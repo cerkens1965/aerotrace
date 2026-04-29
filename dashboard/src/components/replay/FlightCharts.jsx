@@ -1,7 +1,3 @@
-/**
- * FlightCharts.jsx — Single chart with selectable parameters
- * Toggle buttons to show/hide individual data series
- */
 import { useRef, useEffect, useMemo, useState } from 'react'
 import { subsampleFrames } from '../../utils/csvParser'
 
@@ -25,7 +21,7 @@ const PARAMS = [
   { key: 'oat',    label: 'OAT',   unit: '°C',  color: '#67e8f9', defaultOn: false },
 ]
 
-export default function FlightCharts({ frames, currentTs, height = 130 }) {
+export default function FlightCharts({ frames, currentTs, height = 130, onSeek }) {
   const canvasRef = useRef(null)
   const [active, setActive] = useState(() =>
     Object.fromEntries(PARAMS.map(p => [p.key, p.defaultOn]))
@@ -49,7 +45,6 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
     const totalTs = endTs - startTs
     const px = ts => ((ts - startTs) / totalTs) * W
 
-    // Draw each active param on shared canvas, normalized to 0-1 range per param
     activeParams.forEach(param => {
       const vals = data.map(f => f[param.key]).filter(v => !isNaN(v))
       if (vals.length === 0) return
@@ -58,45 +53,41 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
       const range = maxV - minV || 1
       const py = v => H - ((v - minV) / range) * (H - 8) - 4
 
-      // Ghost (full trace)
+      // Ghost
       ctx.beginPath()
       data.forEach((f, i) => {
-        const x = px(f.ts)
-        const y = py(f[param.key])
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+        i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key])) : ctx.lineTo(px(f.ts), py(f[param.key]))
       })
       ctx.strokeStyle = `${param.color}35`
       ctx.lineWidth = 1.5
       ctx.stroke()
 
-      // Played trace
+      // Played
       const played = data.filter(f => f.ts <= currentTs)
       if (played.length > 1) {
         ctx.beginPath()
         played.forEach((f, i) => {
-          const x = px(f.ts)
-          const y = py(f[param.key])
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+          i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key])) : ctx.lineTo(px(f.ts), py(f[param.key]))
         })
         ctx.strokeStyle = param.color
         ctx.lineWidth = 2
         ctx.stroke()
       }
 
-      // Current value dot
+      // Dot
       const cur = played[played.length - 1]
       if (cur) {
         ctx.beginPath()
         ctx.arc(px(cur.ts), py(cur[param.key]), 4, 0, Math.PI * 2)
         ctx.fillStyle = param.color
         ctx.fill()
-        ctx.strokeStyle = '#ffffff'
-        ctx.lineWidth = 1.5
+        ctx.strokeStyle = '#000000'
+        ctx.lineWidth = 1
         ctx.stroke()
       }
     })
 
-    // Current time line
+    // Cursor line
     const cx = px(currentTs)
     ctx.strokeStyle = 'rgba(245,166,35,0.7)'
     ctx.lineWidth = 1
@@ -109,7 +100,30 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
 
   }, [data, currentTs, activeParams])
 
-  // Current values for display
+  // Drag to seek
+  const handleMouseDown = (e) => {
+    if (!onSeek || !data || data.length === 0) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const seek = (clientX) => {
+      const rect = canvas.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      onSeek(data[0].ts + ratio * (data[data.length - 1].ts - data[0].ts))
+    }
+
+    seek(e.clientX)
+
+    const onMove = (ev) => seek(ev.clientX)
+    const onUp   = ()  => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  // Current values
   const curFrame = useMemo(() => {
     if (!data || !data.length) return null
     return data.find(f => f.ts >= currentTs) ?? data[data.length - 1]
@@ -120,21 +134,14 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
   if (!frames || frames.length === 0) return null
 
   return (
-    <div style={{
-      background: C.panel,
-      borderTop: `1px solid ${C.border}`,
-      padding: '8px 12px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
+    <div style={{ background: C.panel, borderTop: `1px solid ${C.border}`, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
 
       {/* Toggle buttons */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         {PARAMS.map(p => {
           const on = active[p.key]
           const val = curFrame ? curFrame[p.key] : null
-          const displayVal = val != null
-            ? (Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val))
-            : '—'
+          const displayVal = val != null ? (Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val)) : '—'
           return (
             <button key={p.key} onClick={() => toggle(p.key)} style={{
               display: 'flex', alignItems: 'center', gap: 5,
@@ -143,15 +150,8 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
               background: on ? `${p.color}15` : 'transparent',
               transition: 'all 0.15s',
             }}>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: on ? p.color : 'transparent',
-                border: `1.5px solid ${on ? p.color : 'rgba(255,255,255,0.3)'}`,
-              }} />
-              <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700,
-                color: on ? p.color : 'rgba(255,255,255,0.4)', letterSpacing: '0.06em' }}>
-                {p.label}
-              </span>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : 'rgba(255,255,255,0.3)'}` }} />
+              <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: on ? p.color : 'rgba(255,255,255,0.4)', letterSpacing: '0.06em' }}>{p.label}</span>
               {on && curFrame && (
                 <span style={{ fontFamily: C.mono, fontSize: 9, color: C.text }}>
                   {displayVal}<span style={{ fontSize: 7, color: p.color }}>{p.unit}</span>
@@ -162,12 +162,13 @@ export default function FlightCharts({ frames, currentTs, height = 130 }) {
         })}
       </div>
 
-      {/* Chart canvas */}
+      {/* Chart */}
       <canvas
         ref={canvasRef}
         width={1200}
         height={height}
-        style={{ width: '100%', height: height, display: 'block', borderRadius: 6 }}
+        onMouseDown={handleMouseDown}
+        style={{ width: '100%', height: height, display: 'block', borderRadius: 6, cursor: 'ew-resize' }}
       />
     </div>
   )

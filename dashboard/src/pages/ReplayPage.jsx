@@ -325,7 +325,7 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
           <div style={{ position: 'absolute', right: -8, top: -5,
             width: 16, height: 16, borderRadius: '50%',
             background: C.amber, border: '2px solid #ffffff',
-            boxShadow: '0 0 8px rgba(245,166,35,0.8)',
+            boxShadow: 'none',
             pointerEvents: 'none',
           }} />
         </div>
@@ -549,7 +549,7 @@ export default function ReplayPage({ user }) {
               <DataStrip frame={currentFrame} />
 
               {/* Flight charts */}
-              <FlightCharts frames={parsed.frames} currentTs={currentTs} height={100} />
+              <FlightCharts frames={parsed.frames} currentTs={currentTs} height={130} onSeek={handleSeek} />
             </>
           )}
 
