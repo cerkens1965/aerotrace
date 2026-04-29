@@ -52,12 +52,9 @@ function formatAlt(ft) {
 function getAirportFilter(active) {
   if (!active.length) return ['==', 'type', 'NONE']
   const parts = []
-  if (active.includes('fixed')) parts.push(['all',
-    ['!=', ['get', 'type'], 'helipad'],
-    ['!=', ['get', 'type'], 'seaplane'],
-  ])
-  if (active.includes('heli')) parts.push(['==', ['get', 'type'], 'helipad'])
-  if (active.includes('sea'))  parts.push(['==', ['get', 'type'], 'seaplane'])
+  if (active.includes('fixed')) parts.push(['in', ['get', 'type'], ['literal', ['apt', 'af_civil', 'ad_mil', 'light_aircraft']]])
+  if (active.includes('heli'))  parts.push(['==', ['get', 'type'], 'heli_civil'])
+  if (active.includes('sea'))   parts.push(['==', ['get', 'type'], 'af_water'])
   return parts.length === 1 ? parts[0] : ['any', ...parts]
 }
 
