@@ -1,0 +1,191 @@
+/**
+ * csvParser.js — Garmin G3X CSV parser for AeroTrace
+ *
+ * Format: 3 header rows + data at 1Hz
+ *   Row 1: #airframe_info,...,aircraft_ident="FJFVB",...
+ *   Row 2: Long column names
+ *   Row 3: Short column names (used as keys)
+ *   Row 4+: Data
+ */
+
+// Columns we extract from the G3X CSV
+const COLS = {
+  date:    'Lcl Date',
+  time:    'Lcl Time',
+  lat:     'Latitude',
+  lon:     'Longitude',
+  altGps:  'AltGPS',
+  altInd:  'AltInd',
+  agl:     'AGL',
+  gndSpd:  'GndSpd',
+  ias:     'IAS',
+  trk:     'TRK',
+  hdg:     'HDG',
+  vspd:    'VSpd',
+  pitch:   'Pitch',
+  roll:    'Roll',
+  latAc:   'LatAc',
+  normAc:  'NormAc',
+  rpm:     'E1 RPM',
+  oat:     'OAT',
+  cht1:    'E1 CHT1',
+  cht2:    'E1 CHT2',
+  egt1:    'E1 EGT1',
+  egt2:    'E1 EGT2',
+  wndSpd:  'WndSpd',
+  wndDir:  'WndDr',
+}
+
+/**
+ * Parse airframe info from first row
+ */
+function parseAirframeInfo(line) {
+  const info = {}
+  const matches = line.matchAll(/(\w+(?:_\w+)*)="([^"]*)"/g)
+  for (const m of matches) info[m[1]] = m[2]
+  return info
+}
+
+/**
+ * Parse a G3X CSV file content string
+ * Returns: { airframe, columns, frames, stats }
+ */
+export function parseG3XCSV(content) {
+  const lines = content.split('\n').filter(l => l.trim())
+
+  if (lines.length < 4) throw new Error('Invalid G3X CSV: too few lines')
+
+  // Row 1: airframe info
+  const airframe = parseAirframeInfo(lines[0])
+
+  // Row 3: short column names → build index map
+  const shortHeaders = lines[2].split(',').map(h => h.trim())
+  const colIndex = {}
+  Object.entries(COLS).forEach(([key, colName]) => {
+    const idx = shortHeaders.indexOf(colName)
+    if (idx !== -1) colIndex[key] = idx
+  })
+
+  // Parse data rows
+  const frames = []
+  let minLat = Infinity, maxLat = -Infinity
+  let minLon = Infinity, maxLon = -Infinity
+  let maxAlt = -Infinity, maxSpd = -Infinity, maxG = -Infinity, maxRpm = -Infinity
+
+  for (let i = 3; i < lines.length; i++) {
+    const parts = lines[i].split(',')
+    if (parts.length < 10) continue
+
+    const get = (key) => {
+      const idx = colIndex[key]
+      return idx !== undefined ? parts[idx]?.trim() : null
+    }
+    const num = (key) => parseFloat(get(key)) || 0
+
+    const dateStr = get('date')
+    const timeStr = get('time')
+    if (!dateStr || !timeStr) continue
+
+    const ts = new Date(`${dateStr}T${timeStr}`).getTime()
+    if (isNaN(ts)) continue
+
+    const lat = num('lat')
+    const lon = num('lon')
+    if (lat === 0 && lon === 0) continue
+
+    const frame = {
+      ts,
+      lat,
+      lon,
+      altGps:  num('altGps'),
+      altInd:  num('altInd'),
+      agl:     num('agl'),
+      gndSpd:  num('gndSpd'),
+      ias:     num('ias'),
+      trk:     num('trk'),
+      hdg:     num('hdg'),
+      vspd:    num('vspd'),
+      pitch:   num('pitch'),
+      roll:    num('roll'),
+      latAc:   num('latAc'),
+      normAc:  num('normAc'),
+      rpm:     num('rpm'),
+      oat:     num('oat'),
+      cht1:    num('cht1'),
+      cht2:    num('cht2'),
+      egt1:    num('egt1'),
+      egt2:    num('egt2'),
+      wndSpd:  num('wndSpd'),
+      wndDir:  num('wndDir'),
+    }
+
+    // Flight phase detection
+    if (frame.agl < 50 || frame.rpm < 800) frame.phase = 'GROUND'
+    else if (Math.abs(frame.normAc) > 2.5) frame.phase = 'CRITICAL'
+    else if (frame.agl < 500) frame.phase = 'APPROACH'
+    else if (Math.abs(frame.roll) > 20) frame.phase = 'MANEUVER'
+    else frame.phase = 'CRUISE'
+
+    // Trail color based on G-load
+    const g = Math.abs(frame.normAc)
+    if (g > 2.5) frame.color = '#ef4444'      // Red flashing
+    else if (g > 1.4) frame.color = '#eab308'  // Yellow
+    else if (g > 1.2) frame.color = '#f97316'  // Orange
+    else frame.color = '#22c55e'               // Green normal
+
+    frames.push(frame)
+
+    // Stats
+    if (lat < minLat) minLat = lat
+    if (lat > maxLat) maxLat = lat
+    if (lon < minLon) minLon = lon
+    if (lon > maxLon) maxLon = lon
+    if (frame.altInd > maxAlt) maxAlt = frame.altInd
+    if (frame.ias > maxSpd)    maxSpd = frame.ias
+    if (g > maxG)              maxG = g
+    if (frame.rpm > maxRpm)    maxRpm = frame.rpm
+  }
+
+  if (frames.length === 0) throw new Error('No valid frames found in CSV')
+
+  const duration = Math.round((frames[frames.length - 1].ts - frames[0].ts) / 1000)
+
+  return {
+    airframe,
+    frames,
+    stats: {
+      frameCount: frames.length,
+      duration,        // seconds
+      durationHuman: `${Math.floor(duration/3600)}h${String(Math.floor((duration%3600)/60)).padStart(2,'0')}`,
+      startTs: frames[0].ts,
+      endTs:   frames[frames.length - 1].ts,
+      bounds:  { minLat, maxLat, minLon, maxLon },
+      maxAlt:  Math.round(maxAlt),
+      maxSpd:  Math.round(maxSpd),
+      maxG:    Math.round(maxG * 10) / 10,
+      maxRpm:  Math.round(maxRpm),
+    }
+  }
+}
+
+/**
+ * Subsample frames for map rendering (max N points)
+ */
+export function subsampleFrames(frames, maxPoints = 2000) {
+  if (frames.length <= maxPoints) return frames
+  const step = Math.ceil(frames.length / maxPoints)
+  return frames.filter((_, i) => i % step === 0)
+}
+
+/**
+ * Get frame at a specific time (binary search)
+ */
+export function getFrameAtTime(frames, ts) {
+  let lo = 0, hi = frames.length - 1
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (frames[mid].ts < ts) lo = mid + 1
+    else hi = mid
+  }
+  return frames[lo]
+}
