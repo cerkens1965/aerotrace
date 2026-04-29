@@ -524,18 +524,7 @@ export default function ReplayPage({ user }) {
                 {/* MapLibre map */}
                 <div style={{ flex: 1, position: 'relative' }}>
                   <ReplayMap frames={parsed.frames} currentFrame={currentFrame} is3D={is3D} />
-                  {/* 2D/3D toggle */}
-                  <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 4, zIndex: 10 }}>
-                    {['2D','3D'].map(mode => (
-                      <button key={mode} onClick={() => setIs3D(mode === '3D')} style={{
-                        padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
-                        fontFamily: 'monospace', fontSize: 9, fontWeight: 700,
-                        background: (mode === '3D') === is3D ? 'rgba(245,166,35,0.2)' : 'rgba(5,8,20,0.8)',
-                        border: `1px solid ${(mode === '3D') === is3D ? '#F5A623' : 'rgba(255,255,255,0.1)'}`,
-                        color: (mode === '3D') === is3D ? '#F5A623' : '#ffffff',
-                      }}>{mode}</button>
-                    ))}
-                  </div>
+
                 </div>
 
                 {/* Six-pack */}

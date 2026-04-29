@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { subsampleFrames } from '../../utils/csvParser'
@@ -6,211 +6,232 @@ import { subsampleFrames } from '../../utils/csvParser'
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY  = import.meta.env.VITE_OPENAIP_KEY
 
+// ── Same basemaps as LIVE ─────────────────────────────────────────────────────
 const BASEMAPS = [
-  { id: 'outdoor',   label: 'TOPO',      dark: false },
-  { id: 'satellite', label: 'SATELLITE', dark: true  },
-  { id: 'light',     label: 'LIGHT',     dark: false },
-  { id: 'dark',      label: 'DARK',      dark: true  },
-  { id: 'basic',     label: 'BASIC',     dark: false },
+  { id: 'dataviz-light', label: 'Light',     dark: false },
+  { id: 'dataviz-dark',  label: 'Dark',      dark: true  },
+  { id: 'outdoor-v2',    label: 'Topo',      dark: false },
+  { id: 'satellite',     label: 'Satellite', dark: true  },
+  { id: 'basic-v2',      label: 'Basic',     dark: false },
 ]
-const getStyleUrl = id => {
-  const map = { outdoor: 'outdoor-v2', satellite: 'satellite', light: 'dataviz-light', dark: 'dataviz-dark', basic: 'basic-v2' }
-  return `https://api.maptiler.com/maps/${map[id]}/style.json?key=${MAPTILER_KEY}`
+
+// ── Same AIP layers as LIVE (minus traffic) ───────────────────────────────────
+const LAYERS = [
+  { id: 'ctr',      label: 'CTR',      color: '#dc3232', rgb: '220,50,50',  hasSlider: true  },
+  { id: 'tma',      label: 'TMA/CTA',  color: '#1e64dc', rgb: '30,100,220', hasSlider: true  },
+  { id: 'danger',   label: 'DANGER',   color: '#ff8c00', rgb: '255,140,0',  hasSlider: true  },
+  { id: 'airports', label: 'AIRPORTS', color: '#4a7ab5', rgb: '74,122,181', hasSlider: false },
+]
+
+const LAYER_IDS = {
+  ctr:      ['airspace-ctr-fill', 'airspace-ctr-line'],
+  tma:      ['airspace-tma-fill', 'airspace-tma-line'],
+  danger:   ['airspace-danger-fill', 'airspace-danger-line'],
+  airports: ['airports', 'airports-labels'],
 }
 
-const PHASE_COLORS = {
-  GROUND:   '#ffffff', CRUISE:   '#22c55e',
-  MANEUVER: '#f97316', APPROACH: '#F5A623', CRITICAL: '#ef4444',
+const FILL_COLORS = {
+  ctr:    o => `rgba(220,50,50,${o})`,
+  tma:    o => `rgba(30,100,220,${o})`,
+  danger: o => `rgba(255,140,0,${o})`,
 }
-
-const AIP_LAYERS = [
-  { id: 'ctr',     label: 'CTR',     color: '#ef4444', types: [1,2,3]   },
-  { id: 'tma',     label: 'TMA/CTA', color: '#3b82f6', types: [4,5]     },
-  { id: 'danger',  label: 'DANGER',  color: '#f97316', types: [6,7,8,9] },
-]
 
 const AIRPORT_TYPES = [
-  { id: 'civil', label: 'ADEP / ULM / MIL', codes: [0,2,3,9] },
-  { id: 'heli',  label: 'HÉLIPAD',           codes: [5]        },
-  { id: 'water', label: 'HYDRAVION',         codes: [7]        },
+  { id: 'fixed', label: 'ADEP / ULM / MIL' },
+  { id: 'heli',  label: 'HÉLIPAD' },
+  { id: 'sea',   label: 'HYDRAVION' },
 ]
 
-function setupBaseLayers(map) {
-  if (!map.getSource('openaip')) {
-    map.addSource('openaip', { type: 'vector',
-      tiles: [`https://api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.pbf?apiKey=${OPENAIP_KEY}`],
-      minzoom: 0, maxzoom: 14 })
-  }
-  // CTR
-  if (!map.getLayer('ctr-fill')) {
-    map.addLayer({ id: 'ctr-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['==', ['get', 'type'], 'ctr'],
-      paint: { 'fill-color': 'rgba(220,50,50,0.03)' } })
-    map.addLayer({ id: 'ctr-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['==', ['get', 'type'], 'ctr'],
-      paint: { 'line-color': 'rgba(220,50,50,0.9)', 'line-width': 2, 'line-dasharray': [4,2] } })
-  }
-  // TMA
-  if (!map.getLayer('tma-fill')) {
-    map.addLayer({ id: 'tma-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['in', ['get', 'type'], ['literal', ['tma','cta']]],
-      paint: { 'fill-color': 'rgba(0,0,0,0)' } })
-    map.addLayer({ id: 'tma-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['in', ['get', 'type'], ['literal', ['tma','cta']]],
-      paint: { 'line-color': 'rgba(30,100,220,0.85)', 'line-width': 1.5 } })
-  }
-  // DANGER
-  if (!map.getLayer('danger-line')) {
-    map.addLayer({ id: 'danger-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['in', ['get', 'type'], ['literal', ['danger','restricted','prohibited']]],
-      paint: { 'fill-color': 'rgba(0,0,0,0)' } })
-    map.addLayer({ id: 'danger-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces',
-      filter: ['in', ['get', 'type'], ['literal', ['danger','restricted','prohibited']]],
-      paint: { 'line-color': 'rgba(255,140,0,0.9)', 'line-width': 1.5, 'line-dasharray': [3,2] } })
-  }
-  // Airports
-  if (!map.getLayer('airports')) {
-    map.addLayer({ id: 'airports', type: 'circle', source: 'openaip', 'source-layer': 'airports',
-      paint: { 'circle-radius': 5, 'circle-color': '#1e3a5f', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } })
-    map.addLayer({ id: 'airport-labels', type: 'symbol', source: 'openaip', 'source-layer': 'airports',
-      layout: { 'text-field': ['get', 'icao_code'], 'text-size': 10, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
-      paint: { 'text-color': '#ffffff', 'text-halo-color': '#000000', 'text-halo-width': 1 } })
-  }
-  // Traces
+function getAirportFilter(active) {
+  if (!active.length) return ['==', 'type', 'NONE']
+  const parts = []
+  if (active.includes('fixed')) parts.push(['in', ['get', 'type'], ['literal', ['apt', 'af_civil', 'ad_mil', 'light_aircraft']]])
+  if (active.includes('heli'))  parts.push(['==', ['get', 'type'], 'heli_civil'])
+  if (active.includes('sea'))   parts.push(['==', ['get', 'type'], 'af_water'])
+  return parts.length === 1 ? parts[0] : ['any', ...parts]
+}
+
+function addOpenAIPLayers(map, activeAirportTypes) {
+  if (map.getSource('openaip')) return
+  map.addSource('openaip', { type: 'vector',
+    tiles: [`https://api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.pbf?apiKey=${OPENAIP_KEY}`],
+    minzoom: 0, maxzoom: 14 })
+  map.addLayer({ id: 'airspace-ctr-fill',    type: 'fill',   source: 'openaip', 'source-layer': 'airspaces', filter: ['==', ['get', 'type'], 'ctr'],                                                                                 paint: { 'fill-color': 'rgba(220,50,50,0.03)' } })
+  map.addLayer({ id: 'airspace-ctr-line',    type: 'line',   source: 'openaip', 'source-layer': 'airspaces', filter: ['==', ['get', 'type'], 'ctr'],                                                                                 paint: { 'line-color': 'rgba(220,50,50,0.9)',  'line-width': 2,   'line-dasharray': [4,2] } })
+  map.addLayer({ id: 'airspace-tma-fill',    type: 'fill',   source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['tma','cta']]],                                                           paint: { 'fill-color': 'rgba(0,0,0,0)' } })
+  map.addLayer({ id: 'airspace-tma-line',    type: 'line',   source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['tma','cta']]],                                                           paint: { 'line-color': 'rgba(30,100,220,0.85)', 'line-width': 1.5 } })
+  map.addLayer({ id: 'airspace-danger-fill', type: 'fill',   source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['danger','restricted','prohibited']]],                                    paint: { 'fill-color': 'rgba(0,0,0,0)' } })
+  map.addLayer({ id: 'airspace-danger-line', type: 'line',   source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['danger','restricted','prohibited']]],                                    paint: { 'line-color': 'rgba(255,140,0,0.9)',  'line-width': 1.5, 'line-dasharray': [3,2] } })
+  map.addLayer({ id: 'airports',             type: 'circle', source: 'openaip', 'source-layer': 'airports',  paint: { 'circle-radius': 5, 'circle-color': '#1a3a6b', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+  map.addLayer({ id: 'airports-labels',      type: 'symbol', source: 'openaip', 'source-layer': 'airports',
+    layout: { 'text-field': ['get', 'icao_code'], 'text-font': ['Open Sans Bold','Arial Unicode MS Bold'], 'text-size': 10, 'text-offset': [0,1.4], 'text-anchor': 'top' },
+    paint:  { 'text-color': '#1a3a6b', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } })
+  const f = getAirportFilter(activeAirportTypes)
+  map.setFilter('airports', f)
+  map.setFilter('airports-labels', f)
+}
+
+// ── Phase colors ──────────────────────────────────────────────────────────────
+const PHASE_COLORS = {
+  GROUND: '#ffffff', CRUISE: '#22c55e', MANEUVER: '#f97316', APPROACH: '#F5A623', CRITICAL: '#ef4444',
+}
+
+function addTraceLayers(map) {
   if (!map.getSource('ghost-trace')) {
-    map.addSource('ghost-trace', { type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
+    map.addSource('ghost-trace', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     map.addLayer({ id: 'ghost-trace', type: 'line', source: 'ghost-trace',
       paint: { 'line-color': '#999999', 'line-width': 2.5, 'line-opacity': 0.65 },
       layout: { 'line-join': 'round', 'line-cap': 'round' } })
   }
   if (!map.getSource('played-trace')) {
-    map.addSource('played-trace', { type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] } })
+    map.addSource('played-trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     map.addLayer({ id: 'played-trace', type: 'line', source: 'played-trace',
       paint: { 'line-color': ['get', 'color'], 'line-width': 6, 'line-opacity': 1 },
       layout: { 'line-join': 'round', 'line-cap': 'round' } })
   }
 }
 
-function updateGhostTrace(map, frames) {
-  if (!frames || frames.length === 0) return
-  const sub = subsampleFrames(frames, 3000)
-  const src = map.getSource('ghost-trace')
-  if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: sub.map(f => [f.lon, f.lat]) } })
+// ── UI helpers (identical to AerotraceMap) ────────────────────────────────────
+const panel     = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
+const titleStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }
+const titleText  = { fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.15em', color: '#ffffff' }
+const triangle   = (open) => <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
+
+
+// ── SliderTrack — identical to AerotraceMap ───────────────────────────────────
+function SliderTrack({ value, max = 30, color, onChange }) {
+  return (
+    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
+      <div style={{ position: 'absolute', width: `${(value / max) * 100}%`, height: 1, background: color, borderRadius: 1 }} />
+      <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
+      <input type="range" min={0} max={max} step={1} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
+    </div>
+  )
 }
 
+// ── Main component ────────────────────────────────────────────────────────────
 export default function ReplayMap({ frames, currentFrame, is3D = false }) {
-  const mapRef     = useRef(null)
-  const mapObj     = useRef(null)
-  const markerRef  = useRef(null)
-  const markerElRef = useRef(null)
-  const framesRef  = useRef(frames)
-  const [basemap,      setBasemap]      = useState('outdoor')
-  const [showBasemaps, setShowBasemaps] = useState(false)
-  const [aipOpen,      setAipOpen]      = useState(true)
-  const [aipLayers,    setAipLayers]    = useState({ ctr: true, tma: true, danger: true })
-  const [airports,     setAirports]     = useState(true)
-
+  const mapRef      = useRef(null)
+  const mapObj      = useRef(null)
+  const markerRef   = useRef(null)
+  const framesRef   = useRef(frames)
   framesRef.current = frames
 
-  // ── Init map ────────────────────────────────────────────────────────────────
+  const [activeBasemap,  setActiveBasemap]  = useState('outdoor-v2')
+  const [visible,        setVisible]        = useState({ ctr: true, tma: true, danger: true, airports: true })
+  const [opacity,        setOpacity]        = useState({ ctr: 3, tma: 0, danger: 0 })
+  const [activeAirports, setActiveAirports] = useState(['fixed'])
+  const [panelOpen,      setPanelOpen]      = useState({ layers: true, map: false })
+  const [showMap,        setShowMap]        = useState(false)
+
+  // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current || mapObj.current) return
     const map = new maplibregl.Map({
       container: mapRef.current,
-      style: getStyleUrl('outdoor'),
-      center: [10.0, 60.5],
-      zoom: 7, pitch: is3D ? 60 : 0, antialias: true,
+      style: `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`,
+      center: [10.0, 60.5], zoom: 7, pitch: is3D ? 60 : 0, antialias: true,
     })
     mapObj.current = map
 
-    // Marker element
     const el = document.createElement('div')
     el.style.cssText = 'width:36px;height:36px;pointer-events:none;'
-    el.innerHTML = '<img id="aircraft-icon" src="/icons/VL3.svg" style="width:100%;height:100%;" />'
-    markerElRef.current = el
+    el.innerHTML = '<img id="replay-aircraft-icon" src="/icons/VL3.svg" style="width:100%;height:100%;" />'
 
     map.on('load', () => {
-      setupBaseLayers(map)
+      addOpenAIPLayers(map, activeAirports)
+      addTraceLayers(map)
       markerRef.current = new maplibregl.Marker({ element: el, rotationAlignment: 'map' })
-
-      // Place marker at start immediately
       const f = framesRef.current
       if (f && f.length > 0) {
         markerRef.current.setLngLat([f[0].lon, f[0].lat]).setRotation(f[0].hdg ?? 0).addTo(map)
-        updateGhostTrace(map, f)
+        const src = map.getSource('ghost-trace')
+        if (src) {
+          const sub = subsampleFrames(f, 3000)
+          src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: sub.map(x => [x.lon, x.lat]) } })
+        }
         map.fitBounds([[Math.min(...f.map(x=>x.lon))-0.1, Math.min(...f.map(x=>x.lat))-0.1],
                        [Math.max(...f.map(x=>x.lon))+0.1, Math.max(...f.map(x=>x.lat))+0.1]], { padding: 40 })
       }
     })
-
-    return () => {
-      if (markerRef.current) markerRef.current.remove()
-      map.remove(); mapObj.current = null
-    }
+    return () => { if (markerRef.current) markerRef.current.remove(); map.remove(); mapObj.current = null }
   }, [])
 
-  // ── Place marker at start when frames load ──────────────────────────────────
+  // ── Frames loaded ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!frames || frames.length === 0) return
     const map = mapObj.current
     if (!map) return
-
-    const place = () => {
-      if (markerRef.current) {
-        markerRef.current.setLngLat([frames[0].lon, frames[0].lat]).setRotation(frames[0].hdg ?? 0).addTo(map)
+    const apply = () => {
+      if (markerRef.current) markerRef.current.setLngLat([frames[0].lon, frames[0].lat]).setRotation(frames[0].hdg ?? 0).addTo(map)
+      addTraceLayers(map)
+      const src = map.getSource('ghost-trace')
+      if (src) {
+        const sub = subsampleFrames(frames, 3000)
+        src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: sub.map(f => [f.lon, f.lat]) } })
       }
-      updateGhostTrace(map, frames)
       map.fitBounds([[Math.min(...frames.map(x=>x.lon))-0.1, Math.min(...frames.map(x=>x.lat))-0.1],
                      [Math.max(...frames.map(x=>x.lon))+0.1, Math.max(...frames.map(x=>x.lat))+0.1]], { padding: 40 })
     }
-
-    if (map.isStyleLoaded()) place()
-    else map.once('load', place)
+    if (map.isStyleLoaded()) apply(); else map.once('load', apply)
   }, [frames])
 
-  // ── Basemap change ──────────────────────────────────────────────────────────
-  useEffect(() => {
+  // ── Basemap change ────────────────────────────────────────────────────────
+  const changeBasemap = useCallback((styleId) => {
     const map = mapObj.current
     if (!map) return
-    map.setStyle(getStyleUrl(basemap))
+    setActiveBasemap(styleId)
+    map.setStyle(`https://api.maptiler.com/maps/${styleId}/style.json?key=${MAPTILER_KEY}`)
     map.once('styledata', () => {
-      setupBaseLayers(map)
-      updateGhostTrace(map, framesRef.current)
-      // Restore visibility
-      applyLayerVisibility(map, aipLayers, airports)
+      addOpenAIPLayers(map, activeAirports)
+      addTraceLayers(map)
+      const f = framesRef.current
+      if (f && f.length > 0) {
+        const sub = subsampleFrames(f, 3000)
+        const src = map.getSource('ghost-trace')
+        if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: sub.map(x => [x.lon, x.lat]) } })
+      }
     })
-    // Icon color
-    const icon = document.getElementById('aircraft-icon')
-    const dark = BASEMAPS.find(b => b.id === basemap)?.dark
+    const dark = BASEMAPS.find(b => b.id === styleId)?.dark
+    const icon = document.getElementById('replay-aircraft-icon')
     if (icon) icon.style.filter = dark ? 'invert(1)' : 'none'
-  }, [basemap])
+  }, [activeAirports])
 
-  // ── AIP visibility ──────────────────────────────────────────────────────────
-  function applyLayerVisibility(map, layers, apt) {
-    const vis = (on) => on ? 'visible' : 'none'
-    ;['ctr-fill','ctr-line'].forEach(l => { try { map.setLayoutProperty(l, 'visibility', vis(layers.ctr)) } catch(e){} })
-    ;['tma-fill','tma-line'].forEach(l => { try { map.setLayoutProperty(l, 'visibility', vis(layers.tma)) } catch(e){} })
-    ;['danger-fill','danger-line'].forEach(l => { try { map.setLayoutProperty(l, 'visibility', vis(layers.danger)) } catch(e){} })
-    ;['airports','airport-labels'].forEach(l => { try { map.setLayoutProperty(l, 'visibility', vis(apt)) } catch(e){} })
+  // ── Layer toggle ──────────────────────────────────────────────────────────
+  const toggleLayer = (id) => {
+    const next = { ...visible, [id]: !visible[id] }
+    setVisible(next)
+    const map = mapObj.current
+    if (!map) return
+    ;(LAYER_IDS[id] || []).forEach(lid => {
+      if (map.getLayer(lid)) map.setLayoutProperty(lid, 'visibility', next[id] ? 'visible' : 'none')
+    })
   }
 
-  useEffect(() => {
+  const handleOpacity = (id, val) => {
+    setOpacity(prev => ({ ...prev, [id]: val }))
     const map = mapObj.current
-    if (!map || !map.isStyleLoaded()) return
-    applyLayerVisibility(map, aipLayers, airports)
-  }, [aipLayers, airports])
+    const fillLayerId = `airspace-${id}-fill`
+    if (map?.getLayer(fillLayerId)) map.setPaintProperty(fillLayerId, 'fill-color', FILL_COLORS[id](val / 100))
+  }
 
-  // ── Update played trace + marker ────────────────────────────────────────────
+  const toggleAirportType = (typeId) => {
+    const next = activeAirports.includes(typeId) ? activeAirports.filter(t => t !== typeId) : [...activeAirports, typeId]
+    setActiveAirports(next)
+    const map = mapObj.current
+    const f = getAirportFilter(next)
+    if (map?.getLayer('airports')) map.setFilter('airports', f)
+    if (map?.getLayer('airports-labels')) map.setFilter('airports-labels', f)
+  }
+
+  // ── Played trace + marker update ──────────────────────────────────────────
   useEffect(() => {
     const map = mapObj.current
     if (!map || !currentFrame || !frames) return
-
-    if (markerRef.current) {
-      markerRef.current.setLngLat([currentFrame.lon, currentFrame.lat]).setRotation(currentFrame.hdg ?? 0).addTo(map)
-    }
-
+    if (markerRef.current) markerRef.current.setLngLat([currentFrame.lon, currentFrame.lat]).setRotation(currentFrame.hdg ?? 0).addTo(map)
     const doUpdate = () => {
       const played = frames.filter(f => f.ts <= currentFrame.ts)
       const sub = subsampleFrames(played, 2000)
@@ -220,9 +241,7 @@ export default function ReplayMap({ frames, currentFrame, is3D = false }) {
         for (let i = 1; i < sub.length; i++) {
           segCoords.push([sub[i].lon, sub[i].lat])
           if (sub[i].phase !== segPhase || i === sub.length - 1) {
-            if (segCoords.length >= 2) features.push({ type: 'Feature',
-              properties: { color: PHASE_COLORS[segPhase] ?? '#22c55e' },
-              geometry: { type: 'LineString', coordinates: [...segCoords] } })
+            if (segCoords.length >= 2) features.push({ type: 'Feature', properties: { color: PHASE_COLORS[segPhase] ?? '#22c55e' }, geometry: { type: 'LineString', coordinates: [...segCoords] } })
             segCoords = [[sub[i].lon, sub[i].lat]]; segPhase = sub[i].phase
           }
         }
@@ -231,88 +250,87 @@ export default function ReplayMap({ frames, currentFrame, is3D = false }) {
       if (src) src.setData({ type: 'FeatureCollection', features })
       if (is3D) map.easeTo({ center: [currentFrame.lon, currentFrame.lat], bearing: currentFrame.hdg ?? 0, pitch: 60, duration: 400 })
     }
-
-    if (map.isStyleLoaded()) doUpdate()
-    else map.once('styledata', doUpdate)
+    if (map.isStyleLoaded()) doUpdate(); else map.once('styledata', doUpdate)
   }, [currentFrame, frames, is3D])
 
-  const toggleAip = (id) => setAipLayers(p => ({ ...p, [id]: !p[id] }))
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
 
-      {/* AIP Panel */}
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10,
-        background: 'rgba(5,8,20,0.88)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.07)',
-        overflow: 'hidden', minWidth: 160 }}>
-        <div onClick={() => setAipOpen(p => !p)} style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '7px 10px', cursor: 'pointer' }}>
-          <span style={{ fontFamily: 'monospace', fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', color: '#ffffff' }}>AIP LAYERS</span>
-          <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', transform: aipOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
-        </div>
-        {aipOpen && (
-          <div style={{ padding: '0 8px 8px' }}>
-            {AIP_LAYERS.map(l => (
-              <div key={l.id} onClick={() => toggleAip(l.id)} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '4px 4px', cursor: 'pointer', borderLeft: `2px solid ${aipLayers[l.id] ? l.color : 'rgba(255,255,255,0.1)'}`,
-                paddingLeft: 6, marginBottom: 2, borderRadius: '0 4px 4px 0',
-              }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 9, color: aipLayers[l.id] ? '#ffffff' : 'rgba(255,255,255,0.4)' }}>{l.label}</span>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: aipLayers[l.id] ? l.color : 'transparent',
-                  border: `1.5px solid ${aipLayers[l.id] ? l.color : 'rgba(255,255,255,0.2)'}` }} />
-              </div>
-            ))}
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 0' }} />
-            <div onClick={() => setAirports(p => !p)} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '4px 4px', cursor: 'pointer', borderLeft: `2px solid ${airports ? '#93c5fd' : 'rgba(255,255,255,0.1)'}`,
-              paddingLeft: 6, borderRadius: '0 4px 4px 0',
-            }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 9, color: airports ? '#ffffff' : 'rgba(255,255,255,0.4)' }}>AIRPORTS</span>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: airports ? '#93c5fd' : 'transparent',
-                border: `1.5px solid ${airports ? '#93c5fd' : 'rgba(255,255,255,0.2)'}` }} />
-            </div>
+      {/* ── Left panel (AIP + MAP) — same as LIVE ── */}
+      <div style={{ position: 'absolute', top: 46, left: 10, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+
+        {/* AIP LAYERS */}
+        <div style={panel}>
+          <div style={titleStyle} onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))}>
+            <span style={titleText}>AIP LAYERS</span>
+            {triangle(panelOpen.layers)}
           </div>
-        )}
+          {panelOpen.layers && (
+            <div style={{ padding: '0 8px 8px' }}>
+              {LAYERS.filter(l => l.id !== 'airports').map(layer => {
+                const on = visible[layer.id]
+                return (
+                  <div key={layer.id} style={{ marginBottom: 8, borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.1)'}`, paddingLeft: 6, borderRadius: '0 4px 4px 0', background: on ? `rgba(${layer.rgb},0.04)` : 'transparent', padding: '4px 6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: layer.hasSlider && on ? 4 : 0 }}>
+                      <span onClick={() => toggleLayer(layer.id)} style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? '#ffffff' : 'rgba(255,255,255,0.4)', cursor: 'pointer', userSelect: 'none' }}>{layer.label}</span>
+                      {layer.hasSlider && on && <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>{opacity[layer.id]}%</span>}
+                    </div>
+                    {layer.hasSlider && on && (
+                      <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} onChange={v => handleOpacity(layer.id, v)} />
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* AIRPORTS */}
+              <div style={{ borderLeft: `2px solid ${visible.airports ? '#4a7ab5' : 'rgba(255,255,255,0.1)'}`, paddingLeft: 6, borderRadius: '0 4px 4px 0' }}>
+                <span onClick={() => toggleLayer('airports')} style={{ fontSize: 9, fontWeight: 700, fontFamily: 'monospace', color: visible.airports ? '#ffffff' : 'rgba(255,255,255,0.4)', cursor: 'pointer', display: 'block', marginBottom: 4 }}>AIRPORTS</span>
+                {visible.airports && AIRPORT_TYPES.map(t => {
+                  const checked = activeAirports.includes(t.id)
+                  return (
+                    <div key={t.id} onClick={() => toggleAirportType(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, cursor: 'pointer' }}>
+                      <div style={{ width: 10, height: 10, border: `1px solid ${checked ? '#4a7ab5' : 'rgba(255,255,255,0.3)'}`, borderRadius: 2, background: checked ? '#4a7ab5' : 'transparent', flexShrink: 0 }} />
+                      <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#ffffff' }}>{t.label}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* MAP */}
+        <div style={panel}>
+          <div style={titleStyle} onClick={() => setPanelOpen(p => ({ ...p, map: !p.map }))}>
+            <span style={titleText}>MAP</span>
+            {triangle(panelOpen.map)}
+          </div>
+          {panelOpen.map && (
+            <div style={{ padding: '0 8px 8px' }}>
+              {BASEMAPS.map(bm => (
+                <div key={bm.id} onClick={() => changeBasemap(bm.id)} style={{
+                  padding: '4px 6px', cursor: 'pointer', borderRadius: 4, marginBottom: 2,
+                  background: activeBasemap === bm.id ? 'rgba(245,166,35,0.1)' : 'transparent',
+                  borderLeft: `2px solid ${activeBasemap === bm.id ? '#F5A623' : 'transparent'}`,
+                }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 9, fontWeight: 500, color: '#ffffff' }}>{bm.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Phase legend */}
-      <div style={{ position: 'absolute', top: 10, right: 10,
-        background: 'rgba(5,8,20,0.85)', borderRadius: 8, padding: '8px 10px',
-        border: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(5,8,20,0.85)', borderRadius: 8, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {Object.entries(PHASE_COLORS).filter(([p]) => p !== 'GROUND').map(([phase, color]) => (
           <div key={phase} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 16, height: 3, background: color, borderRadius: 1 }} />
             <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#ffffff' }}>{phase}</span>
           </div>
         ))}
-      </div>
-
-      {/* Basemap selector */}
-      <div style={{ position: 'absolute', bottom: 36, left: 10, zIndex: 10 }}>
-        <button onClick={() => setShowBasemaps(p => !p)} style={{
-          padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
-          fontFamily: 'monospace', fontSize: 9, fontWeight: 700,
-          background: 'rgba(5,8,20,0.9)', border: '1px solid rgba(255,255,255,0.15)', color: '#ffffff' }}>
-          MAP ▾
-        </button>
-        {showBasemaps && (
-          <div style={{ position: 'absolute', bottom: 32, left: 0,
-            background: 'rgba(5,8,20,0.95)', border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 8, overflow: 'hidden', minWidth: 110 }}>
-            {BASEMAPS.map(bm => (
-              <div key={bm.id} onClick={() => { setBasemap(bm.id); setShowBasemaps(false) }} style={{
-                padding: '7px 12px', cursor: 'pointer', fontFamily: 'monospace', fontSize: 10, fontWeight: 700,
-                color: basemap === bm.id ? '#F5A623' : '#ffffff',
-                background: basemap === bm.id ? 'rgba(245,166,35,0.1)' : 'transparent',
-                borderLeft: `2px solid ${basemap === bm.id ? '#F5A623' : 'transparent'}`,
-              }}>{bm.label}</div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   )
