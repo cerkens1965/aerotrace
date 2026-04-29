@@ -29,7 +29,6 @@ function getTabs(role) {
   }
   if (role === 'admin') {
     tabs.push({ path: '/admin', label: 'ADMIN', icon: '⚙' })
-    tabs.splice(1, 0, { path: '/en-vol', label: 'EN VOL', icon: '✈' })
   }
   return tabs
 }
