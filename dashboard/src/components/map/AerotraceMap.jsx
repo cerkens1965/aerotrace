@@ -5,7 +5,7 @@ import useSafeSky from '../../hooks/useSafeSky'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
-const CENTER = { lat: 50.85, lon: 4.35 }
+const CENTER = { lat: 50.5686, lon: 4.4347 }
 const ALT_MAX = 35000
 
 const BASEMAPS = [
@@ -187,7 +187,7 @@ export default function AerotraceMap() {
       <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
       <input type="range" min={0} max={max} step={max === ALT_MAX ? 1000 : 1} value={value}
         onChange={e => onChange(Number(e.target.value))}
-        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0 }} />
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
     </div>
   )
 
@@ -217,29 +217,29 @@ export default function AerotraceMap() {
                       borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.07)'}`,
                       cursor: 'pointer', userSelect: 'none',
                     }}>
-                      <span style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.2)' }}>
+                      <span style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)' }}>
                         {layer.label}
                       </span>
-                      <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>
+                      <span style={{ fontSize: 8, color: on ? layer.color : 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
                         {layer.hasSlider && on && `${opacity[layer.id]}%`}
-                        {layer.hasAltSlider && on && `${formatAlt(altRange[0])}·${formatAlt(altRange[1])}`}
+                        {layer.hasAltSlider && on && `${filteredTraffic.length} ✈ · ${formatAlt(altRange[0])}·${formatAlt(altRange[1])}`}
                       </span>
                     </div>
 
                     {layer.hasSlider && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '4px 6px 5px', background: `rgba(${layer.rgb},0.04)`, borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
+                      <div onClick={e => e.stopPropagation()} style={{ padding: '4px 6px 5px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
                         <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} onChange={v => handleOpacity(layer.id, v)} />
                       </div>
                     )}
 
                     {layer.id === 'airports' && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: `rgba(${layer.rgb},0.04)`, borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px', display: 'flex', flexDirection: 'column', gap: 3 }}>
                         {AIRPORT_TYPES.map(t => {
                           const checked = activeAirports.includes(t.id)
                           return (
                             <div key={t.id} onClick={() => toggleAirportType(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
                               <div style={{ width: 8, height: 8, borderRadius: 2, border: `1.5px solid ${checked ? layer.color : 'rgba(255,255,255,0.2)'}`, background: checked ? layer.color : 'transparent', flexShrink: 0, transition: 'all 0.15s' }} />
-                              <span style={{ fontSize: 9, fontFamily: 'monospace', color: checked ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.3)' }}>{t.label}</span>
+                              <span style={{ fontSize: 9, fontFamily: 'monospace', color: checked ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.6)' }}>{t.label}</span>
                             </div>
                           )
                         })}
@@ -247,11 +247,11 @@ export default function AerotraceMap() {
                     )}
 
                     {layer.hasAltSlider && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: `rgba(${layer.rgb},0.04)`, borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
+                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
                         {[0, 1].map(idx => (
                           <div key={idx} style={{ marginBottom: idx === 0 ? 5 : 0 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                              <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}>{idx === 0 ? 'MIN' : 'MAX'}</span>
+                              <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.55)', fontFamily: 'monospace' }}>{idx === 0 ? 'MIN' : 'MAX'}</span>
                               <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>{formatAlt(altRange[idx])}</span>
                             </div>
                             <SliderTrack value={altRange[idx]} max={ALT_MAX} color={layer.color}
@@ -283,7 +283,7 @@ export default function AerotraceMap() {
                   background: activeBasemap === bm.id ? 'rgba(255,255,255,0.08)' : 'transparent',
                   borderLeft: `2px solid ${activeBasemap === bm.id ? 'rgba(255,255,255,0.4)' : 'transparent'}`,
                 }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 500, letterSpacing: '0.05em', color: activeBasemap === bm.id ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.25)' }}>
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 500, letterSpacing: '0.05em', color: activeBasemap === bm.id ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)' }}>
                     {bm.label.toUpperCase()}
                   </span>
                 </div>
