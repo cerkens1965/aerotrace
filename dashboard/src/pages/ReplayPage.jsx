@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { collection, addDoc, onSnapshot, query, where, serverTimestamp } from 'firebase/firestore'
-import { ref, uploadBytesResumable, getDownloadURL, getBytes } from 'firebase/storage'
+import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore'
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
 import SixPack from '../components/ui/SixPack'
+import ReplayMap from '../components/map/ReplayMap'
+import FlightCharts from '../components/replay/FlightCharts'
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -265,11 +267,15 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
   const total   = endTs - startTs
   const progress = ((currentTs - startTs) / total) * 100
 
-  const handleClick = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
+  const isDragging = useRef(false)
+  const seek = (e, currentTarget) => {
+    const rect = (currentTarget || e.currentTarget).getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
     onSeek(startTs + ratio * total)
   }
+  const handleMouseDown = (e) => { isDragging.current = true; seek(e) }
+  const handleMouseMove = (e) => { if (isDragging.current) seek(e) }
+  const handleMouseUp   = ()  => { isDragging.current = false }
 
   return (
     <div style={{ padding: '12px 16px', background: C.panel, borderTop: `1px solid ${C.border}` }}>
@@ -311,13 +317,18 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
       </div>
 
       {/* Progress bar */}
-      <div onClick={handleClick} style={{
-        height: 6, background: C.border, borderRadius: 3, cursor: 'pointer', position: 'relative'
-      }}>
+      <div onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ height: 6, background: C.border, borderRadius: 3, cursor: 'ew-resize', position: 'relative', userSelect: 'none' }}>
         <div style={{
           height: '100%', width: `${progress}%`, background: C.amber,
-          borderRadius: 3, transition: playing ? 'none' : 'width 0.1s',
-        }} />
+          borderRadius: 3, transition: playing ? 'none' : 'width 0.05s', position: 'relative',
+        }}>
+          <div style={{ position: 'absolute', right: -8, top: -5,
+            width: 16, height: 16, borderRadius: '50%',
+            background: C.amber, border: '2px solid #ffffff',
+            boxShadow: '0 0 8px rgba(245,166,35,0.8)',
+            pointerEvents: 'none',
+          }} />
+        </div>
         {/* Phase coloring - mini bars */}
         <div style={{
           position: 'absolute', top: 10, left: 0, right: 0, height: 3,
@@ -377,14 +388,15 @@ export default function ReplayPage({ user }) {
   const [speed, setSpeed]           = useState(1)
   const [showUpload, setShowUpload] = useState(false)
   const [sideOpen, setSideOpen]     = useState(true)
+  const [is3D, setIs3D]             = useState(false)
   const animRef = useRef(null)
   const lastTimeRef = useRef(null)
 
   // Load flight list
   useEffect(() => {
     if (!user) return
-    const q = query(collection(db, 'flights'), where('pilotId', '==', user.uid))
-    return onSnapshot(q, snap => setFlights(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.startTs - a.startTs)))
+    const q = query(collection(db, 'flights'), where('pilotId', '==', user.uid), orderBy('startTs', 'desc'))
+    return onSnapshot(q, snap => setFlights(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
   }, [user])
 
   // Playback loop
@@ -476,10 +488,10 @@ export default function ReplayPage({ user }) {
                 <FlightItem key={f.id} flight={f} selected={selected?.id === f.id}
                   onSelect={async (fl) => {
                     setSelected(fl)
+                    // Load CSV from storage URL
                     try {
-                      const storageRef = ref(storage, fl.csvStoragePath)
-                      const bytes = await getBytes(storageRef)
-                      const text = new TextDecoder().decode(bytes)
+                      const res = await fetch(fl.csvUrl)
+                      const text = await res.text()
                       const p = parseG3XCSV(text)
                       setParsed(p)
                       setCurrentTs(p.frames[0].ts)
@@ -508,24 +520,36 @@ export default function ReplayPage({ user }) {
           ) : (
             <>
               {/* Map + six-pack */}
-              <div style={{ flex: 1, display: 'flex', gap: 0, overflow: 'hidden' }}>
-                {/* Trace map */}
-                <div style={{ flex: 1, padding: 12, display: 'flex' }}>
-                  <TraceMap
-                    frames={parsed.frames}
-                    currentFrame={currentFrame}
-                    bounds={parsed.stats.bounds}
-                  />
+              <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+                {/* MapLibre map */}
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <ReplayMap frames={parsed.frames} currentFrame={currentFrame} is3D={is3D} />
+                  {/* 2D/3D toggle */}
+                  <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', gap: 4, zIndex: 10 }}>
+                    {['2D','3D'].map(mode => (
+                      <button key={mode} onClick={() => setIs3D(mode === '3D')} style={{
+                        padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+                        fontFamily: 'monospace', fontSize: 9, fontWeight: 700,
+                        background: (mode === '3D') === is3D ? 'rgba(245,166,35,0.2)' : 'rgba(5,8,20,0.8)',
+                        border: `1px solid ${(mode === '3D') === is3D ? '#F5A623' : 'rgba(255,255,255,0.1)'}`,
+                        color: (mode === '3D') === is3D ? '#F5A623' : '#ffffff',
+                      }}>{mode}</button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Six-pack */}
-                <div style={{ width: 280, padding: '12px 12px 12px 0', display: 'flex', alignItems: 'center' }}>
-                  <SixPack frame={currentFrame} size={80} />
+                <div style={{ width: 300, padding: '8px', display: 'flex', alignItems: 'center',
+                  borderLeft: '1px solid rgba(255,255,255,0.07)', background: 'rgba(5,8,20,0.9)' }}>
+                  <SixPack frame={currentFrame} size={110} />
                 </div>
               </div>
 
               {/* Data strip */}
               <DataStrip frame={currentFrame} />
+
+              {/* Flight charts */}
+              <FlightCharts frames={parsed.frames} currentTs={currentTs} height={100} />
             </>
           )}
 

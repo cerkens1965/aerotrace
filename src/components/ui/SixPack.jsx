@@ -414,8 +414,7 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
     ctx.clip()
 
     // Bank marks
-    const bankMarks = [-30, -20, -10, 0, 10, 20, 30]
-    bankMarks.forEach(b => {
+    [-30, -20, -10, 0, 10, 20, 30].forEach(b => {
       const angle = (b - 90) * Math.PI/180
       const isMajor = b % 30 === 0
       ctx.beginPath()
