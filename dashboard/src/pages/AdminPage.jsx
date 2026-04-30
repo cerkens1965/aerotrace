@@ -23,9 +23,35 @@ const C = {
   mono:     'monospace',
 }
 
-const ROLES    = ['student', 'pilot', 'instructor', 'admin']
-const ROLE_COLORS = { student: '#60a5fa', pilot: '#22c55e', instructor: '#F5A623', admin: '#ef4444' }
+const ROLES    = ['user', 'instructor', 'admin']
+const ROLE_COLORS = { user: '#60a5fa', instructor: '#F5A623', admin: '#ef4444' }
 const LICENCES = ['LAPL', 'PPL', 'CPL', 'ATPL', 'IR', 'ME', 'FI', 'CRI', 'ULM', 'Night']
+
+// Désignateurs OACI types aéronefs — plans de vol
+const AIRCRAFT_TYPES = [
+  // ── ULM ──
+  { value: 'VL3',    label: 'VL3    — JMB VL-3 Evolution' },
+  { value: 'FK9',    label: 'FK9    — B&F Technik FK9 Mk IV' },
+  { value: 'MCR01',  label: 'MCR01  — Dyn\'Aéro MCR-01' },
+  { value: 'A22L',   label: 'A22L   — Aeroprakt A-22 Foxbat' },
+  { value: 'ULAC',   label: 'ULAC   — ULM Aile Classique' },
+  { value: 'TRIN',   label: 'TRIN   — Trixy Aviation G4' },
+  { value: 'AVID',   label: 'AVID   — Avid Flyer' },
+  { value: 'SAVI',   label: 'SAVI   — Savannah S' },
+  { value: 'EURO',   label: 'EURO   — Eurostar EV-97' },
+  { value: 'P92',    label: 'P92    — Tecnam P92 Echo' },
+  // ── GA ──
+  { value: 'C172',   label: 'C172   — Cessna 172 Skyhawk' },
+  { value: 'C150',   label: 'C150   — Cessna 150/152' },
+  { value: 'PA28',   label: 'PA28   — Piper PA-28 Cherokee' },
+  { value: 'DR400',  label: 'DR400  — Robin DR400' },
+  { value: 'TB10',   label: 'TB10   — Socata TB-10 Tobago' },
+  { value: 'TB20',   label: 'TB20   — Socata TB-20 Trinidad' },
+  { value: 'DA40',   label: 'DA40   — Diamond DA40' },
+  { value: 'DA42',   label: 'DA42   — Diamond DA42 Twin Star' },
+  { value: 'SR22',   label: 'SR22   — Cirrus SR22' },
+  { value: 'BE35',   label: 'BE35   — Beechcraft Bonanza' },
+]
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 function Label({ children }) {
@@ -142,7 +168,7 @@ function ClubTab({ clubId }) {
 }
 
 // ─── AIRCRAFT ─────────────────────────────────────────────────────────────────
-const EMPTY_AC = { registration: '', icao24: '', callSign: '', type: '', active: true }
+const EMPTY_AC = { registration: '', typeDesig: '', icao24: '', callSign: '', homeBase: '', active: true }
 
 function AircraftTab({ clubId }) {
   const [aircraft, setAircraft] = useState([])
@@ -153,8 +179,8 @@ function AircraftTab({ clubId }) {
 
   useEffect(() => {
     if (!clubId) return
-    return onSnapshot(query(collection(db, 'aircraft'), where('clubId', '==', clubId), where('archived', '==', false)),
-      snap => setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+    return onSnapshot(query(collection(db, 'aircraft'), where('clubId', '==', clubId)),
+      snap => setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true)))
   }, [clubId])
 
   const save = async () => {
@@ -164,9 +190,13 @@ function AircraftTab({ clubId }) {
       const data = { ...form, clubId, archived: false, updatedAt: serverTimestamp() }
       if (form.id) { await updateDoc(doc(db, 'aircraft', form.id), data) }
       else { await addDoc(collection(db, 'aircraft'), { ...data, createdAt: serverTimestamp() }) }
-      setForm(null); showToast(form.id ? 'Updated ✓' : 'Added ✓')
-    } catch (e) { showToast(e.message, 'error') }
-    setSaving(false)
+      setForm(null)
+      showToast(form.id ? 'Updated ✓' : 'Added ✓')
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const archive = async id => {
@@ -178,7 +208,7 @@ function AircraftTab({ clubId }) {
     <div>
       <Toast msg={toast?.msg} type={toast?.type} />
       <div style={{ maxWidth: 680, marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '12px 120px 70px 90px 90px 1fr',
+        <div style={{ display: 'grid', gridTemplateColumns: '12px 1fr 80px 90px 100px 1fr',
           gap: 12, padding: '4px 14px', marginBottom: 4, alignItems: 'center' }}>
           {['', 'REGISTRATION', 'TYPE', 'ICAO24', 'CALLSIGN', ''].map((h, i) => (
             <span key={i} style={{ fontFamily: C.mono, fontSize: 8, letterSpacing: '0.1em', color: C.amber, fontWeight: 700 }}>{h}</span>
@@ -187,14 +217,14 @@ function AircraftTab({ clubId }) {
         <div style={{ height: 1, background: C.border, marginBottom: 6 }} />
         {aircraft.length === 0 && <div style={{ fontFamily: C.mono, fontSize: 11, color: C.text, padding: '20px 0', opacity: 0.4 }}>No aircraft yet</div>}
         {aircraft.map(ac => (
-          <div key={ac.id} style={{ display: 'grid', gridTemplateColumns: '12px 120px 70px 90px 90px 1fr',
+          <div key={ac.id} style={{ display: 'grid', gridTemplateColumns: '12px 1fr 80px 90px 100px 1fr',
             gap: 12, alignItems: 'center',
             padding: '8px 14px', borderRadius: 6, background: C.rowBg, border: `1px solid ${C.border}`, marginBottom: 4 }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: ac.active ? C.green : C.border }} />
             <span style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: C.text }}>{ac.registration}</span>
-            <span style={{ fontFamily: C.mono, fontSize: 11, color: C.text }}>{ac.type}</span>
-            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text }}>{ac.icao24}</span>
-            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text }}>{ac.callSign}</span>
+            <span style={{ fontFamily: C.mono, fontSize: 11, color: C.amber }}>{ac.typeDesig || ac.type}</span>
+            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text, opacity: 0.7 }}>{ac.icao24}</span>
+            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text, opacity: 0.7 }}>{ac.callSign}</span>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Btn small variant="ghost" onClick={() => setForm(ac)}>EDIT</Btn>
               <Btn small variant="danger" onClick={() => archive(ac.id)}>REMOVE</Btn>
@@ -209,17 +239,46 @@ function AircraftTab({ clubId }) {
             {form.id ? 'EDIT AIRCRAFT' : 'NEW AIRCRAFT'}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            {[
-              { key: 'registration', label: 'REGISTRATION', ph: 'OO-VL3' },
-              { key: 'type',         label: 'TYPE',         ph: 'VL3' },
-              { key: 'icao24',       label: 'ICAO24',       ph: 'abc123' },
-              { key: 'callSign',     label: 'CALLSIGN',     ph: 'OOVL3' },
-            ].map(f => (
-              <div key={f.key}>
-                <Label>{f.label}</Label>
-                <Input value={form[f.key]} onChange={v => setForm(p => ({ ...p, [f.key]: v }))} placeholder={f.ph} />
+            <div>
+              <Label>REGISTRATION</Label>
+              <Input value={form.registration} onChange={v => setForm(p => ({ ...p, registration: v.toUpperCase() }))}
+                placeholder="OO-E07, F-JFVB, G-ABCD" />
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.3)', marginTop: 3 }}>
+                Immatriculation officielle avec tiret
               </div>
-            ))}
+            </div>
+            <div>
+              <Label>TYPE OACI (plans de vol)</Label>
+              <select value={form.typeDesig ?? ''} onChange={e => setForm(p => ({ ...p, typeDesig: e.target.value }))} style={{
+                width: '100%', background: 'rgba(10,14,30,0.98)', border: `1px solid ${C.border}`,
+                borderRadius: 6, padding: '8px 10px', fontFamily: C.mono, fontSize: 11,
+                color: C.text, outline: 'none', cursor: 'pointer', boxSizing: 'border-box',
+              }}>
+                <option value="">Sélectionner un type…</option>
+                {AIRCRAFT_TYPES.map(t => <option key={t.value} value={t.value} style={{ background: '#0a0e1e' }}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>ICAO24 — CODE TRANSPONDEUR</Label>
+              <Input value={form.icao24} onChange={v => setForm(p => ({ ...p, icao24: v.toUpperCase() }))}
+                placeholder="ex: 44D074  (6 hex)" />
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.3)', marginTop: 3 }}>
+                Mode S · évite les doublons ADS-B/SafeSky
+              </div>
+            </div>
+            <div>
+              <Label>CALLSIGN RADIO</Label>
+              <Input value={form.callSign} onChange={v => setForm(p => ({ ...p, callSign: v.toUpperCase() }))}
+                placeholder="ex: FJFVB, OOE07" />
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.3)', marginTop: 3 }}>
+                Identifiant radio + SafeSky (sans tiret)
+              </div>
+            </div>
+            <div>
+              <Label>AÉRODROME DE BASE (ICAO)</Label>
+              <Input value={form.homeBase} onChange={v => setForm(p => ({ ...p, homeBase: v.toUpperCase() }))}
+                placeholder="EBBY" />
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <Btn onClick={save} disabled={saving}>{saving ? 'SAVING...' : 'SAVE'}</Btn>
@@ -231,8 +290,38 @@ function AircraftTab({ clubId }) {
   )
 }
 
+// ─── Génération trigramme avec détection de collision ────────────────────────
+// Essai 1 : firstName[0] + lastName[0..1]   → CER
+// Essai 2 : lastName[0]  + firstName[0..1]  → ECH  (nom puis prénom)
+// Essai 3 : lastName[0..2]                  → ERK
+// Essai 4 : firstName[0..2]                 → CHR
+function generateTrigram(firstName, lastName, existingPilots, excludeId = null) {
+  if (!firstName || !lastName) return ''
+  const used = new Set(
+    existingPilots
+      .filter(p => p.id !== excludeId)
+      .map(p => p.trigram?.toUpperCase())
+      .filter(Boolean)
+  )
+  const fn = firstName.toUpperCase().replace(/[^A-Z]/g, '')
+  const ln = lastName.toUpperCase().replace(/[^A-Z]/g, '')
+  const candidates = [
+    (fn[0] || '') + (ln[0] || '') + (ln[1] || ''),   // CER
+    (ln[0] || '') + (fn[0] || '') + (fn[1] || ''),   // ECH
+    (ln[0] || '') + (ln[1] || '') + (ln[2] || ''),   // ERK
+    (fn[0] || '') + (fn[1] || '') + (fn[2] || ''),   // CHR
+  ].map(c => c.padEnd(3, 'X').slice(0, 3)).filter(c => c.length === 3)
+  return candidates.find(c => !used.has(c)) ?? candidates[0] ?? ''
+}
+
 // ─── PILOTS ───────────────────────────────────────────────────────────────────
-const EMPTY_PILOT = { firstName: '', lastName: '', email: '', role: 'student', birthDate: '', licenceDate: '', licences: [] }
+const EMPTY_PILOT = {
+  firstName: '', lastName: '', email: '',
+  role: 'user',             // accès plateforme
+  licence: 'student',       // qualification vol : 'student' | 'pilot'
+  isInstructor: false,      // peut instruire (seulement si licence='pilot')
+  birthDate: '', licenceDate: '', licences: [], trigram: '', pin: ''
+}
 
 function calcAge(birthDate) {
   if (!birthDate) return null
@@ -250,8 +339,8 @@ function PilotsTab({ clubId }) {
 
   useEffect(() => {
     if (!clubId) return
-    return onSnapshot(query(collection(db, 'pilots'), where('clubId', '==', clubId), where('archived', '==', false)),
-      snap => setPilots(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+    return onSnapshot(query(collection(db, 'pilots'), where('clubId', '==', clubId)),
+      snap => setPilots(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true)))
   }, [clubId])
 
   const toggleLicence = lic => setForm(p => ({
@@ -260,14 +349,26 @@ function PilotsTab({ clubId }) {
 
   const save = async () => {
     if (!form.lastName || !form.firstName) return showToast('Name required', 'error')
+    if (form.pin && !/^\d{4}$/.test(form.pin)) return showToast('PIN — 4 chiffres exactement', 'error')
     setSaving(true)
     try {
-      const data = { ...form, clubId, archived: false, updatedAt: serverTimestamp() }
+      const trigram = (form.trigram?.length === 3)
+        ? form.trigram.toUpperCase()
+        : generateTrigram(form.firstName, form.lastName, pilots, form.id)
+      const collision = pilots.find(p => p.id !== form.id && p.trigram?.toUpperCase() === trigram)
+      if (collision) { showToast(`Trigramme ${trigram} déjà utilisé par ${collision.firstName} ${collision.lastName}`, 'error'); return }
+      // Exclure les champs internes UI (_trigramManual)
+      const { _trigramManual, ...rest } = form
+      const data = { ...rest, trigram, clubId, archived: false, updatedAt: serverTimestamp() }
       if (form.id) { await updateDoc(doc(db, 'pilots', form.id), data) }
       else { await addDoc(collection(db, 'pilots'), { ...data, createdAt: serverTimestamp() }) }
-      setForm(null); showToast(form.id ? 'Updated ✓' : 'Added ✓')
-    } catch (e) { showToast(e.message, 'error') }
-    setSaving(false)
+      setForm(null)
+      showToast(form.id ? 'Updated ✓' : 'Added ✓')
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const archive = async id => {
@@ -291,8 +392,15 @@ function PilotsTab({ clubId }) {
                 {(p.firstName?.[0] ?? '') + (p.lastName?.[0] ?? '')}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: C.text }}>
+                <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: C.text, display: 'flex', alignItems: 'center', gap: 8 }}>
                   {p.firstName} {p.lastName}
+                  {p.trigram && (
+                    <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.amber,
+                      padding: '1px 7px', borderRadius: 4, border: `1px solid ${C.amber20}`,
+                      background: C.amber10, letterSpacing: '0.1em' }}>
+                      {p.trigram}
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
                   <RoleBadge role={p.role} />
@@ -301,14 +409,22 @@ function PilotsTab({ clubId }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn small variant="ghost" onClick={e => { e.stopPropagation(); setForm(p) }}>EDIT</Btn>
+                <Btn small variant="ghost" onClick={e => { e.stopPropagation(); setForm({ ...EMPTY_PILOT, licences: [], ...p }) }}>EDIT</Btn>
                 <Btn small variant="danger" onClick={e => { e.stopPropagation(); archive(p.id) }}>REMOVE</Btn>
               </div>
             </div>
             {expanded === p.id && (
               <div style={{ padding: '12px 14px', borderTop: `1px solid ${C.border}`,
-                display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
-                {[['EMAIL', p.email], ['AGE', calcAge(p.birthDate) ? `${calcAge(p.birthDate)} y.o.` : null], ['LICENCE DATE', p.licenceDate ? new Date(p.licenceDate).toLocaleDateString('en-GB') : null]].map(([l, v]) => (
+                display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 12 }}>
+                {[
+                  ['EMAIL', p.email],
+                  ['ÂGE', calcAge(p.birthDate) ? `${calcAge(p.birthDate)} y.o.` : null],
+                  ['LICENCE DATE', p.licenceDate ? new Date(p.licenceDate).toLocaleDateString('en-GB') : null],
+                  ['QUALIFICATION', p.licence === 'pilot' ? '✈ PILOT' : '🎓 STUDENT'],
+                  ['INSTRUCTEUR', p.isInstructor ? '✓ OUI' : '—'],
+                  ['TRIGRAMME', p.trigram || '—'],
+                  ['PIN', p.pin ? '••••' : 'non défini'],
+                ].map(([l, v]) => (
                   <div key={l}><Label>{l}</Label>
                     <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text }}>{v || '—'}</span>
                   </div>
@@ -334,13 +450,117 @@ function PilotsTab({ clubId }) {
             ].map(f => (
               <div key={f.key}>
                 <Label>{f.label}</Label>
-                <Input value={form[f.key]} onChange={v => setForm(p => ({ ...p, [f.key]: v }))} placeholder={f.ph} type={f.type} />
+                <Input value={form[f.key]} onChange={v => {
+                  // Quand prénom ou nom changent → recalculer le trigramme auto si pas de saisie manuelle
+                  const updated = { ...form, [f.key]: v }
+                  const isNameField = f.key === 'firstName' || f.key === 'lastName'
+                  if (isNameField && !form._trigramManual) {
+                    updated.trigram = generateTrigram(
+                      f.key === 'firstName' ? v : form.firstName,
+                      f.key === 'lastName'  ? v : form.lastName,
+                      pilots, form.id
+                    )
+                  }
+                  setForm(updated)
+                }} placeholder={f.ph} type={f.type} />
               </div>
             ))}
             <div>
-              <Label>ROLE</Label>
+              <Label>RÔLE PLATEFORME</Label>
               <Select value={form.role} onChange={v => setForm(p => ({ ...p, role: v }))}
                 options={ROLES.map(r => ({ value: r, label: r.toUpperCase() }))} />
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.4)', marginTop: 3 }}>
+                Accès aux pages dashboard
+              </div>
+            </div>
+
+            {/* Qualification vol — séparée du rôle plateforme */}
+            <div style={{ gridColumn: '1/-1' }}>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '4px 0 14px' }} />
+              <Label>QUALIFICATION VOL</Label>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                {['student', 'pilot'].map(lic => {
+                  const active = form.licence === lic
+                  return (
+                    <button key={lic} type="button"
+                      onClick={() => setForm(p => ({ ...p, licence: lic, isInstructor: lic === 'student' ? false : p.isInstructor }))}
+                      style={{
+                        flex: 1, padding: '8px 0',
+                        background: active ? C.amber10 : 'transparent',
+                        border: `1px solid ${active ? C.amber40 : C.border}`,
+                        color: active ? C.amber : C.text,
+                        fontFamily: C.mono, fontSize: 11, fontWeight: active ? 700 : 400,
+                        borderRadius: 6, cursor: 'pointer', letterSpacing: 0.5,
+                      }}>
+                      {lic === 'student' ? '🎓 STUDENT — en formation' : '✈ PILOT — breveté'}
+                    </button>
+                  )
+                })}
+              </div>
+              {/* isInstructor — visible seulement si pilot */}
+              {form.licence === 'pilot' && (
+                <div
+                  onClick={() => setForm(p => ({ ...p, isInstructor: !p.isInstructor }))}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                    background: form.isInstructor ? C.amber10 : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${form.isInstructor ? C.amber40 : C.border}`,
+                  }}>
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                    background: form.isInstructor ? C.amber : 'transparent',
+                    border: `1px solid ${form.isInstructor ? C.amber : 'rgba(255,255,255,0.3)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, color: '#050814',
+                  }}>
+                    {form.isInstructor ? '✓' : ''}
+                  </div>
+                  <span style={{ fontFamily: C.mono, fontSize: 11, color: form.isInstructor ? C.amber : C.text }}>
+                    Peut instruire d'autres pilotes
+                  </span>
+                </div>
+              )}
+            </div>
+            <div>
+              <Label>TRIGRAMME</Label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Input
+                  value={form.trigram}
+                  onChange={v => setForm(p => ({
+                    ...p,
+                    trigram: v.toUpperCase().replace(/[^A-Z]/g,'').slice(0, 3),
+                    _trigramManual: v.length > 0,  // l'admin a saisi manuellement
+                  }))}
+                  placeholder="auto"
+                />
+                {/* Bouton reset → re-générer automatiquement */}
+                {form._trigramManual && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(p => ({
+                      ...p,
+                      trigram: generateTrigram(form.firstName, form.lastName, pilots, form.id),
+                      _trigramManual: false,
+                    }))}
+                    title="Regénérer automatiquement"
+                    style={{ background: 'transparent', border: `1px solid ${C.border}`, color: C.amber,
+                      fontFamily: C.mono, fontSize: 14, padding: '4px 8px', borderRadius: 5, cursor: 'pointer',
+                      flexShrink: 0 }}
+                  >↺</button>
+                )}
+              </div>
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.4)', marginTop: 3 }}>
+                {form._trigramManual ? '✎ Manuel — cliquer ↺ pour regénérer' : '⚡ Auto-généré · unique dans le club'}
+              </div>
+            </div>
+            <div>
+              <Label>CODE PIN (accès boîtier FDR)</Label>
+              <Input value={form.pin} onChange={v => setForm(p => ({ ...p, pin: v.replace(/\D/g,'').slice(0,4) }))}
+                placeholder="4 chiffres" type="password" />
+              <div style={{ fontFamily: C.mono, fontSize: 8, color: 'rgba(255,255,255,0.4)', marginTop: 3 }}>
+                4 chiffres · saisie sur écran T-RGB au démarrage
+              </div>
             </div>
           </div>
           <div style={{ marginBottom: 16 }}>

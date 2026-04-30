@@ -16,11 +16,13 @@ const COLS = {
   lon:     'Longitude',
   altGps:  'AltGPS',
   altInd:  'AltInd',
+  altP:    'AltP',
   agl:     'AGL',
   gndSpd:  'GndSpd',
   ias:     'IAS',
-  trk:     'TRK',
-  hdg:     'HDG',
+  trk:     'TRK',      // GPS ground track — cap vrai sur le sol
+  hdg:     'HDG',      // Cap magnétique — nécessite correction MagVar
+  magVar:  'MagVar',   // Déclinaison magnétique (négatif = Ouest)
   vspd:    'VSpd',
   pitch:   'Pitch',
   roll:    'Roll',
@@ -80,7 +82,11 @@ export function parseG3XCSV(content) {
       const idx = colIndex[key]
       return idx !== undefined ? parts[idx]?.trim() : null
     }
-    const num = (key) => parseFloat(get(key)) || 0
+    const num = (key) => {
+      const v = parseFloat(get(key))
+      return isNaN(v) ? null : v
+    }
+    const numOr0 = (key) => num(key) ?? 0
 
     const dateStr = get('date')
     const timeStr = get('time')
@@ -97,32 +103,44 @@ export function parseG3XCSV(content) {
       ts,
       lat,
       lon,
-      altGps:  num('altGps'),
-      altInd:  num('altInd'),
-      agl:     num('agl'),
-      gndSpd:  num('gndSpd'),
-      ias:     num('ias'),
-      trk:     num('trk'),
-      hdg:     num('hdg'),
-      vspd:    num('vspd'),
-      pitch:   num('pitch'),
-      roll:    num('roll'),
-      latAc:   num('latAc'),
-      normAc:  num('normAc'),
-      rpm:     num('rpm'),
-      oat:     num('oat'),
-      cht1:    num('cht1'),
-      cht2:    num('cht2'),
-      egt1:    num('egt1'),
-      egt2:    num('egt2'),
-      wndSpd:  num('wndSpd'),
-      wndDir:  num('wndDir'),
+      altGps:  num('altGps'),   // GPS altitude ft MSL — source la plus fiable en vol
+      altInd:  num('altInd'),   // Baro altitude ft MSL (QNH)
+      altP:    num('altP'),     // Pressure altitude ft
+      agl:     num('agl'),      // AGL ft — souvent null en vol (G3X ne le publie pas toujours)
+      gndSpd:  numOr0('gndSpd'),
+      ias:     numOr0('ias'),
+      trk:     num('trk'),      // GPS track vrai (null si GPS pas lock)
+      hdg:     numOr0('hdg'),   // Cap magnétique
+      magVar:  num('magVar'),   // Déclinaison magnétique (négatif = Ouest)
+      vspd:    numOr0('vspd'),
+      pitch:   numOr0('pitch'),
+      roll:    numOr0('roll'),
+      latAc:   numOr0('latAc'),
+      normAc:  numOr0('normAc'),
+      rpm:     numOr0('rpm'),
+      oat:     numOr0('oat'),
+      cht1:    numOr0('cht1'),
+      cht2:    numOr0('cht2'),
+      egt1:    numOr0('egt1'),
+      egt2:    numOr0('egt2'),
+      wndSpd:  numOr0('wndSpd'),
+      wndDir:  numOr0('wndDir'),
     }
 
-    // Flight phase detection
-    if (frame.agl < 50 || frame.rpm < 800) frame.phase = 'GROUND'
+    // Cap vrai = cap magnétique + déclinaison
+    // MagVar négatif = Ouest → True = Mag + MagVar (ex: HDG=26°, MagVar=-5° → True=21°)
+    frame.truHdg = (frame.hdg + (frame.magVar ?? 0) + 360) % 360
+
+    // Bearing caméra : TRK (GPS vrai) prioritaire, sinon cap vrai corrigé
+    frame.bearing = (frame.trk !== null && frame.trk !== 0)
+      ? frame.trk
+      : frame.truHdg
+
+    // Phase detection — utilise AGL si dispo, sinon vitesse sol comme proxy
+    const aglFt = frame.agl ?? (frame.gndSpd < 5 ? 0 : null)
+    if (frame.rpm < 800 || (aglFt !== null && aglFt < 50)) frame.phase = 'GROUND'
     else if (Math.abs(frame.normAc) > 2.5) frame.phase = 'CRITICAL'
-    else if (frame.agl < 500) frame.phase = 'APPROACH'
+    else if (aglFt !== null && aglFt < 500) frame.phase = 'APPROACH'
     else if (Math.abs(frame.roll) > 20) frame.phase = 'MANEUVER'
     else frame.phase = 'CRUISE'
 

@@ -133,14 +133,19 @@ panel bg       → rgba(10,14,30,0.95)
 
 ## CSV Flight Log Format (Garmin G3X)
 
-3 header rows + data at 1Hz. Key columns:
+3 header rows + data at 1Hz. Key columns parsed by csvParser.js:
 ```
 Lcl Date, Lcl Time, Latitude, Longitude
-AltInd (ft), AltGPS, AGL
-IAS (kt), GndSpd, TRK, HDG
+AltInd (ft MSL baro), AltGPS (ft MSL GPS), AGL (ft — souvent null en vol)
+IAS (kt), GndSpd, TRK (GPS track vrai), HDG (cap magnétique), MagVar
 VSpd (fpm), Pitch, Roll, NormAc, LatAc
 E1 RPM, OAT, E1 CHT1, E1 EGT1
 ```
+
+**Important** : `AGL` est souvent null/0 en vol (G3X ne le publie pas toujours).
+Utiliser `AltGPS` (ft MSL) pour les calculs d'altitude caméra.
+
+**frame.bearing** : calculé dans csvParser → `TRK` (GPS vrai) si dispo, sinon `HDG + MagVar` (cap vrai corrigé). Toujours utiliser `frame.bearing` pour orienter la caméra, jamais `frame.hdg` brut.
 
 Parser: `src/utils/csvParser.js` — exports `parseG3XCSV`, `subsampleFrames`, `getFrameAtTime`
 
@@ -170,13 +175,73 @@ Trail colors: GROUND=#fff, CRUISE=#22c55e, MANEUVER=#f97316, APPROACH=#F5A623, C
 - Basemaps: Light / Dark / Topo / Satellite / Basic
 
 ### ReplayMap (REPLAY)
+- Props: `frames`, `currentFrame`, `is3D`, `isPlaying`, `speed`
 - Fits bounds of loaded flight automatically
-- Ghost trace: gray #999, 2.5px, opacity 0.65 (future path)
-- Played trace: 6px colored by flight phase
-- Aircraft marker: `/icons/VL3.svg`, rotated by HDG, inverted on dark/satellite
+- Ghost trace: gray dashed #6b7280, 2px (future path)
+- Played trace: 5px colored by flight phase
+- Aircraft marker: `/icons/VL3.svg` via HTML `<img>` tag (NOT map.loadImage — SVG non supporté WebGL)
+  - Marker inversé (`filter: invert(1)`) sur cartes sombres (Satellite/Dark)
+  - Créé via `createAircraftMarker(isDark)` → `maplibregl.Marker({ element })`
 - AIP panel: identical to LIVE minus traffic
 - Basemaps: same 5 styles
-- 2D/3D toggle (3D uses MapTiler terrain-rgb-v2, pitch 60°)
+- 2D/3D toggle button: centré en haut de la carte, dans ReplayPage.jsx (pas dans ReplayMap.jsx)
+
+---
+
+## ReplayMap — Architecture 3D Cockpit (CRITIQUE)
+
+### Altitude caméra — calcul correct
+```javascript
+// AGL vrai = AltGPS MSL − élévation terrain DEM
+const altGpsM   = frame.altGps * 0.3048          // ft → mètres MSL
+const terrainM  = map.queryTerrainElevation([lon, lat]) ?? 0  // mètres MSL
+const trueAglM  = altGpsM - terrainM             // vrai AGL en mètres
+const aglM      = phase === 'GROUND' ? 4 : Math.max(20, trueAglM)
+```
+
+**JAMAIS** utiliser `frame.agl` directement (souvent null/0 en vol).
+**JAMAIS** utiliser `AltInd` (baro QNH) pour la caméra → erreurs terrain.
+`exaggeration: 1.0` OBLIGATOIRE — avec 1.5x le terrain visuel > terrain DEM → caméra dans le sol.
+
+### Bearing caméra — lissage adaptatif
+```javascript
+// Détection virage : comparer 3 dernières frames
+const isTurning = deltaLastFrames > 1.5°
+
+// En croisière : buffer 8 frames, dead zone 3°, lerp 20%
+// En virage    : buffer 3 frames, dead zone 0.5°, lerp 50%
+```
+
+### Zoom caméra
+```javascript
+function aglToZoom(aglM, offsetSlider = 12) {
+  const z = Math.log2(1638400 / Math.max(2, aglM))
+  return Math.max(8, Math.min(18, z + (offsetSlider - 12) * 0.5))
+}
+// Seuil 5% : ne change pas si variation < 5%
+// Lerp 15% vers la cible
+```
+
+### Anti-snapback (CRITIQUE)
+```javascript
+// duration DOIT être < intervalle entre frames, sinon MapLibre rebondit
+const frameInterval = 1000 / speed       // ms entre frames
+const dur = Math.max(16, frameInterval * 0.75)
+map.easeTo({ ..., duration: dur, easing: t => t })  // linéaire = pas de rebond
+```
+
+### Pre-caching tuiles terrain
+Avant le replay 3D, survoler silencieusement 25 points clés via `map.jumpTo()` pour charger les tuiles DEM en cache. Déclenché 1.5s après activation 3D.
+
+### Centre caméra (vue cockpit)
+```javascript
+// Centre MapLibre = point devant l'avion, pas la position de l'avion
+const pitchRad = cockpitPitch * Math.PI / 180
+const aheadKm  = Math.max(0.01, aglM * Math.tan(pitchRad) / 1000)
+const center   = getAheadPoint(lon, lat, bearing, aheadKm)
+// Géométrie : œil à altitude aglM, regarde vers le bas à angle (90°-pitch)
+// → center est sur le terrain dans l'axe du cap
+```
 
 ---
 
@@ -232,6 +297,26 @@ function SliderTrack({ value, max = 30, color, onChange }) {
 
 ---
 
+## Dev Setup
+
+```bash
+# Terminal 1 — SafeSky proxy
+cd dashboard/proxy && node server.js   # port 3001
+
+# Terminal 2 — Vite dev server
+cd dashboard && npm run dev             # port 5173
+```
+
+Projet sur **iCloud Apple** :
+```
+/Users/c.erkens/Library/Mobile Documents/com~apple~CloudDocs/
+00 - A.DVP DIGITAL FLIGHT RECORDER/CODAGE/aerotrace/dashboard
+```
+
+Workflow fichiers : Claude génère → Christophe télécharge → `cp` dans terminal.
+
+---
+
 ## Do Not
 
 - ❌ Never use gray/low-opacity text on dark backgrounds → use #ffffff
@@ -241,3 +326,8 @@ function SliderTrack({ value, max = 30, color, onChange }) {
 - ❌ Never commit `.env.local` or `serviceAccountKey.json`
 - ❌ Never delete Firestore documents → use `archived: true`
 - ❌ Never use class components → functional only
+- ❌ Never use `map.loadImage()` with SVG files → WebGL ne supporte pas SVG
+- ❌ Never use terrain `exaggeration > 1.0` → caméra passe dans le sol
+- ❌ Never use `frame.agl` directement → souvent null/0 en vol G3X
+- ❌ Never use `easeTo(duration)` > frameInterval → snapback caméra
+- ❌ Never use `frame.hdg` brut pour la caméra → toujours `frame.bearing`

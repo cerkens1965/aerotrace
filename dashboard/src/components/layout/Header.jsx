@@ -10,12 +10,12 @@ const AMBER20 = 'rgba(245,166,35,0.20)'
 const ROLE_LABELS = {
   admin:      'ADMIN',
   instructor: 'INSTRUCTEUR',
-  student:    'ÉLÈVE',
+  user:       'MEMBRE',
 }
 const ROLE_COLORS = {
-  admin:      '#ff4d4d',
-  instructor: AMBER,
-  student:    '#ffffff',
+  admin:      '#ef4444',
+  instructor: '#F5A623',
+  user:       '#60a5fa',
 }
 
 // Tabs visibles selon rôle
@@ -25,7 +25,8 @@ function getTabs(role) {
     { path: '/replay', label: 'REPLAY',  icon: '▶' },
   ]
   if (role === 'instructor' || role === 'admin') {
-    tabs.splice(1, 0, { path: '/en-vol', label: 'IN FLIGHT', icon: '✈' })
+    tabs.splice(1, 0, { path: '/en-vol',  label: 'IN FLIGHT', icon: '✈' })
+    tabs.push(        { path: '/logbook', label: 'LOGBOOK',   icon: '📋' })
   }
   if (role === 'admin') {
     tabs.push({ path: '/admin', label: 'ADMIN', icon: '⚙' })

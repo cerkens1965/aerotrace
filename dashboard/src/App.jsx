@@ -9,6 +9,8 @@ import LivePage from './pages/LivePage'
 import EnVolPage from './pages/EnVolPage'
 import ReplayPage from './pages/ReplayPage'
 import AdminPage from './pages/AdminPage'
+import LogbookPage from './pages/LogbookPage'
+import DiagPage from './pages/DiagPage'
 
 // ─── Loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen() {
@@ -42,7 +44,7 @@ function RequireRole({ user, role, allowed, children }) {
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser]       = useState(null)
-  const [role, setRole]       = useState(null)   // 'student' | 'instructor' | 'admin'
+  const [role, setRole]       = useState(null)   // 'user' | 'instructor' | 'admin'
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -52,17 +54,17 @@ export default function App() {
         try {
           const snap = await getDoc(doc(db, 'users', currentUser.uid))
           if (snap.exists()) {
-            setRole(snap.data().role ?? 'student')
+            setRole(snap.data().role ?? 'user')
           } else {
             // First login — create user doc with default role
             const { setDoc, serverTimestamp } = await import('firebase/firestore')
             await setDoc(doc(db, 'users', currentUser.uid), {
               displayName: currentUser.displayName,
               email:       currentUser.email,
-              role:        'student',
+              role:        'user',
               createdAt:   serverTimestamp(),
             })
-            setRole('student')
+            setRole('user')
           }
         } catch (err) {
           console.error('[App] Failed to fetch user role:', err)
@@ -105,6 +107,17 @@ export default function App() {
             <Route path="/replay/:flightId" element={<ReplayPage user={user} role={role} />} />
 
             <Route path="/admin" element={<RequireRole user={user} role={role} allowed={['admin']}><AdminPage role={role} /></RequireRole>} />
+
+            {/* LOGBOOK — instructeur + admin */}
+            <Route path="/logbook" element={
+              <RequireRole user={user} role={role} allowed={['instructor', 'admin']}>
+                <LogbookPage />
+              </RequireRole>
+            } />
+
+            {/* DIAG — temporaire */}
+            <Route path="/diag" element={<DiagPage />} />
+
             <Route path="*"         element={<Navigate to="/live" replace />} />
           </Routes>
         </main>

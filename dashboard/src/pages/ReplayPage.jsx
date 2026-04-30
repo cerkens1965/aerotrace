@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, getDocs, getDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
+import { deriveFlightType, FLIGHT_TYPES } from '../utils/logbookUtils'
 import SixPack from '../components/ui/SixPack'
 import ReplayMap from '../components/map/ReplayMap'
 import FlightCharts from '../components/replay/FlightCharts'
@@ -45,8 +46,10 @@ function fmtDate(ts) {
   return new Date(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
 }
 
-// ─── Upload + parse flight CSV ─────────────────────────────────────────────────
-function UploadZone({ onParsed }) {
+// ─── Upload + parse flight CSV ────────────────────────────────────────────────
+// Ne crée PAS le doc Firestore — appelle onUploaded avec les données brutes
+// L'écriture se fait après assignation pilote/avion dans AssignAfterUpload
+function UploadZone({ onUploaded }) {
   const [dragging, setDragging]   = useState(false)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress]   = useState(0)
@@ -54,53 +57,23 @@ function UploadZone({ onParsed }) {
   const inputRef = useRef(null)
 
   const processFile = async (file) => {
-    if (!file || !file.name.endsWith('.csv')) {
-      return setError('Please select a G3X CSV file')
-    }
-    setUploading(true)
-    setError(null)
+    if (!file || !file.name.endsWith('.csv')) return setError('Please select a G3X CSV file')
+    setUploading(true); setError(null)
     try {
-      // Parse CSV
-      const text = await file.text()
+      const text   = await file.text()
       const parsed = parseG3XCSV(text)
-
-      // Upload to Firebase Storage
-      const path = `flights/${auth.currentUser.uid}/${Date.now()}_${file.name}`
-      const storageRef = ref(storage, path)
-      const uploadTask = uploadBytesResumable(storageRef, file)
-
+      const path   = `flights/${auth.currentUser.uid}/${Date.now()}_${file.name}`
+      const uploadTask = uploadBytesResumable(ref(storage, path), file)
       uploadTask.on('state_changed',
         snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-        err => { setError(err.message); setUploading(false) },
+        err  => { setError(err.message); setUploading(false) },
         async () => {
           const url = await getDownloadURL(uploadTask.snapshot.ref)
-
-          // Save flight metadata to Firestore
-          const flightDoc = await addDoc(collection(db, 'flights'), {
-            pilotId:      auth.currentUser.uid,
-            aircraftIdent: parsed.airframe.aircraft_ident,
-            fileName:     file.name,
-            csvStoragePath: path,
-            csvUrl:       url,
-            startTs:      parsed.stats.startTs,
-            endTs:        parsed.stats.endTs,
-            duration:     parsed.stats.duration,
-            maxAlt:       parsed.stats.maxAlt,
-            maxSpd:       parsed.stats.maxSpd,
-            maxG:         parsed.stats.maxG,
-            maxRpm:       parsed.stats.maxRpm,
-            bounds:       parsed.stats.bounds,
-            uploadedAt:   serverTimestamp(),
-          })
-
-          onParsed({ ...parsed, flightId: flightDoc.id })
+          onUploaded({ parsed, path, url, fileName: file.name })
           setUploading(false)
         }
       )
-    } catch (e) {
-      setError(e.message)
-      setUploading(false)
-    }
+    } catch (e) { setError(e.message); setUploading(false) }
   }
 
   return (
@@ -145,6 +118,104 @@ function UploadZone({ onParsed }) {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+// ─── Assignation post-upload ──────────────────────────────────────────────────
+function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) {
+  const { parsed, path, url, fileName } = uploadData
+  const [aircraftIdent,     setAircraftIdent]     = useState(parsed.airframe?.aircraft_ident || '')
+  const [pilotId,           setPilotId]           = useState('')
+  const [instructorId,      setInstructorId]      = useState('')
+  const [instructorOnboard, setInstructorOnboard] = useState(true)
+  const [saving,            setSaving]            = useState(false)
+
+  const selectedPilot  = pilots.find(p => p.id === pilotId)
+  const isStudent      = selectedPilot?.licence === 'student'
+  const pilotRole      = isStudent ? 'student' : 'pilot'
+  const instructors    = pilots.filter(p => p.isInstructor === true)
+  const flightType     = deriveFlightType(pilotRole, isStudent ? instructorId : null, instructorOnboard)
+  const ft             = flightType ? FLIGHT_TYPES[flightType] : null
+  const canSave        = aircraftIdent && pilotId && (!isStudent || instructorId)
+
+  const sel = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontFamily: 'monospace', fontSize: 11, padding: '5px 8px', borderRadius: 4, width: '100%', outline: 'none', cursor: 'pointer' }
+  const lbl = { display: 'block', color: 'rgba(255,255,255,0.35)', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 }
+  const RadioBtn = ({ label, active, onClick }) => (
+    <button onClick={onClick} type="button" style={{ flex: 1, padding: '4px 0', background: active ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? 'rgba(245,166,35,0.5)' : 'rgba(255,255,255,0.08)'}`, color: active ? '#F5A623' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>{label}</button>
+  )
+
+  const handleSave = async () => {
+    if (!canSave || saving) return
+    setSaving(true)
+    try {
+      const flightDoc = await addDoc(collection(db, 'flights'), {
+        fileName, csvStoragePath: path, csvUrl: url,
+        aircraftIdent, pilotId, pilotRole,
+        instructorId:      isStudent ? instructorId      : null,
+        instructorOnboard: isStudent ? instructorOnboard : null,
+        flightType, validated: true,
+        startTs: parsed.stats.startTs, endTs: parsed.stats.endTs,
+        duration: parsed.stats.duration, maxAlt: parsed.stats.maxAlt,
+        maxSpd: parsed.stats.maxSpd, maxG: parsed.stats.maxG,
+        maxRpm: parsed.stats.maxRpm, bounds: parsed.stats.bounds,
+        uploadedAt: serverTimestamp(),
+      })
+      onSaved({ ...parsed, flightId: flightDoc.id })
+    } catch (e) { console.error(e) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div style={{ padding: '10px 8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ color: '#F5A623', fontFamily: 'monospace', fontSize: 9, letterSpacing: 1.5, marginBottom: 10 }}>ASSIGNER CE VOL</div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={lbl}>AÉRONEF</span>
+        <select value={aircraftIdent} onChange={e => setAircraftIdent(e.target.value)} style={sel}>
+          <option value="">Sélectionner…</option>
+          {aircraft.map(a => <option key={a.id} value={a.registration}>{a.callSign || a.registration} — {a.typeDesig || a.type}</option>)}
+        </select>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={lbl}>PILOTE</span>
+        <select value={pilotId} onChange={e => { setPilotId(e.target.value); setInstructorId('') }} style={sel}>
+          <option value="">Sélectionner…</option>
+          {pilots.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}</option>)}
+        </select>
+      </div>
+      {selectedPilot && (
+        <div style={{ color: isStudent ? '#60a5fa' : '#22c55e', fontFamily: 'monospace', fontSize: 10, marginBottom: 10 }}>
+          {isStudent ? '🎓 STUDENT — instructor requis' : '✈ PILOT — vol solo'}
+        </div>
+      )}
+      {isStudent && pilotId && (
+        <div style={{ background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 6, padding: '8px', marginBottom: 10 }}>
+          <div style={{ marginBottom: 8 }}>
+            <span style={lbl}>INSTRUCTEUR</span>
+            <select value={instructorId} onChange={e => setInstructorId(e.target.value)} style={sel}>
+              <option value="">Sélectionner…</option>
+              {instructors.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}</option>)}
+            </select>
+          </div>
+          <span style={lbl}>PRÉSENCE</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <RadioBtn label="🪑 À BORD"  active={instructorOnboard === true}  onClick={() => setInstructorOnboard(true)} />
+            <RadioBtn label="📡 AU SOL" active={instructorOnboard === false} onClick={() => setInstructorOnboard(false)} />
+          </div>
+        </div>
+      )}
+      {ft && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '4px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 4 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: ft.color }} />
+          <span style={{ color: ft.color, fontFamily: 'monospace', fontSize: 10 }}>{ft.label.toUpperCase()}</span>
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: '5px 0', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>ANNULER</button>
+        <button onClick={handleSave} disabled={!canSave || saving} style={{ flex: 2, padding: '5px 0', background: canSave && !saving ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${canSave && !saving ? 'rgba(245,166,35,0.4)' : 'rgba(255,255,255,0.06)'}`, color: canSave && !saving ? '#F5A623' : 'rgba(255,255,255,0.2)', fontFamily: 'monospace', fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
+          {saving ? '…' : '✓ VALIDER'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -380,24 +451,60 @@ function DataStrip({ frame }) {
 // ─── Main REPLAY page ─────────────────────────────────────────────────────────
 export default function ReplayPage({ user }) {
   const { flightId }  = useParams()
-  const [flights, setFlights]       = useState([])
-  const [selected, setSelected]     = useState(null)   // flight metadata
-  const [parsed, setParsed]         = useState(null)   // { frames, stats, airframe }
-  const [currentTs, setCurrentTs]   = useState(0)
-  const [playing, setPlaying]       = useState(false)
-  const [speed, setSpeed]           = useState(1)
-  const [showUpload, setShowUpload] = useState(false)
-  const [sideOpen, setSideOpen]     = useState(true)
-  const [is3D, setIs3D]             = useState(false)
-  const animRef = useRef(null)
+  const [flights,      setFlights]      = useState([])
+  const [selected,     setSelected]     = useState(null)
+  const [parsed,       setParsed]       = useState(null)
+  const [currentTs,    setCurrentTs]    = useState(0)
+  const [playing,      setPlaying]      = useState(false)
+  const [speed,        setSpeed]        = useState(1)
+  const [showUpload,   setShowUpload]   = useState(false)
+  const [pendingUpload, setPendingUpload] = useState(null)
+  const [pilots,       setPilots]       = useState([])
+  const [aircraft,     setAircraft]     = useState([])
+  const [sideOpen,     setSideOpen]     = useState(true)
+  const [is3D,         setIs3D]         = useState(false)
+  const animRef     = useRef(null)
   const lastTimeRef = useRef(null)
 
-  // Load flight list
+  // ── Charger tous les vols ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!user) return
-    const q = query(collection(db, 'flights'), where('pilotId', '==', user.uid), orderBy('startTs', 'desc'))
+    const q = query(collection(db, 'flights'), orderBy('startTs', 'desc'))
     return onSnapshot(q, snap => setFlights(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
-  }, [user])
+  }, [])
+
+  // ── Charger pilots + aircraft pour AssignAfterUpload ──────────────────────
+  useEffect(() => {
+    async function load() {
+      const [ps, as] = await Promise.all([
+        getDocs(collection(db, 'pilots')),
+        getDocs(collection(db, 'aircraft')),
+      ])
+      setPilots(ps.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true))
+      setAircraft(as.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true))
+    }
+    load()
+  }, [])
+
+  // ── Auto-load depuis URL /replay/:flightId (vient du Logbook) ─────────────
+  useEffect(() => {
+    if (!flightId) return
+    async function autoLoad() {
+      try {
+        const snap = await getDoc(doc(db, 'flights', flightId))
+        if (!snap.exists()) return
+        const fl = { id: snap.id, ...snap.data() }
+        setSelected(fl)
+        if (!fl.csvUrl) return
+        const res  = await fetch(fl.csvUrl)
+        const text = await res.text()
+        const p    = parseG3XCSV(text)
+        setParsed(p)
+        setCurrentTs(p.frames[0].ts)
+        setPlaying(false)
+      } catch (e) { console.error('Auto-load flight:', e) }
+    }
+    autoLoad()
+  }, [flightId])
 
   // Playback loop
   useEffect(() => {
@@ -420,23 +527,10 @@ export default function ReplayPage({ user }) {
     return () => { cancelAnimationFrame(animRef.current); lastTimeRef.current = null }
   }, [playing, speed, parsed])
 
-  const handlePlayPause = () => {
-    lastTimeRef.current = null
-    setPlaying(p => !p)
-  }
-
-  const handleSeek = (ts) => {
-    lastTimeRef.current = null
-    setCurrentTs(ts)
-    setPlaying(false)
-  }
-
-  const handleParsed = (data) => {
-    setParsed(data)
-    setCurrentTs(data.frames[0].ts)
-    setPlaying(false)
-    setShowUpload(false)
-  }
+  const handlePlayPause = () => { lastTimeRef.current = null; setPlaying(p => !p) }
+  const handleSeek = (ts) => { lastTimeRef.current = null; setCurrentTs(ts); setPlaying(false) }
+  const handleUploaded = (data) => { setPendingUpload(data); setShowUpload(false) }
+  const handleSaved = (data) => { setParsed(data); setCurrentTs(data.frames[0].ts); setPlaying(false); setPendingUpload(null) }
 
   const currentFrame = parsed ? getFrameAtTime(parsed.frames, currentTs) : null
 
@@ -474,12 +568,22 @@ export default function ReplayPage({ user }) {
 
               {showUpload && (
                 <div style={{ marginBottom: 12 }}>
-                  <UploadZone onParsed={handleParsed} />
+                  <UploadZone onUploaded={handleUploaded} />
                 </div>
               )}
 
+              {pendingUpload && (
+                <AssignAfterUpload
+                  uploadData={pendingUpload}
+                  pilots={pilots}
+                  aircraft={aircraft}
+                  onSaved={handleSaved}
+                  onCancel={() => setPendingUpload(null)}
+                />
+              )}
+
               {/* Flight list */}
-              {flights.length === 0 && !showUpload && (
+              {flights.length === 0 && !showUpload && !pendingUpload && (
                 <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textAlign: 'center', padding: 16 }}>
                   No flights yet.<br/>Import a G3X CSV.
                 </div>
@@ -488,11 +592,11 @@ export default function ReplayPage({ user }) {
                 <FlightItem key={f.id} flight={f} selected={selected?.id === f.id}
                   onSelect={async (fl) => {
                     setSelected(fl)
-                    // Load CSV from storage URL
+                    if (!fl.csvUrl) return
                     try {
-                      const res = await fetch(fl.csvUrl)
+                      const res  = await fetch(fl.csvUrl)
                       const text = await res.text()
-                      const p = parseG3XCSV(text)
+                      const p    = parseG3XCSV(text)
                       setParsed(p)
                       setCurrentTs(p.frames[0].ts)
                       setPlaying(false)
@@ -523,8 +627,32 @@ export default function ReplayPage({ user }) {
               <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
                 {/* MapLibre map */}
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <ReplayMap frames={parsed.frames} currentFrame={currentFrame} is3D={is3D} />
+                  <ReplayMap frames={parsed.frames} currentFrame={currentFrame} is3D={is3D} isPlaying={playing} speed={speed} />
 
+                  {/* ── Bouton 2D / 3D ── */}
+                  <button
+                    onClick={() => setIs3D(v => !v)}
+                    style={{
+                      position:      'absolute',
+                      top:           10,
+                      left:          '50%',
+                      transform:     'translateX(-50%)',
+                      zIndex:        20,
+                      background:    is3D ? C.amber : 'rgba(5,8,20,0.82)',
+                      color:         is3D ? '#050814' : C.text,
+                      border:        `1px solid ${is3D ? C.amber : 'rgba(255,255,255,0.15)'}`,
+                      borderRadius:  6,
+                      padding:       '4px 16px',
+                      fontFamily:    C.mono,
+                      fontSize:      10,
+                      fontWeight:    700,
+                      letterSpacing: '0.12em',
+                      cursor:        'pointer',
+                      userSelect:    'none',
+                    }}
+                  >
+                    {is3D ? '3D' : '2D'}
+                  </button>
                 </div>
 
                 {/* Six-pack */}
