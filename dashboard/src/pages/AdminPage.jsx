@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc,
+  collection, getDocs, addDoc, updateDoc,
   doc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
@@ -675,8 +675,8 @@ export default function AdminPage({ role }) {
   }
 
   const deletePilot = async (p) => {
-    if (!window.confirm(`Delete pilot ${p.firstName} ${p.lastName}?`)) return
-    await deleteDoc(doc(db, 'pilots', p.id))
+    if (!window.confirm(`Archive pilot ${p.firstName} ${p.lastName}?`)) return
+    await updateDoc(doc(db, 'pilots', p.id), { archived: true, updatedAt: serverTimestamp() })
     setPilots(prev => prev.filter(x => x.id !== p.id))
   }
 
@@ -711,8 +711,8 @@ export default function AdminPage({ role }) {
   }
 
   const deleteAircraft = async (a) => {
-    if (!window.confirm(`Delete aircraft ${a.registration}?`)) return
-    await deleteDoc(doc(db, 'aircraft', a.id))
+    if (!window.confirm(`Archive aircraft ${a.registration}?`)) return
+    await updateDoc(doc(db, 'aircraft', a.id), { archived: true, updatedAt: serverTimestamp() })
     setAircraft(prev => prev.filter(x => x.id !== a.id))
   }
 
