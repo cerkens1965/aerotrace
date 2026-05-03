@@ -3,17 +3,71 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2026, 5, 28);
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Lit le rôle plateforme depuis /users/{uid}
+    // Valeurs attendues : 'user' | 'instructor' | 'admin'
+    function userRole() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc.data == null ? 'user' : userDoc.data.get('role', 'user');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userRole() == 'admin';
+    }
+
+    function isInstructorOrAdmin() {
+      return isSignedIn() && userRole() in ['instructor', 'admin'];
+    }
+
+    // ── Users ──────────────────────────────────────────────────────────────────
+    // Lecture : soi-même ou admin. Création : soi-même (first login dans App.jsx).
+    // Update : soi-même (profil) ou admin (promotion rôle).
+    match /users/{uid} {
+      allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow delete: if false;
+    }
+
+    // ── Clubs ──────────────────────────────────────────────────────────────────
+    match /clubs/{clubId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Aircraft ───────────────────────────────────────────────────────────────
+    match /aircraft/{id} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Pilots ─────────────────────────────────────────────────────────────────
+    match /pilots/{id} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── FDR status ─────────────────────────────────────────────────────────────
+    // L'ESP32 (LILYGO T-SIM7600G-H) écrit via Firestore REST API sans Firebase Auth.
+    // Write reste ouvert jusqu'à l'implémentation de l'auth hardware (NFC PN532).
+    // Read restreint aux utilisateurs connectés.
+    match /fdr_status/{icao24} {
+      allow read:  if isSignedIn();
+      allow write: if true;
+    }
+
+    // ── Flights ────────────────────────────────────────────────────────────────
+    // Create : tout utilisateur connecté (upload CSV via ReplayPage).
+    // Update : instructeur ou admin (assignation pilote/avion, validation).
+    // Delete : jamais (soft-delete non applicable ici, les docs restent).
+    match /flights/{flightId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isInstructorOrAdmin();
+      allow delete: if false;
     }
   }
 }
