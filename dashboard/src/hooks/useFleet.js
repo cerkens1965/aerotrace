@@ -101,7 +101,7 @@ export default function useFleet(clubId) {
       // FDR dit "en vol" mais SafeSky muet
       const stale = skyTs === 0 && (now - fdrTs) > STALE_MS
       status = stale ? 'LTE_LOST' : 'IN_FLIGHT'
-    } else if (fdrMode === 'MODE_GROUND' || fdrMode === 'MODE_PREFLIGHT' || fdrMode === 'MODE_SLEEP') {
+    } else if (fdrMode === 'MODE_POSTFLIGHT' || fdrMode === 'MODE_PREFLIGHT' || fdrMode === 'MODE_SLEEP') {
       status = 'GROUNDED'
     } else if (skyAlt <= IN_FLIGHT_ALT_FT && sky) {
       status = 'GROUNDED'
