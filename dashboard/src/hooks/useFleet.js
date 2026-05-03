@@ -125,6 +125,7 @@ export default function useFleet(clubId) {
         lon:      fdr.lon,
         alt:      fdr.alt_m,
         spd:      fdr.spd_kt,
+        hdg:      fdr.hdg_deg ?? null,
         rpm:      fdr.rpm,
         co:       fdr.co_ppm,
         lastSeen: fdrTs,

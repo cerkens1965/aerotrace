@@ -122,7 +122,7 @@ function AircraftCard({ ac, expanded, onToggle }) {
   const fdr  = ac.fdrData
   const altFt  = live?.altitude ?? (fdr?.alt != null ? fdr.alt * 3.28084 : null)
   const spdKt  = live?.speed    ?? fdr?.spd ?? null
-  const hdgDeg = live?.heading  ?? null   // le hook n'expose pas le hdg FDR
+  const hdgDeg = live?.heading  ?? fdr?.hdg ?? null
   const sourceLabel = ac.status === 'LTE_LOST' ? 'FDR only'
     : live ? 'SafeSky'
     : fdr  ? 'FDR'
