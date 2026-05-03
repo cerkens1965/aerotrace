@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy,
 } from 'firebase/firestore'
-import { db } from '../firebase/config'
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { db, storage } from '../firebase/config'
 
 // ─── Design tokens — WHITE theme ─────────────────────────────────────────────
 const C = {
@@ -52,6 +53,7 @@ const EMPTY_PILOT = {
 }
 const EMPTY_AIRCRAFT = {
   registration: '', callSign: '', typeDesig: '', icao24: '', homeBase: '',
+  photoUrl: '', photoStoragePath: '',
 }
 
 // ─── Reusable form components ─────────────────────────────────────────────────
@@ -316,6 +318,72 @@ function PilotForm({ form, setForm, allTrigrams, saving, error, onSave, onCancel
   )
 }
 
+// ─── Aircraft photo uploader ──────────────────────────────────────────────────
+function AircraftPhotoField({ form, setForm }) {
+  const inputRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
+  const [err, setErr]             = useState('')
+
+  const onFile = async (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setErr('Image file required')
+    if (file.size > 5 * 1024 * 1024)     return setErr('Max 5MB')
+    setErr(''); setUploading(true)
+    try {
+      const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const reg  = (form.registration || 'unknown').replace(/[^a-zA-Z0-9-]/g, '_')
+      const path = `aircraft_photos/${reg}_${Date.now()}.${ext}`
+      const r    = storageRef(storage, path)
+      await uploadBytes(r, file)
+      const url  = await getDownloadURL(r)
+      setForm(p => ({ ...p, photoUrl: url, photoStoragePath: path }))
+    } catch (e) { setErr(e.message) }
+    finally { setUploading(false) }
+  }
+
+  const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '' }))
+
+  return (
+    <div>
+      <Label>PHOTO</Label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{
+          width: 96, height: 64, flexShrink: 0,
+          borderRadius: 8, border: `1px dashed ${C.border}`, background: C.bg,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          overflow: 'hidden', cursor: 'pointer',
+        }} onClick={() => inputRef.current?.click()}>
+          {form.photoUrl
+            ? <img src={form.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span style={{ fontFamily: C.mono, fontSize: 9, color: C.low }}>+ ADD</span>}
+        </div>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button type="button" onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            style={{
+              padding: '6px 14px', borderRadius: 6, cursor: uploading ? 'wait' : 'pointer',
+              background: 'transparent', border: `1px solid ${C.border}`,
+              fontFamily: C.mono, fontSize: 10, color: C.text, alignSelf: 'flex-start',
+            }}>
+            {uploading ? 'UPLOADING…' : form.photoUrl ? 'REPLACE' : 'UPLOAD'}
+          </button>
+          {form.photoUrl && !uploading && (
+            <button type="button" onClick={remove}
+              style={{
+                padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
+                fontFamily: C.mono, fontSize: 9, color: C.red, alignSelf: 'flex-start',
+              }}>REMOVE</button>
+          )}
+          {err && <div style={{ fontFamily: C.mono, fontSize: 9, color: C.red }}>{err}</div>}
+        </div>
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={e => onFile(e.target.files?.[0])} />
+    </div>
+  )
+}
+
 // ─── Aircraft form panel ──────────────────────────────────────────────────────
 function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit }) {
   return (
@@ -361,6 +429,10 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit }
           <Input value={form.homeBase}
             onChange={v => setForm(p => ({ ...p, homeBase: v.toUpperCase() }))}
             placeholder="EBBY" maxLength={4} />
+        </div>
+
+        <div style={{ gridColumn: '1/-1' }}>
+          <AircraftPhotoField form={form} setForm={setForm} />
         </div>
       </div>
 
@@ -471,14 +543,21 @@ function AircraftRow({ ac, onEdit, onDelete }) {
       padding: '12px 16px', background: C.surface,
       border: `1px solid ${C.border}`, borderRadius: 8,
     }}>
-      <div style={{
-        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-        background: C.amber10, border: `1px solid ${C.amber}44`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.amber,
-      }}>
-        {ac.typeDesig || '?'}
-      </div>
+      {ac.photoUrl ? (
+        <img src={ac.photoUrl} alt="" style={{
+          width: 56, height: 36, borderRadius: 6, flexShrink: 0,
+          objectFit: 'cover', border: `1px solid ${C.border}`,
+        }} />
+      ) : (
+        <div style={{
+          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+          background: C.amber10, border: `1px solid ${C.amber}44`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.amber,
+        }}>
+          {ac.typeDesig || '?'}
+        </div>
+      )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
@@ -603,19 +682,21 @@ export default function AdminPage({ role }) {
 
   // ── Aircraft CRUD ───────────────────────────────────────────────────────────
   const openNewAircraft  = () => { setEditId(null); setAircraftForm({ ...EMPTY_AIRCRAFT }); setError('') }
-  const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...a }); setError('') }
+  const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...EMPTY_AIRCRAFT, ...a }); setError('') }
 
   const saveAircraft = async () => {
     if (!aircraftForm.registration) return setError('Registration required')
     setSaving(true); setError('')
     try {
       const data = {
-        registration: aircraftForm.registration,
-        callSign:     aircraftForm.callSign,
-        typeDesig:    aircraftForm.typeDesig,
-        icao24:       aircraftForm.icao24,
-        homeBase:     aircraftForm.homeBase,
-        updatedAt:    serverTimestamp(),
+        registration:     aircraftForm.registration,
+        callSign:         aircraftForm.callSign,
+        typeDesig:        aircraftForm.typeDesig,
+        icao24:           aircraftForm.icao24,
+        homeBase:         aircraftForm.homeBase,
+        photoUrl:         aircraftForm.photoUrl || '',
+        photoStoragePath: aircraftForm.photoStoragePath || '',
+        updatedAt:        serverTimestamp(),
       }
       if (editId) {
         await updateDoc(doc(db, 'aircraft', editId), data)

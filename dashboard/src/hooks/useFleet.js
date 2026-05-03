@@ -64,7 +64,8 @@ export default function useFleet(clubId) {
       const res = await fetch('http://localhost:3001/safesky/traffic?lat=50.5686&lon=4.4347')
       if (!res.ok) throw new Error(`SafeSky proxy ${res.status}`)
       const data = await res.json()
-      setSafesky(Array.isArray(data) ? data : [])
+      // Le proxy renvoie { nearby_traffic: [...] } — pas un array brut
+      setSafesky(Array.isArray(data?.nearby_traffic) ? data.nearby_traffic : [])
     } catch (err) {
       console.warn('[useFleet] SafeSky poll failed:', err.message)
       // Ne pas crasher — SafeSky peut être indispo

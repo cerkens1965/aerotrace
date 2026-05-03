@@ -115,7 +115,18 @@ function FilterTab({ label, count, active, color, onClick }) {
 // ─── Aircraft card ────────────────────────────────────────────────────────────
 function AircraftCard({ ac, expanded, onToggle }) {
   const st  = STATUS[ac.status] ?? STATUS.UNKNOWN
-  const dur = fmtDuration(ac.live?.flightStart ?? null)
+  const dur = fmtDuration(ac.flightStart ?? null)
+
+  // SafeSky d'abord, fallback FDR. SafeSky est en ft/kt/deg ; FDR alt est en mètres.
+  const live = ac.liveData
+  const fdr  = ac.fdrData
+  const altFt  = live?.altitude ?? (fdr?.alt != null ? fdr.alt * 3.28084 : null)
+  const spdKt  = live?.speed    ?? fdr?.spd ?? null
+  const hdgDeg = live?.heading  ?? null   // le hook n'expose pas le hdg FDR
+  const sourceLabel = ac.status === 'LTE_LOST' ? 'FDR only'
+    : live ? 'SafeSky'
+    : fdr  ? 'FDR'
+    : '—'
 
   return (
     <div style={{
@@ -182,11 +193,11 @@ function AircraftCard({ ac, expanded, onToggle }) {
           background: '#fafbfc',
         }}>
           {[
-            { label: 'ALTITUDE', value: fmtAlt(ac.live?.alt) },
-            { label: 'SPEED',    value: fmtSpd(ac.live?.spd) },
-            { label: 'HEADING',  value: fmtHdg(ac.live?.hdg) },
+            { label: 'ALTITUDE', value: fmtAlt(altFt) },
+            { label: 'SPEED',    value: fmtSpd(spdKt) },
+            { label: 'HEADING',  value: fmtHdg(hdgDeg) },
             { label: 'PILOT',    value: ac.pilotName ?? '—' },
-            { label: 'SOURCE',   value: ac.status === 'LTE_LOST' ? 'FDR only' : ac.live ? 'SafeSky' : '—' },
+            { label: 'SOURCE',   value: sourceLabel },
             { label: 'ICAO24',   value: ac.icao24 ?? '—' },
           ].map(({ label, value }) => (
             <div key={label}>
