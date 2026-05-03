@@ -83,17 +83,32 @@ Role stored in Firestore `/users/{uid}.role`
 
 ## Design Rules — CRITICAL
 
+### Pages thème BLANC (défaut)
 ```
-text color     → ALWAYS #ffffff (never rgba gray on dark bg)
+background     → #f0f2f8
+panel bg       → rgba(255,255,255,0.97)
+border         → rgba(0,0,0,0.08)
+text color     → #0a0e1e (JAMAIS blanc sur fond blanc)
+mid color      → rgba(10,14,30,0.5)
 accent color   → #F5A623 (amber)
-borders/bg     → rgba subtils ok (rgba(255,255,255,0.07) etc.)
-placeholders   → rgba gray ok (champ vide = indication)
 font           → monospace partout
-background     → #050814
-panel bg       → rgba(10,14,30,0.95)
 ```
 
-**Never use low-opacity white for text.** Only for borders/backgrounds.
+Pages thème blanc : **LivePage, EnVolPage, ReplayPage, AdminPage, LogbookPage, Header, FlightCharts**
+
+### Composants thème SOMBRE (exception)
+```
+background     → #050814
+panel bg       → rgba(10,14,30,0.95)
+border         → rgba(255,255,255,0.07)
+text color     → #ffffff TOUJOURS
+accent color   → #F5A623 (amber)
+```
+
+Composants thème sombre : **ReplayMap, AerotraceMap** (maps MapLibre — restent dark)
+
+**Règle absolue** : jamais de texte gris/low-opacity sur fond sombre → `#ffffff` uniquement.
+Seules exceptions : placeholders champs vides, labels section (10px, letterSpacing).
 
 ---
 
@@ -264,24 +279,58 @@ DANGER: ['in', ['get', 'type'], ['literal', ['danger', 'restricted', 'prohibited
 fetch('http://localhost:3001/safesky/traffic?lat=50.5686&lon=4.4347')
 // Returns SafeSky nearby aircraft array
 // Center: EBBY (50.5686, 4.4347)
+// Sandbox API key: sk_test_d74f45601570557f758c67a147ba32fe3181944c9241a2b9
 ```
 
 ---
 
-## SliderTrack Component (reuse everywhere)
+## SliderRow / SliderTrack Component — RÈGLE CRITIQUE
+
+**Ne JAMAIS définir ce composant à l'intérieur d'un autre composant.**
+Le définir à l'intérieur cause un unmount/remount à chaque render → drag impossible.
+**Toujours le déclarer en top-level**, avant le `export default function`.
 
 ```jsx
-function SliderTrack({ value, max = 30, color, onChange }) {
+// ✅ CORRECT — top-level, avant export default
+function SliderRow({ value, min = 0, max = 30, step = 1, color, onChange }) {
+  const pct = ((value - min) / (max - min)) * 100
   return (
     <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
       <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
-      <div style={{ position: 'absolute', width: `${(value/max)*100}%`, height: 1, background: color, borderRadius: 1 }} />
-      <div style={{ position: 'absolute', left: `calc(${(value/max)*100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
-      <input type="range" min={0} max={max} value={value} onChange={e => onChange(Number(e.target.value))}
-        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none' }} />
+      <div style={{ position: 'absolute', width: `${pct}%`, height: 1, background: color, borderRadius: 1 }} />
+      <div style={{ position: 'absolute', left: `calc(${pct}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
     </div>
   )
 }
+
+export default function AerotraceMap() { ... }
+```
+
+Utilisations :
+- AIP layers (CTR/TMA/DANGER) : `min=0, max=30, step=1`
+- Cockpit ALTITUDE : `min=8, max=16, step=0.5, color="#F5A623"`
+- Cockpit ANGLE : `min=60, max=85, step=1, color="#22c55e"`
+- Traffic altitude MIN/MAX : `min=0, max=ALT_MAX(35000), step=1000`
+
+---
+
+## AIP Layers — Toggle (CRITIQUE)
+
+Le `onClick` pour toggle un layer AIP doit être sur le **div parent de la rangée**, pas sur le `<span>` label seul. Zone cliquable trop petite sinon.
+
+```jsx
+// ✅ CORRECT
+<div onClick={() => toggleLayer(layer.id)} style={{ ..., cursor: 'pointer' }}>
+  <span style={{ ... }}>{layer.label}</span>
+</div>
+
+// ❌ INCORRECT — zone cliquable trop petite
+<div style={{ ... }}>
+  <span onClick={() => toggleLayer(layer.id)} style={{ cursor: 'pointer' }}>{layer.label}</span>
+</div>
 ```
 
 ---
@@ -315,6 +364,9 @@ Projet sur **iCloud Apple** :
 
 Workflow fichiers : Claude génère → Christophe télécharge → `cp` dans terminal.
 
+Git base saine : commit `facef2e`
+**Ne jamais modifier ReplayMap.jsx sans upload préalable du fichier existant.**
+
 ---
 
 ## Do Not
@@ -331,3 +383,5 @@ Workflow fichiers : Claude génère → Christophe télécharge → `cp` dans te
 - ❌ Never use `frame.agl` directement → souvent null/0 en vol G3X
 - ❌ Never use `easeTo(duration)` > frameInterval → snapback caméra
 - ❌ Never use `frame.hdg` brut pour la caméra → toujours `frame.bearing`
+- ❌ Never define SliderRow/SliderTrack inside a component → drag broken
+- ❌ Never put onClick only on label span for layer toggle → use parent div
