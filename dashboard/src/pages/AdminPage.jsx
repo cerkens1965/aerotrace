@@ -348,7 +348,7 @@ function AircraftPhotoField({ form, setForm }) {
       <Label>PHOTO</Label>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{
-          width: 96, height: 64, flexShrink: 0,
+          width: 192, height: 128, flexShrink: 0,
           borderRadius: 8, border: `1px dashed ${C.border}`, background: C.bg,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           overflow: 'hidden', cursor: 'pointer',
