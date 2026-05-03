@@ -142,6 +142,9 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 .DS_Store
+
+# Claude Code runtime
+.claude/
 seed.js
 serviceAccountKey.json
 .firebaserc
