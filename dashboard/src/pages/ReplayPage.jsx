@@ -123,6 +123,10 @@ function UploadZone({ onUploaded }) {
 }
 
 // ─── Assignation post-upload ──────────────────────────────────────────────────
+const RadioBtn = ({ label, active, onClick }) => (
+  <button onClick={onClick} type="button" style={{ flex: 1, padding: '4px 0', background: active ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? 'rgba(245,166,35,0.5)' : 'rgba(255,255,255,0.08)'}`, color: active ? '#F5A623' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>{label}</button>
+)
+
 function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) {
   const { parsed, path, url, fileName } = uploadData
   const [aircraftIdent,     setAircraftIdent]     = useState(parsed.airframe?.aircraft_ident || '')
@@ -141,9 +145,6 @@ function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) 
 
   const sel = { background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.1)', color: '#0a0e1e', fontFamily: 'monospace', fontSize: 11, padding: '5px 8px', borderRadius: 4, width: '100%', outline: 'none', cursor: 'pointer' }
   const lbl = { display: 'block', color: 'rgba(0,0,0,0.45)', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 }
-  const RadioBtn = ({ label, active, onClick }) => (
-    <button onClick={onClick} type="button" style={{ flex: 1, padding: '4px 0', background: active ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? 'rgba(245,166,35,0.5)' : 'rgba(255,255,255,0.08)'}`, color: active ? '#F5A623' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>{label}</button>
-  )
 
   const handleSave = async () => {
     if (!canSave || saving) return
