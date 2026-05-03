@@ -221,7 +221,7 @@ function PilotCard({ pilot, flights, pilots, mode, onReplay, onAssign }) {
                     </td>
                   )}
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(255,255,255,0.55)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
+                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                     {f.validated
                       ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
@@ -304,7 +304,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
                   <td style={TD}>{formatDuration(f.duration)}</td>
                   <td style={TD}><TypeBadge type={f.flightType} /></td>
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(255,255,255,0.55)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
+                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                     {f.validated ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button> : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
                   </td>
