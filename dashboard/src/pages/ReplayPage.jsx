@@ -152,6 +152,7 @@ function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) 
       const flightDoc = await addDoc(collection(db, 'flights'), {
         fileName, csvStoragePath: path, csvUrl: url,
         aircraftIdent, pilotId, pilotRole,
+        clubId: selectedPilot?.clubId ?? null,
         instructorId:      isStudent ? instructorId      : null,
         instructorOnboard: isStudent ? instructorOnboard : null,
         flightType, validated: true,
