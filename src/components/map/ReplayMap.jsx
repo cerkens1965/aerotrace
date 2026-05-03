@@ -98,6 +98,19 @@ const titleText  = { fontSize: 10, fontWeight: 700, fontFamily: 'monospace', let
 const triangle   = (open) => <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
 
 // ── Main component ────────────────────────────────────────────────────────────
+function SliderTrack({ value, max = 30, color, onChange }) {
+  return (
+    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
+      <div style={{ position: 'absolute', width: `${(value / max) * 100}%`, height: 1, background: color, borderRadius: 1 }} />
+      <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
+      <input type="range" min={0} max={max} step={1} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
+    </div>
+  )
+}
+
 export default function ReplayMap({ frames, currentFrame, is3D = false }) {
   const mapRef      = useRef(null)
   const mapObj      = useRef(null)
@@ -257,15 +270,13 @@ export default function ReplayMap({ frames, currentFrame, is3D = false }) {
               {LAYERS.filter(l => l.id !== 'airports').map(layer => {
                 const on = visible[layer.id]
                 return (
-                  <div key={layer.id} style={{ marginBottom: 8, borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.1)'}`, paddingLeft: 6, borderRadius: '0 4px 4px 0', background: on ? `rgba(${layer.rgb},0.04)` : 'transparent', padding: '4px 6px' }}>
+                  <div key={layer.id} onClick={() => toggleLayer(layer.id)} style={{ marginBottom: 8, borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.1)'}`, paddingLeft: 6, borderRadius: '0 4px 4px 0', background: on ? `rgba(${layer.rgb},0.04)` : 'transparent', padding: '4px 6px', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: layer.hasSlider && on ? 4 : 0 }}>
-                      <span onClick={() => toggleLayer(layer.id)} style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? '#ffffff' : 'rgba(255,255,255,0.4)', cursor: 'pointer', userSelect: 'none' }}>{layer.label}</span>
+                      <span style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? '#ffffff' : 'rgba(255,255,255,0.4)', userSelect: 'none' }}>{layer.label}</span>
                       {layer.hasSlider && on && <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>{opacity[layer.id]}%</span>}
                     </div>
                     {layer.hasSlider && on && (
-                      <input type="range" min={0} max={30} value={opacity[layer.id]}
-                        onChange={e => handleOpacity(layer.id, Number(e.target.value))}
-                        style={{ width: '100%', accentColor: layer.color, height: 3, cursor: 'pointer' }} />
+                      <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} onChange={v => handleOpacity(layer.id, v)} />
                     )}
                   </div>
                 )

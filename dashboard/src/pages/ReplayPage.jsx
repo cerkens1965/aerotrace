@@ -11,16 +11,16 @@ import FlightCharts from '../components/replay/FlightCharts'
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
-  bg:     '#050814',
-  panel:  'rgba(10,14,30,0.95)',
-  border: 'rgba(255,255,255,0.07)',
+  bg:     '#f0f2f8',
+  panel:  'rgba(255,255,255,0.97)',
+  border: 'rgba(0,0,0,0.08)',
   amber:  '#F5A623',
   amber10:'rgba(245,166,35,0.10)',
   amber20:'rgba(245,166,35,0.20)',
   green:  '#22c55e',
   red:    '#ef4444',
-  text:   '#ffffff',
-  mid:    'rgba(255,255,255,0.55)',
+  text:   '#0a0e1e',
+  mid:    'rgba(10,14,30,0.5)',
   mono:   'monospace',
 }
 
@@ -139,8 +139,8 @@ function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) 
   const ft             = flightType ? FLIGHT_TYPES[flightType] : null
   const canSave        = aircraftIdent && pilotId && (!isStudent || instructorId)
 
-  const sel = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontFamily: 'monospace', fontSize: 11, padding: '5px 8px', borderRadius: 4, width: '100%', outline: 'none', cursor: 'pointer' }
-  const lbl = { display: 'block', color: 'rgba(255,255,255,0.35)', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 }
+  const sel = { background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.1)', color: '#0a0e1e', fontFamily: 'monospace', fontSize: 11, padding: '5px 8px', borderRadius: 4, width: '100%', outline: 'none', cursor: 'pointer' }
+  const lbl = { display: 'block', color: 'rgba(0,0,0,0.45)', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 }
   const RadioBtn = ({ label, active, onClick }) => (
     <button onClick={onClick} type="button" style={{ flex: 1, padding: '4px 0', background: active ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? 'rgba(245,166,35,0.5)' : 'rgba(255,255,255,0.08)'}`, color: active ? '#F5A623' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>{label}</button>
   )
@@ -297,7 +297,7 @@ function TraceMap({ frames, currentFrame, bounds }) {
       ctx.arc(pos.x, pos.y, 6, 0, Math.PI*2)
       ctx.fillStyle = C.amber
       ctx.fill()
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = '#0a0e1e'
       ctx.lineWidth = 1.5
       ctx.stroke()
 
@@ -313,7 +313,7 @@ function TraceMap({ frames, currentFrame, bounds }) {
   }, [frames, currentFrame, project])
 
   return (
-    <div ref={containerRef} style={{ flex: 1, position: 'relative', background: '#0a0e1e', borderRadius: 10,
+    <div ref={containerRef} style={{ flex: 1, position: 'relative', background: '#e8eaf2', borderRadius: 10,
       border: `1px solid ${C.border}`, overflow: 'hidden' }}>
       <canvas ref={canvasRef} width={800} height={400}
         style={{ width: '100%', height: '100%' }} />
@@ -433,7 +433,7 @@ function DataStrip({ frame }) {
     { l: 'PHASE', v: frame.phase, color: PHASE_COLORS[frame.phase] },
   ]
   return (
-    <div style={{ display: 'flex', gap: 0, background: 'rgba(5,8,20,0.9)',
+    <div style={{ display: 'flex', gap: 0, background: C.panel,
       borderTop: `1px solid ${C.border}`, padding: '8px 16px', flexWrap: 'wrap', gap: 20 }}>
       {items.map(item => (
         <div key={item.l}>
@@ -638,9 +638,9 @@ export default function ReplayPage({ user }) {
                       left:          '50%',
                       transform:     'translateX(-50%)',
                       zIndex:        20,
-                      background:    is3D ? C.amber : 'rgba(5,8,20,0.82)',
+                      background:    is3D ? C.amber : 'rgba(255,255,255,0.92)',
                       color:         is3D ? '#050814' : C.text,
-                      border:        `1px solid ${is3D ? C.amber : 'rgba(255,255,255,0.15)'}`,
+                      border:        `1px solid ${is3D ? C.amber : 'rgba(0,0,0,0.15)'}`,
                       borderRadius:  6,
                       padding:       '4px 16px',
                       fontFamily:    C.mono,
@@ -657,7 +657,7 @@ export default function ReplayPage({ user }) {
 
                 {/* Six-pack */}
                 <div style={{ width: 300, padding: '8px', display: 'flex', alignItems: 'center',
-                  borderLeft: '1px solid rgba(255,255,255,0.07)', background: 'rgba(5,8,20,0.9)' }}>
+                  borderLeft: '1px solid rgba(0,0,0,0.08)', background: 'rgba(255,255,255,0.97)' }}>
                   <SixPack frame={currentFrame} size={110} />
                 </div>
               </div>

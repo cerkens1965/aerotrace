@@ -2,12 +2,12 @@ import { useRef, useEffect, useMemo, useState } from 'react'
 import { subsampleFrames } from '../../utils/csvParser'
 
 const C = {
-  bg:     '#050814',
-  border: 'rgba(255,255,255,0.07)',
-  text:   '#ffffff',
+  bg:     '#f0f2f8',
+  border: 'rgba(0,0,0,0.08)',
+  text:   '#0a0e1e',
   mono:   'monospace',
   amber:  '#F5A623',
-  panel:  'rgba(10,14,30,0.95)',
+  panel:  'rgba(255,255,255,0.97)',
 }
 
 const PARAMS = [
@@ -58,7 +58,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       data.forEach((f, i) => {
         i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key])) : ctx.lineTo(px(f.ts), py(f[param.key]))
       })
-      ctx.strokeStyle = `${param.color}35`
+      ctx.strokeStyle = `${param.color}55`
       ctx.lineWidth = 1.5
       ctx.stroke()
 
@@ -150,8 +150,8 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
               background: on ? `${p.color}15` : 'transparent',
               transition: 'all 0.15s',
             }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : 'rgba(255,255,255,0.3)'}` }} />
-              <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: on ? p.color : 'rgba(255,255,255,0.4)', letterSpacing: '0.06em' }}>{p.label}</span>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : 'rgba(0,0,0,0.2)'}` }} />
+              <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: on ? p.color : 'rgba(0,0,0,0.4)', letterSpacing: '0.06em' }}>{p.label}</span>
               {on && curFrame && (
                 <span style={{ fontFamily: C.mono, fontSize: 9, color: C.text }}>
                   {displayVal}<span style={{ fontSize: 7, color: p.color }}>{p.unit}</span>

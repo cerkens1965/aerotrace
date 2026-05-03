@@ -144,3 +144,7 @@ vite.config.ts.timestamp-*
 .DS_Store
 seed.js
 serviceAccountKey.json
+.firebaserc
+firebase.json
+firestore.indexes.json
+firestore.rules

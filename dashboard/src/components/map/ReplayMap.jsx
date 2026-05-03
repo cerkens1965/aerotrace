@@ -215,14 +215,14 @@ const Tri = ({ open }) => (
   }}>▶</span>
 )
 
-function SliderRow({ label, value, max = 30, color, onChange }) {
-  const pct = (value / max) * 100
+function SliderRow({ label, value, min = 0, max = 30, step = 1, color, onChange }) {
+  const pct = ((value - min) / (max - min)) * 100
   return (
     <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
       <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
       <div style={{ position: 'absolute', width: `${pct}%`, height: 1, background: color, borderRadius: 1 }} />
       <div style={{ position: 'absolute', left: `calc(${pct}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
-      <input type="range" min={0} max={max} step={1} value={value} onChange={e => onChange(Number(e.target.value))}
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))}
         style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, WebkitAppearance: 'none' }} />
     </div>
   )
@@ -717,41 +717,31 @@ export default function ReplayMap({
 
         {/* Sliders cockpit */}
         {is3D && cockpitMode && (
-          <div style={{ background: 'rgba(5,8,20,0.88)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, width: 160 }}>
-            <style>{`
-              .ct-sl { -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px; outline:none; cursor:pointer; }
-              .ct-sl::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid #050814; }
-              .ct-z { background: linear-gradient(to right, #F5A623 0%, #F5A623 ${zPct}%, rgba(255,255,255,0.12) ${zPct}%); }
-              .ct-z::-webkit-slider-thumb { background: #F5A623; }
-              .ct-p { background: linear-gradient(to right, #22c55e 0%, #22c55e ${pPct}%, rgba(255,255,255,0.12) ${pPct}%); }
-              .ct-p::-webkit-slider-thumb { background: #22c55e; }
-            `}</style>
+          <div style={{ background: 'rgba(5,8,20,0.82)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, width: 160 }}>
 
             {/* Slider altitude (offset zoom) */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: 'rgba(255,255,255,0.5)' }}>ALTITUDE</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>ALTITUDE</span>
                 <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#F5A623' }}>{cockpitZoom > 12 ? '+' : ''}{(cockpitZoom - 12).toFixed(0)}</span>
               </div>
-              <input type="range" className="ct-sl ct-z" min={8} max={16} step={0.5} value={cockpitZoom}
-                onChange={e => { setCockpitZoom(Number(e.target.value)); prevZoom.current = null }} />
+              <SliderRow value={cockpitZoom} min={8} max={16} step={0.5} color="#F5A623" onChange={v => { setCockpitZoom(v); prevZoom.current = null }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.25)' }}>HAUT</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.25)' }}>BAS</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>HAUT</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>BAS</span>
               </div>
             </div>
 
             {/* Slider angle pitch */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: 'rgba(255,255,255,0.5)' }}>ANGLE</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>ANGLE</span>
                 <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#22c55e' }}>{cockpitPitch}°</span>
               </div>
-              <input type="range" className="ct-sl ct-p" min={60} max={85} step={1} value={cockpitPitch}
-                onChange={e => { const p = Number(e.target.value); setCockpitPitch(p); mapObj.current?.easeTo({ pitch: p, duration: 200 }) }} />
+              <SliderRow value={cockpitPitch} min={60} max={85} step={1} color="#22c55e" onChange={v => { setCockpitPitch(v); mapObj.current?.easeTo({ pitch: v, duration: 200 }) }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.25)' }}>OBLIQUE</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.25)' }}>HORIZON</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>OBLIQUE</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>HORIZON</span>
               </div>
             </div>
           </div>

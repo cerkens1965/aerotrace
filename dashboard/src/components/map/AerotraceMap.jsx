@@ -79,6 +79,19 @@ function addOpenAIPLayers(map, activeAirportTypes) {
   map.setFilter('airports-labels', f)
 }
 
+function SliderTrack({ value, max = 30, color, onChange }) {
+  return (
+    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
+      <div style={{ position: 'absolute', width: `${(value / max) * 100}%`, height: 1, background: color, borderRadius: 1 }} />
+      <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
+      <input type="range" min={0} max={max} step={max === ALT_MAX ? 1000 : 1} value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
+    </div>
+  )
+}
+
 export default function AerotraceMap() {
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -180,16 +193,7 @@ export default function AerotraceMap() {
   const triangle = (open) => (
     <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
   )
-  const SliderTrack = ({ value, max = 30, color, onChange }) => (
-    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
-      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
-      <div style={{ position: 'absolute', width: `${(value / max) * 100}%`, height: 1, background: color, borderRadius: 1 }} />
-      <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
-      <input type="range" min={0} max={max} step={max === ALT_MAX ? 1000 : 1} value={value}
-        onChange={e => onChange(Number(e.target.value))}
-        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
-    </div>
-  )
+
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

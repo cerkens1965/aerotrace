@@ -149,17 +149,21 @@ export default function Header({ user, role }) {
               <img
                 src={user.photoURL} alt=""
                 style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)' }}
+                onError={e => {
+                  e.currentTarget.style.display = 'none'
+                  e.currentTarget.nextSibling.style.display = 'flex'
+                }}
               />
-            ) : (
-              <div style={{
-                width: 24, height: 24, borderRadius: '50%',
-                background: AMBER10, border: `1px solid ${AMBER20}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontFamily: 'monospace', fontSize: 10, color: AMBER,
-              }}>
-                {(user.displayName || user.email || '?')[0].toUpperCase()}
-              </div>
-            )}
+            ) : null}
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%',
+              background: AMBER10, border: `1px solid ${AMBER20}`,
+              display: user.photoURL ? 'none' : 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'monospace', fontSize: 10, color: AMBER,
+            }}>
+              {(user.displayName || user.email || '?')[0].toUpperCase()}
+            </div>
             <span style={{
               fontFamily: 'monospace', fontSize: 10,
               color: '#ffffff',
