@@ -115,8 +115,12 @@ export default function App() {
               </RequireRole>
             } />
 
-            {/* DIAG — temporaire */}
-            <Route path="/diag" element={<DiagPage />} />
+            {/* DIAG — temporaire, admin only */}
+            <Route path="/diag" element={
+              <RequireRole user={user} role={role} allowed={['admin']}>
+                <DiagPage />
+              </RequireRole>
+            } />
 
             <Route path="*"         element={<Navigate to="/live" replace />} />
           </Routes>
