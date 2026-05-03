@@ -68,7 +68,7 @@ export default function App() {
           }
         } catch (err) {
           console.error('[App] Failed to fetch user role:', err)
-          setRole('student')
+          setRole('user')
         }
       } else {
         setRole(null)

@@ -60,7 +60,8 @@ The dashboard is a single SPA with three functional surfaces, gated by role from
 
 Auth flow lives entirely in `src/App.jsx`:
 - Firebase `onAuthStateChanged` → fetch `/users/{uid}` → if missing, auto-create with `role: 'user'`.
-- `RequireRole` is the only guard. Note: the default created role is `'user'` but the role *set* used downstream is `student | pilot | instructor | admin`. This mismatch is intentional-but-fragile — bare `'user'` accounts land on `/live` only.
+- `RequireRole` is the only guard. Platform roles: `user | instructor | admin`. Bare `'user'` accounts land on `/live` and `/replay` only.
+- Note: `pilotRole` on flight docs (`student | pilot`) is a **separate** field used only for flight-type derivation — not the same as the platform `role`.
 
 ### Data flow
 
