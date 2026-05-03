@@ -465,6 +465,26 @@ export default function ReplayPage({ user }) {
   const [is3D,         setIs3D]         = useState(false)
   const animRef     = useRef(null)
   const lastTimeRef = useRef(null)
+  const csvAbortRef = useRef(null)   // annule le fetch CSV précédent si l'user change de vol
+
+  const loadCSV = useCallback(async (fl) => {
+    csvAbortRef.current?.abort()
+    csvAbortRef.current = new AbortController()
+    const { signal } = csvAbortRef.current
+    setSelected(fl)
+    setParsed(null)
+    if (!fl.csvUrl) return
+    try {
+      const res  = await fetch(fl.csvUrl, { signal })
+      const text = await res.text()
+      const p    = parseG3XCSV(text)
+      setParsed(p)
+      setCurrentTs(p.frames[0].ts)
+      setPlaying(false)
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error('Load CSV:', e)
+    }
+  }, [])
 
   // ── Charger tous les vols ─────────────────────────────────────────────────
   useEffect(() => {
@@ -492,19 +512,11 @@ export default function ReplayPage({ user }) {
       try {
         const snap = await getDoc(doc(db, 'flights', flightId))
         if (!snap.exists()) return
-        const fl = { id: snap.id, ...snap.data() }
-        setSelected(fl)
-        if (!fl.csvUrl) return
-        const res  = await fetch(fl.csvUrl)
-        const text = await res.text()
-        const p    = parseG3XCSV(text)
-        setParsed(p)
-        setCurrentTs(p.frames[0].ts)
-        setPlaying(false)
+        loadCSV({ id: snap.id, ...snap.data() })
       } catch (e) { console.error('Auto-load flight:', e) }
     }
     autoLoad()
-  }, [flightId])
+  }, [flightId, loadCSV])
 
   // Playback loop
   useEffect(() => {
@@ -590,18 +602,7 @@ export default function ReplayPage({ user }) {
               )}
               {flights.map(f => (
                 <FlightItem key={f.id} flight={f} selected={selected?.id === f.id}
-                  onSelect={async (fl) => {
-                    setSelected(fl)
-                    if (!fl.csvUrl) return
-                    try {
-                      const res  = await fetch(fl.csvUrl)
-                      const text = await res.text()
-                      const p    = parseG3XCSV(text)
-                      setParsed(p)
-                      setCurrentTs(p.frames[0].ts)
-                      setPlaying(false)
-                    } catch(e) { console.error('Load CSV:', e) }
-                  }}
+                  onSelect={loadCSV}
                 />
               ))}
             </div>
