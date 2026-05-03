@@ -333,13 +333,13 @@ function TraceMap({ frames, currentFrame, bounds }) {
 
 // ─── Timeline scrubber ────────────────────────────────────────────────────────
 function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSpeedChange }) {
+  const isDragging = useRef(false)
+
   if (!frames || frames.length === 0) return null
   const startTs = frames[0].ts
   const endTs   = frames[frames.length-1].ts
   const total   = endTs - startTs
   const progress = ((currentTs - startTs) / total) * 100
-
-  const isDragging = useRef(false)
   const seek = (e, currentTarget) => {
     const rect = (currentTarget || e.currentTarget).getBoundingClientRect()
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
