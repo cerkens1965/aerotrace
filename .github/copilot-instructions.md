@@ -205,58 +205,80 @@ Trail colors: GROUND=#fff, CRUISE=#22c55e, MANEUVER=#f97316, APPROACH=#F5A623, C
 
 ## ReplayMap — Architecture 3D Cockpit (CRITIQUE)
 
-### Altitude caméra — calcul correct
+### Approche hybride (MapLibre v5)
+
+La caméra cockpit utilise une **approche hybride** :
+1. `calculateCameraOptionsFromCameraLngLatAltRotation` → fournit le `center` géométriquement correct (point de visée terrain)
+2. Le `zoom` retourné par l'API est **ignoré** et remplacé par une formule basée sur l'AGL réel
+
+**Pourquoi ?** L'API native calcule le zoom à partir de la *distance caméra-centre* (≈ 3.24×AGL à pitch=72°), pas de l'altitude. Résultat : terrain 3.25× trop petit visuellement. La formule AGL reproduit la perception pilote.
+
 ```javascript
-// AGL vrai = AltGPS MSL − élévation terrain DEM
-const altGpsM   = frame.altGps * 0.3048          // ft → mètres MSL
-const terrainM  = map.queryTerrainElevation([lon, lat]) ?? 0  // mètres MSL
-const trueAglM  = altGpsM - terrainM             // vrai AGL en mètres
-const aglM      = phase === 'GROUND' ? 4 : Math.max(20, trueAglM)
+// 1. Calcul center via API native
+const camOpts = map.calculateCameraOptionsFromCameraLngLatAltRotation(
+  [lon, lat],          // position avion
+  Math.max(1, altGpsM),// altitude caméra MSL en mètres
+  bearing,             // cap lissé
+  cockpitPitch,        // pitch (72° par défaut)
+  0                    // roll
+)
+
+// 2. Zoom AGL-based (remplace camOpts.zoom)
+const rawZoom    = Math.log2(1638400 / aglM) + zoomOffset  // zoomOffset par défaut = 1.0
+const targetZoom = Math.max(8, Math.min(18, rawZoom))
+const newZoom    = prevZoom + (targetZoom - prevZoom) * 0.15  // lerp 15%
+
+map.easeTo({ ...camOpts, zoom: newZoom, duration: dur, easing: t => t })
 ```
 
-**JAMAIS** utiliser `frame.agl` directement (souvent null/0 en vol).
-**JAMAIS** utiliser `AltInd` (baro QNH) pour la caméra → erreurs terrain.
+### Altitude AGL — calcul correct
+```javascript
+const altGpsM  = frame.altGps * 0.3048          // ft MSL → mètres MSL
+const terrainH = map.queryTerrainElevation([lon, lat]) ?? null  // null si tuiles pas encore chargées
+
+if (terrainH !== null) {
+  const rawAgl = altGpsM - terrainH
+  const target = (onGround || rawAgl < 20) ? 4 : Math.max(20, rawAgl)
+  if (smoothAgl.current === null) {
+    smoothAgl.current = target   // première init uniquement depuis données DEM réelles
+  } else {
+    smoothAgl.current += (target - smoothAgl.current) * alpha  // EMA
+  }
+}
+const aglM = smoothAgl.current ?? Math.max(20, altGpsM * 0.5)  // fallback rough, n'alimente pas smoothAgl
+```
+
+**JAMAIS** utiliser `frame.agl` (souvent null/0 en G3X).
+**JAMAIS** utiliser `AltInd` (baro QNH) pour la caméra.
+**JAMAIS** initialiser `smoothAgl` depuis une estimation (altGpsM×0.5) — le vrai terrain peut différer de centaines de mètres, causant un snap quand les tuiles DEM se chargent.
 `exaggeration: 1.0` OBLIGATOIRE — avec 1.5x le terrain visuel > terrain DEM → caméra dans le sol.
 
 ### Bearing caméra — lissage adaptatif
 ```javascript
-// Détection virage : comparer 3 dernières frames
-const isTurning = deltaLastFrames > 1.5°
+// Pré-filtre EMA (α=0.5) sur bearing brut GPS
+brgEmaRef.current += diff(rawBrg, brgEmaRef.current) * 0.5
 
-// En croisière : buffer 8 frames, dead zone 3°, lerp 20%
+// Buffer circulaire 8 frames → moyenne circulaire (évite aliasing 359°→1°)
+const isTurning = |delta des 3 dernières frames| > 1.5°
+
+// En croisière : buffer 8 frames, dead zone 2°, lerp 25%
 // En virage    : buffer 3 frames, dead zone 0.5°, lerp 50%
-```
-
-### Zoom caméra
-```javascript
-function aglToZoom(aglM, offsetSlider = 12) {
-  const z = Math.log2(1638400 / Math.max(2, aglM))
-  return Math.max(8, Math.min(18, z + (offsetSlider - 12) * 0.5))
-}
-// Seuil 5% : ne change pas si variation < 5%
-// Lerp 15% vers la cible
+// Normalisation finale : ((bearing % 360) + 360) % 360
 ```
 
 ### Anti-snapback (CRITIQUE)
 ```javascript
 // duration DOIT être < intervalle entre frames, sinon MapLibre rebondit
 const frameInterval = 1000 / speed       // ms entre frames
-const dur = Math.max(16, frameInterval * 0.75)
+const dur = Math.max(16, frameInterval * 0.85)
 map.easeTo({ ..., duration: dur, easing: t => t })  // linéaire = pas de rebond
 ```
 
 ### Pre-caching tuiles terrain
-Avant le replay 3D, survoler silencieusement 25 points clés via `map.jumpTo()` pour charger les tuiles DEM en cache. Déclenché 1.5s après activation 3D.
+Avant le replay 3D, survoler silencieusement 25 points clés via `map.jumpTo(zoom=12)` pour charger les tuiles DEM en cache. Déclenché au montage (is3D=true) et 1.5s après activation 3D.
 
-### Centre caméra (vue cockpit)
-```javascript
-// Centre MapLibre = point devant l'avion, pas la position de l'avion
-const pitchRad = cockpitPitch * Math.PI / 180
-const aheadKm  = Math.max(0.01, aglM * Math.tan(pitchRad) / 1000)
-const center   = getAheadPoint(lon, lat, bearing, aheadKm)
-// Géométrie : œil à altitude aglM, regarde vers le bas à angle (90°-pitch)
-// → center est sur le terrain dans l'axe du cap
-```
+### Slider VIEW (zoomOffset)
+Exposé dans le panneau cockpit. Default=1.0, range=-2 (wide-angle) to +3 (telephoto). Changer `zoomOffset` remet `prevZoom.current = null` pour éviter un zoom-snap.
 
 ---
 
@@ -276,9 +298,9 @@ DANGER: ['in', ['get', 'type'], ['literal', ['danger', 'restricted', 'prohibited
 
 ```javascript
 // Always via Node proxy — never direct from browser
-fetch('http://localhost:3001/safesky/traffic?lat=50.5686&lon=4.4347')
+fetch('http://localhost:3001/safesky/traffic?lat=50.9014&lon=4.4844')
 // Returns SafeSky nearby aircraft array
-// Center: EBBY (50.5686, 4.4347)
+// Center: EBBR Brussels Airport (50.9014, 4.4844) — covers Belgium/NL/LUX traffic
 // Sandbox API key: sk_test_d74f45601570557f758c67a147ba32fe3181944c9241a2b9
 ```
 
@@ -369,6 +391,17 @@ Git base saine : commit `facef2e`
 
 ---
 
+## Language — MANDATORY
+
+**All UI text must be in English UK.** This applies to every surface:
+- Web dashboard (all pages: LivePage, EnVolPage, ReplayPage, AdminPage, LogbookPage)
+- T-RGB 2.8" cockpit display
+- Labels, buttons, status messages, error messages, tooltips
+
+No French words anywhere in user-facing strings. Use British spellings where relevant (e.g. "Colour" not "Color", "Licence" not "License").
+
+---
+
 ## Do Not
 
 - ❌ Never use gray/low-opacity text on dark backgrounds → use #ffffff
@@ -385,3 +418,6 @@ Git base saine : commit `facef2e`
 - ❌ Never use `frame.hdg` brut pour la caméra → toujours `frame.bearing`
 - ❌ Never define SliderRow/SliderTrack inside a component → drag broken
 - ❌ Never put onClick only on label span for layer toggle → use parent div
+- ❌ Never use the `zoom` returned by `calculateCameraOptionsFromCameraLngLatAltRotation` at pitch > 60° → 1.7 levels too low (uses camera-to-center distance, not altitude); override with `log2(1638400/aglM) + zoomOffset`
+- ❌ Never initialise `smoothAgl` from an estimated altitude (e.g. `altGpsM * 0.5`) — only initialise from real `queryTerrainElevation` data; premature init causes a visible snap when DEM tiles load
+- ❌ Never pass 3D coordinates `[lon, lat, altM]` to trace GeoJSON source lines — when altGps=0 the line goes underground and breaks satellite 3D rendering; use `[lon, lat]` only

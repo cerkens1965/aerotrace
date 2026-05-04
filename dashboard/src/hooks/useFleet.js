@@ -61,7 +61,7 @@ export default function useFleet(clubId) {
   const fetchSafeSky = useCallback(async () => {
     try {
       // Centre Brussels par défaut — idéalement centré sur la flotte connue
-      const res = await fetch('http://localhost:3001/safesky/traffic?lat=50.5686&lon=4.4347')
+      const res = await fetch('http://localhost:3001/safesky/traffic?lat=50.9014&lon=4.4844')
       if (!res.ok) throw new Error(`SafeSky proxy ${res.status}`)
       const data = await res.json()
       // Le proxy renvoie { nearby_traffic: [...] } — pas un array brut

@@ -5,7 +5,7 @@ import useSafeSky from '../../hooks/useSafeSky'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
-const CENTER = { lat: 50.5686, lon: 4.4347 }
+const CENTER = { lat: 50.9014, lon: 4.4844 }
 const ALT_MAX = 35000
 
 const BASEMAPS = [
@@ -161,14 +161,19 @@ export default function AerotraceMap() {
     Object.values(markersRef.current).forEach(m => m.remove())
     markersRef.current = {}
     if (!visible.traffic) return
+    const isDark = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
+    const labelBg   = isDark ? 'rgba(0,0,0,0.72)'          : 'rgba(255,255,255,0.65)'
+    const labelBdr  = isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)'
+    const labelClr  = isDark ? '#fff'                       : '#111'
+    const iconFilter = isDark ? 'invert(1)'                 : 'none'
     filteredTraffic.forEach(ac => {
       const el = document.createElement('div')
       el.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
-          <img src="/icons/VL3.svg" style="width:32px;height:32px;transform:rotate(${ac.course || 0}deg);transform-origin:center center;" />
-          <div style="margin-top:2px;background:rgba(255,255,255,0.65);border:1px solid rgba(0,0,0,0.5);border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;">
-            <div style="font-size:10px;font-weight:700;color:#111;">${ac.call_sign || ac.id}</div>
-            <div style="font-size:9px;font-weight:400;color:#111;">${ac.altitude || 0} ft</div>
+          <img src="/icons/VL3.svg" style="width:32px;height:32px;transform:rotate(${ac.course || 0}deg);transform-origin:center center;filter:${iconFilter};" />
+          <div style="margin-top:2px;background:${labelBg};border:${labelBdr};border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;">
+            <div style="font-size:10px;font-weight:700;color:${labelClr};">${ac.call_sign || ac.id}</div>
+            <div style="font-size:9px;font-weight:400;color:${labelClr};">${ac.altitude || 0} ft</div>
           </div>
         </div>`
       const marker = new maplibregl.Marker({ element: el })
@@ -185,7 +190,7 @@ export default function AerotraceMap() {
         .addTo(map.current)
       markersRef.current[ac.id] = marker
     })
-  }, [filteredTraffic, visible.traffic])
+  }, [filteredTraffic, visible.traffic, activeBasemap])
 
   const panel = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
   const titleStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }

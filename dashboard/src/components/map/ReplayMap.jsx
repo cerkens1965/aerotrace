@@ -82,14 +82,6 @@ function circularMean(bearings) {
   return ((Math.atan2(s, c) * 180 / Math.PI) + 360) % 360
 }
 
-/** Zoom MapLibre depuis altitude AGL en mètres */
-function aglToZoom(aglM, offsetSlider = 12) {
-  const m   = Math.max(2, aglM)
-  const z   = Math.log2(1638400 / m)
-  const off = (offsetSlider - 12) * 0.5
-  return Math.max(8, Math.min(18, z + off))
-}
-
 // ─── MAPLIBRE HELPERS ────────────────────────────────────────────────────────
 
 function getAirportFilter(active) {
@@ -275,14 +267,15 @@ export default function ReplayMap({
 
   // Smoothing refs (pas de state = pas de re-render React inutile)
   const hdgBufRef  = useRef([])   // buffer caps pour moyenne circulaire
-  const smoothAgl  = useRef(null) // AGL lissé EMA
-  const prevBrg    = useRef(null) // bearing précédent
-  const prevZoom   = useRef(null) // zoom précédent
+  const smoothAgl  = useRef(null) // AGL lissé EMA — initialisé seulement quand DEM chargé
+  const prevBrg    = useRef(null) // bearing caméra précédent (lissé)
+  const prevZoom   = useRef(null) // zoom précédent (lissé)
+  const brgEmaRef  = useRef(null) // pré-filtre EMA sur bearing brut GPS
 
   // UI state
   const [cockpitMode,  setCockpitMode]  = useState(true)
-  const [cockpitZoom,  setCockpitZoom]  = useState(12)  // offset slider
-  const [cockpitPitch, setCockpitPitch] = useState(72)  // degrés
+  const [zoomOffset,   setZoomOffset]   = useState(1.0) // zoom visual offset (-2 wide → +3 close)
+  const [cockpitPitch, setCockpitPitch] = useState(72)  // degrees
   const [activeBasemap,  setActiveBasemap]  = useState('outdoor-v2')
   const [visible,        setVisible]        = useState({ ctr: true, tma: true, danger: true, airports: true })
   const [opacity,        setOpacity]        = useState({ ctr: 3, tma: 0, danger: 0 })
@@ -340,8 +333,7 @@ export default function ReplayMap({
       addTraceLayers(map)
       _updateGhostTrace(map, frames)
       if (is3D) {
-        // Pre-cache les tuiles terrain avant de jouer
-        preCacheTiles(map, frames, Math.round(aglToZoom(500, cockpitZoom)))
+        preCacheTiles(map, frames, 12)
       } else {
         _fitBounds(map, frames)
       }
@@ -356,6 +348,7 @@ export default function ReplayMap({
     // Reset smoothing à chaque changement de mode
     hdgBufRef.current = []; smoothAgl.current = null
     prevBrg.current   = null; prevZoom.current = null
+    brgEmaRef.current = null
 
     const applyMode = () => {
       if (is3D) {
@@ -368,7 +361,7 @@ export default function ReplayMap({
         // Pre-cache les tuiles de la route
         const allFrames = framesRef.current
         if (allFrames?.length) {
-          setTimeout(() => preCacheTiles(map, allFrames, Math.round(aglToZoom(500, cockpitZoom))), 1500)
+          setTimeout(() => preCacheTiles(map, allFrames, 12), 1500)
         }
         // Masquer le marker en cockpit, afficher en free
         if (markerRef.current?.getElement()) {
@@ -480,7 +473,7 @@ export default function ReplayMap({
       }
       // Marker : toujours mis à jour (même en pause)
       if (markerRef.current) {
-        markerRef.current.setLngLat([lon, lat]).setRotation(hdg)
+        markerRef.current.setLngLat([lon, lat]).setRotation(bearing ?? hdg)
         if (!markerRef.current._map) markerRef.current.addTo(map)
         markerRef.current.getElement().style.display = ''
       }
@@ -490,78 +483,81 @@ export default function ReplayMap({
     // ════════════════════════════════════════════════════════════════
     } else if (cockpitMode) {
 
-      // 1. Vrai AGL = AltGPS(m MSL) − terrain(m MSL)
-      //    queryTerrainElevation avec exaggeration=1.0 retourne les mètres réels
-      const altGpsM    = ((altGps ?? altInd ?? 1000) * 0.3048)
-      const terrainM   = map.queryTerrainElevation?.([lon, lat]) ?? 0
-      const rawAglM    = altGpsM - terrainM
-      const onGround   = phase === 'GROUND' || rawAglM < 20
-      const targetAglM = onGround ? 4 : Math.max(20, rawAglM)
+      // ── 1. Altitude MSL de l'œil pilote ─────────────────────────────────────
+      const altGpsM = (altGps ?? altInd ?? 1000) * 0.3048
 
-      // 2. Lissage AGL (EMA α=0.1) — lent, évite sauts altimètre ±5ft
-      if (smoothAgl.current === null) smoothAgl.current = targetAglM
-      const alpha = onGround ? 0.6 : 0.10           // très lent en croisière
-      smoothAgl.current += (targetAglM - smoothAgl.current) * alpha
-      const aglM = smoothAgl.current
+      // ── 2. AGL lissé — terrain null guard ───────────────────────────────────
+      // queryTerrainElevation retourne null si les tuiles DEM ne sont pas encore chargées.
+      // On n'initialise smoothAgl QUE quand on a des données terrain réelles pour éviter
+      // le snap brutal à l'arrivée des tuiles.
+      const terrainH  = map.queryTerrainElevation?.([lon, lat]) ?? null
+      const onGround  = phase === 'GROUND'
+      if (terrainH !== null) {
+        const rawAgl = altGpsM - terrainH
+        const target = (onGround || rawAgl < 20) ? 4 : Math.max(20, rawAgl)
+        if (smoothAgl.current === null) {
+          smoothAgl.current = target
+        } else {
+          const alpha = Math.abs(target - smoothAgl.current) > 100 ? 0.18 : 0.10
+          smoothAgl.current += (target - smoothAgl.current) * alpha
+        }
+      }
+      // Fallback si tuiles pas encore chargées : estimation à 50% de l'altitude GPS.
+      // Reste stable si smoothAgl est déjà initialisé (terrainH temporairement absent).
+      const aglM = smoothAgl.current ?? Math.max(20, altGpsM * 0.5)
 
-      // 3. Bearing = TRK (GPS vrai) ou HDG+MagVar
+      // ── 3. Bearing : TRK GPS prioritaire, HDG en fallback ───────────────────
       const rawBrg = bearing ?? hdg
 
-      // 4. Lissage bearing adaptatif :
-      //    - En croisière (cap stable) : buffer 8 frames + dead zone 3° + lerp 20%
-      //    - En virage (cap change > 1°/frame) : buffer 3 frames + dead zone 0° + lerp 50%
+      if (brgEmaRef.current === null) brgEmaRef.current = rawBrg
+      const emaDiff = (((rawBrg - brgEmaRef.current + 540) % 360) - 180)
+      brgEmaRef.current = ((brgEmaRef.current + emaDiff * 0.5 + 360) % 360)
+
       const buf = hdgBufRef.current
-      buf.push(rawBrg)
+      buf.push(brgEmaRef.current)
       if (buf.length > 8) buf.shift()
 
-      // Détecter si on vire : comparer les 3 dernières valeurs brutes
-      const recentBuf = buf.slice(-3)
+      const recentBuf   = buf.slice(-3)
       const recentDelta = recentBuf.length >= 2
-        ? Math.abs(((recentBuf[recentBuf.length-1] - recentBuf[0] + 540) % 360) - 180)
+        ? Math.abs((((recentBuf[recentBuf.length - 1] - recentBuf[0] + 540) % 360) - 180))
         : 0
-      const isTurning = recentDelta > 1.5   // > 1.5° en 3s = virage réel
+      const isTurning = recentDelta > 1.5
 
-      const meanBrg = isTurning
-        ? circularMean(buf.slice(-3))        // en virage : moyenne 3 frames seulement
-        : circularMean(buf)                  // stable : moyenne 8 frames
-
+      const meanBrg = isTurning ? circularMean(buf.slice(-3)) : circularMean(buf)
       const prev    = prevBrg.current ?? meanBrg
-      const delta   = Math.abs(((meanBrg - prev + 540) % 360) - 180)
-      const deadZone = isTurning ? 0.5 : 3.0
-      const lerpFactor = isTurning ? 0.5 : 0.20
-      const newBrg  = delta < deadZone
+      const delta   = Math.abs((((meanBrg - prev + 540) % 360) - 180))
+
+      const deadZone   = isTurning ? 0.5 : 2.0
+      const lerpFactor = isTurning ? 0.50 : 0.25
+      const newBrg = delta < deadZone
         ? prev
         : prev + (((meanBrg - prev + 540) % 360) - 180) * lerpFactor
-      prevBrg.current = newBrg
+      prevBrg.current = ((newBrg % 360) + 360) % 360
 
-      // 5. Zoom lissé (seuil 5% strict — ne bouge pas si AGL stable)
-      const targetZoom = aglToZoom(aglM, cockpitZoom)
+      // ── 4. Caméra hybride ────────────────────────────────────────────────────
+      // L'API calcule le CENTER correct (point de regard pour la position pilote + pitch).
+      // On OVERRIDES le zoom avec log2(C/AGL) : cette échelle correspond exactement
+      // à ce que perçoit visuellement un pilote à cette altitude AGL.
+      // L'API pure retourne un zoom 1.7 niveaux trop bas (terrain 3× trop petit).
+      const camOpts = map.calculateCameraOptionsFromCameraLngLatAltRotation(
+        [lon, lat],
+        Math.max(1, altGpsM),
+        prevBrg.current,
+        cockpitPitch,
+        0
+      )
+
+      const rawZoom    = Math.log2(1638400 / aglM) + zoomOffset
+      const targetZoom = Math.max(8, Math.min(18, rawZoom))
       const pz         = prevZoom.current ?? targetZoom
-      const zDelta     = Math.abs(targetZoom - pz) / Math.max(0.5, Math.abs(pz))
-      const newZoom    = zDelta < 0.05              // seuil 5%
-        ? pz
-        : pz + (targetZoom - pz) * 0.15            // lerp 15% (très lent)
+      const newZoom    = Math.abs(targetZoom - pz) < 0.05 ? pz : pz + (targetZoom - pz) * 0.15
       prevZoom.current = newZoom
 
-      // 6. Centre = point devant l'avion (œil pilote)
-      const pitchRad = cockpitPitch * Math.PI / 180
-      const aheadKm  = Math.max(0.01, Math.min(15, aglM * Math.tan(pitchRad) / 1000))
-      const center   = getAheadPoint(lon, lat, newBrg, aheadKm)
+      // ── 5. Animation ─────────────────────────────────────────────────────────
+      const frameInterval = 1000 / speed
+      const dur = Math.max(16, frameInterval * 0.85)
+      map.easeTo({ ...camOpts, zoom: newZoom, duration: dur, easing: t => t })
 
-      // 7. Animation — CRITIQUE : duration < intervalle entre frames (1000/speed)
-      //    Si trop long → MapLibre interrompt l'animation → snapback → effet yo-yo
-      const frameInterval = 1000 / speed           // ms entre deux frames
-      const dur = Math.max(16, frameInterval * 0.75) // 75% de l'intervalle max
-      map.easeTo({
-        center,
-        bearing:  newBrg,
-        pitch:    cockpitPitch,
-        zoom:     newZoom,
-        duration: dur,
-        easing:   t => t,                           // linéaire = pas de rebond
-      })
-
-      // Marker caché (on est dans le cockpit)
       if (markerRef.current?.getElement()) markerRef.current.getElement().style.display = 'none'
 
     // ════════════════════════════════════════════════════════════════
@@ -609,12 +605,9 @@ export default function ReplayMap({
     const traceSrc = map.getSource('played-trace')
     if (traceSrc) traceSrc.setData({ type: 'FeatureCollection', features })
 
-  }, [currentFrame, frames, is3D, isPlaying, cockpitMode, cockpitZoom, cockpitPitch, speed])
+  }, [currentFrame, frames, is3D, isPlaying, cockpitMode, zoomOffset, cockpitPitch, speed])
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
-
-  const zPct = ((cockpitZoom - 8) / 8) * 100
-  const pPct = ((cockpitPitch - 60) / 25) * 100
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -703,6 +696,7 @@ export default function ReplayMap({
             // Reset smoothing au switch
             hdgBufRef.current = []; smoothAgl.current = null
             prevBrg.current   = null; prevZoom.current = null
+            brgEmaRef.current = null
           }} style={{
             background:    cockpitMode ? '#F5A623' : 'rgba(5,8,20,0.85)',
             color:         cockpitMode ? '#050814' : '#fff',
@@ -719,16 +713,16 @@ export default function ReplayMap({
         {is3D && cockpitMode && (
           <div style={{ background: 'rgba(5,8,20,0.82)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, width: 160 }}>
 
-            {/* Slider altitude (offset zoom) */}
+            {/* Slider zoom visuel : 0 = échelle terrain = altitude AGL réelle */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>ALTITUDE</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#F5A623' }}>{cockpitZoom > 12 ? '+' : ''}{(cockpitZoom - 12).toFixed(0)}</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>VIEW</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#F5A623' }}>{zoomOffset > 0 ? '+' : ''}{zoomOffset.toFixed(2)}</span>
               </div>
-              <SliderRow value={cockpitZoom} min={8} max={16} step={0.5} color="#F5A623" onChange={v => { setCockpitZoom(v); prevZoom.current = null }} />
+              <SliderRow value={zoomOffset} min={-2} max={3} step={0.25} color="#F5A623" onChange={v => { setZoomOffset(v); prevZoom.current = null }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>HAUT</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>BAS</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>WIDE</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>CLOSE</span>
               </div>
             </div>
 
@@ -738,7 +732,7 @@ export default function ReplayMap({
                 <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>ANGLE</span>
                 <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#22c55e' }}>{cockpitPitch}°</span>
               </div>
-              <SliderRow value={cockpitPitch} min={60} max={85} step={1} color="#22c55e" onChange={v => { setCockpitPitch(v); mapObj.current?.easeTo({ pitch: v, duration: 200 }) }} />
+              <SliderRow value={cockpitPitch} min={60} max={85} step={1} color="#22c55e" onChange={v => setCockpitPitch(v)} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
                 <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>OBLIQUE</span>
                 <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>HORIZON</span>

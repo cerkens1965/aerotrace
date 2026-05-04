@@ -97,6 +97,10 @@ The 2D/3D toggle is rendered in `ReplayPage.jsx` (overlaid on the map), **not** 
 
 The aircraft marker is `/icons/VL3.svg` injected as an HTML `<img>` element wrapped in `maplibregl.Marker({ element })` — MapLibre's `map.loadImage()` does not support SVG via WebGL.
 
+## Language — MANDATORY
+
+**All UI text must be in English UK.** No French anywhere in user-facing strings — web dashboard pages, labels, buttons, status messages, and T-RGB cockpit display. British spellings apply (e.g. "Licence", "Colour").
+
 ## Critical conventions (read copilot-instructions.md before changing any of these)
 
 These are the failure modes that have already cost time. The detailed rationale is in `../.github/copilot-instructions.md`; the short version:
@@ -109,7 +113,14 @@ These are the failure modes that have already cost time. The detailed rationale 
 
 **OpenAIP filters use string types**, not integers: `['==', ['get', 'type'], 'ctr']`, `['in', ['get', 'type'], ['literal', ['tma','cta']]]`. Airport key is `icao_code`, not `icaoCode`.
 
-**3D camera math (ReplayMap).** Use `AltGPS - queryTerrainElevation()` for true AGL — never `frame.agl` (often null/0 from G3X), never `AltInd` (baro). Terrain `exaggeration` must stay at `1.0` or the camera goes through the ground. `easeTo` duration must be `< frameInterval` (use `frameInterval * 0.75` with linear easing) or MapLibre snaps back. Pre-cache 25 DEM tiles via silent `jumpTo` before starting 3D replay.
+**3D camera math (ReplayMap) — hybrid approach.** Use `calculateCameraOptionsFromCameraLngLatAltRotation([lon,lat], altMSL_m, bearing, pitch, 0)` (MapLibre v5 native API) for the geometrically correct `center` look-at point, but **always override its `zoom`** with `Math.log2(1638400 / aglM) + zoomOffset`. Reason: the native API computes zoom from camera-to-center *distance* (≈ 3.24×AGL at pitch=72°), which places terrain 3.25× too small visually. AGL-based zoom matches pilot perception.
+
+- Never use `frame.agl` (often null/0 in G3X). Never use `AltInd` (baro). Always `AltGPS_ft × 0.3048 − queryTerrainElevation()`.
+- `smoothAgl.current` must stay `null` until `queryTerrainElevation` returns a non-null value — initialising from estimated altitude causes a snap when DEM tiles first load.
+- Terrain `exaggeration` must stay at `1.0` or the camera goes through the ground.
+- `easeTo` duration must be `< frameInterval` (use `frameInterval * 0.85` with linear easing) or MapLibre snaps back.
+- Pre-cache 25 DEM tiles via silent `jumpTo` (zoom=12) before starting 3D replay.
+- `zoomOffset` slider: default `1.0`, range `−2` (wide) to `+3` (close). Resetting it clears `prevZoom.current` to avoid a zoom snap.
 
 **SafeSky never from the browser.** Always go through `localhost:3001`. The proxy does the HMAC signing.
 
