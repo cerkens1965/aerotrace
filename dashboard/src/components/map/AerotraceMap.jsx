@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import useSafeSky from '../../hooks/useSafeSky'
+import { AtCoreMarkerLayer } from '../live/AtCoreMarkerLayer'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
@@ -103,6 +104,7 @@ export default function AerotraceMap() {
   const [activeAirports, setActiveAirports] = useState(['fixed'])
   const [altRange, setAltRange] = useState([0, ALT_MAX])
   const [panelOpen, setPanelOpen] = useState({ layers: true, map: false })
+  const [mapReady, setMapReady] = useState(false)
 
   const filteredTraffic = traffic.filter(ac => {
     const alt = ac.altitude || 0
@@ -152,7 +154,7 @@ export default function AerotraceMap() {
       zoom: 9,
     })
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right')
-    map.current.on('load', () => addOpenAIPLayers(map.current, activeAirports))
+    map.current.on('load', () => { addOpenAIPLayers(map.current, activeAirports); setMapReady(true) })
     return () => { map.current?.remove(); map.current = null }
   }, [])
 
@@ -203,6 +205,7 @@ export default function AerotraceMap() {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+      {mapReady && <AtCoreMarkerLayer map={map.current} />}
 
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10, minWidth: 172 }}>
 

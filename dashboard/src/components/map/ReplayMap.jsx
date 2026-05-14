@@ -159,14 +159,6 @@ function applyFog(map) {
       'star-intensity': 0.0,
     })
   } catch (_) {}
-  try {
-    if (map.getLayer('sky')) map.removeLayer('sky')
-    map.addLayer({ id: 'sky', type: 'sky', paint: {
-      'sky-type': 'atmosphere',
-      'sky-atmosphere-sun': [0, 60],
-      'sky-atmosphere-sun-intensity': 8,
-    }})
-  } catch (_) {}
 }
 
 /**
