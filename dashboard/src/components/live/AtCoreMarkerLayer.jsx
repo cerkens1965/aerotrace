@@ -2,35 +2,36 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import { useAtCorePositions } from '../../hooks/useAtCorePositions';
 
+// CSS filter that turns the black VL3.svg icon to #ef4444 (red)
+const RED_FILTER = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)';
+
 const MODE = {
-  0: { color: '#ffffff', label: 'GROUND'   },
-  1: { color: '#22c55e', label: 'CRUISE'   },
-  2: { color: '#f97316', label: 'MANEUVER' },
-  3: { color: '#F5A623', label: 'APPROACH' },
-  4: { color: '#ef4444', label: 'CRITICAL' },
+  0: { label: 'GROUND'   },
+  1: { label: 'CRUISE'   },
+  2: { label: 'MANEUVER' },
+  3: { label: 'APPROACH' },
+  4: { label: 'CRITICAL' },
 };
 const modeOf = (m) => MODE[m] ?? MODE[0];
 
-const planeSVG = (color, hdg) => `<svg viewBox="0 0 24 24" width="30" height="30" style="transform:rotate(${hdg}deg);display:block;filter:drop-shadow(0 2px 5px rgba(0,0,0,.9))"><path fill="${color}" d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
-
 function popupHTML(pos) {
-  const { color, label } = modeOf(pos.mode);
+  const { label } = modeOf(pos.mode);
   const coColor = (pos.co_ppm ?? 0) > 20 ? '#ef4444' : '#ffffff';
-  return `<div style="background:#0d0d0d;border:1px solid ${color};border-radius:8px;padding:10px 14px;min-width:170px;font-family:monospace;font-size:11px;color:#fff;line-height:1.9;"><div style="color:${color};font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:6px;">✈ ${pos.aircraft_ident ?? pos.icao24 ?? 'AT-CORE'}</div><div><span style="color:rgba(255,255,255,.45)">MODE </span><span style="color:${color};font-weight:700">${label}</span></div><div><span style="color:rgba(255,255,255,.45)">ALT  </span>${pos.alt_m ?? 0} m</div><div><span style="color:rgba(255,255,255,.45)">SPD  </span>${pos.spd_kt ?? 0} kt</div><div><span style="color:rgba(255,255,255,.45)">HDG  </span>${pos.hdg ?? 0}°</div><div><span style="color:rgba(255,255,255,.45)">RPM  </span>${pos.rpm ?? 0}</div><div><span style="color:rgba(255,255,255,.45)">CO   </span><span style="color:${coColor}">${pos.co_ppm ?? 0} ppm</span></div></div>`;
+  return `<div style="background:#0d0d0d;border:1px solid #ef4444;border-radius:8px;padding:10px 14px;min-width:170px;font-family:monospace;font-size:11px;color:#fff;line-height:1.9;"><div style="color:#ef4444;font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:6px;">✈ ${pos.aircraft_ident ?? pos.icao24 ?? 'AT-CORE'}</div><div><span style="color:rgba(255,255,255,.45)">MODE </span><span style="color:#ef4444;font-weight:700">${label}</span></div><div><span style="color:rgba(255,255,255,.45)">ALT  </span>${pos.alt_m ?? 0} m</div><div><span style="color:rgba(255,255,255,.45)">SPD  </span>${pos.spd_kt ?? 0} kt</div><div><span style="color:rgba(255,255,255,.45)">HDG  </span>${pos.hdg ?? 0}°</div><div><span style="color:rgba(255,255,255,.45)">RPM  </span>${pos.rpm ?? 0}</div><div><span style="color:rgba(255,255,255,.45)">CO   </span><span style="color:${coColor}">${pos.co_ppm ?? 0} ppm</span></div></div>`;
 }
 
 function makeElement(pos) {
-  const { color } = modeOf(pos.mode);
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;user-select:none;';
-  const icon = document.createElement('div');
-  icon.className = 'atcore-icon';
-  icon.innerHTML = planeSVG(color, pos.hdg ?? 0);
+  const img = document.createElement('img');
+  img.className = 'atcore-icon';
+  img.src = '/icons/VL3.svg';
+  img.style.cssText = `width:32px;height:32px;transform:rotate(${pos.hdg ?? 0}deg);transform-origin:center center;filter:${RED_FILTER};`;
   const label = document.createElement('div');
   label.className = 'atcore-label';
   label.textContent = pos.aircraft_ident ?? pos.icao24 ?? '';
-  label.style.cssText = `color:${color};font-size:10px;font-weight:700;letter-spacing:.5px;text-shadow:0 1px 4px rgba(0,0,0,.95);margin-top:1px;white-space:nowrap;font-family:monospace;`;
-  wrap.appendChild(icon);
+  label.style.cssText = 'color:#ef4444;font-size:10px;font-weight:700;letter-spacing:.5px;text-shadow:0 1px 4px rgba(0,0,0,.95);margin-top:2px;white-space:nowrap;font-family:monospace;';
+  wrap.appendChild(img);
   wrap.appendChild(label);
   return wrap;
 }
@@ -50,10 +51,8 @@ export function AtCoreMarkerLayer({ map }) {
       if (existing) {
         const { marker, popup, iconEl, labelEl } = existing;
         marker.setLngLat([pos.lon, pos.lat]);
-        const { color } = modeOf(pos.mode);
-        iconEl.innerHTML = planeSVG(color, pos.hdg ?? 0);
+        iconEl.style.transform = `rotate(${pos.hdg ?? 0}deg)`;
         labelEl.textContent = pos.aircraft_ident ?? pos.icao24 ?? '';
-        labelEl.style.color = color;
         popup.setHTML(popupHTML(pos));
       } else {
         const el = makeElement(pos);
