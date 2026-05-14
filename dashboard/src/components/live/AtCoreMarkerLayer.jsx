@@ -16,7 +16,7 @@ const planeSVG = (color, hdg) => `<svg viewBox="0 0 24 24" width="30" height="30
 function popupHTML(pos) {
   const { color, label } = modeOf(pos.mode);
   const coColor = (pos.co_ppm ?? 0) > 20 ? '#ef4444' : '#ffffff';
-  return `<div style="background:#0d0d0d;border:1px solid ${color};border-radius:8px;padding:10px 14px;min-width:170px;font-family:monospace;font-size:11px;color:#fff;line-height:1.9;"><div style="color:${color};font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:6px;">✈ ${pos.flight_id ?? pos.icao24 ?? 'AT-CORE'}</div><div><span style="color:rgba(255,255,255,.45)">MODE </span><span style="color:${color};font-weight:700">${label}</span></div><div><span style="color:rgba(255,255,255,.45)">ALT  </span>${pos.alt_m ?? 0} m</div><div><span style="color:rgba(255,255,255,.45)">SPD  </span>${pos.spd_kt ?? 0} kt</div><div><span style="color:rgba(255,255,255,.45)">HDG  </span>${pos.hdg ?? 0}°</div><div><span style="color:rgba(255,255,255,.45)">RPM  </span>${pos.rpm ?? 0}</div><div><span style="color:rgba(255,255,255,.45)">CO   </span><span style="color:${coColor}">${pos.co_ppm ?? 0} ppm</span></div></div>`;
+  return `<div style="background:#0d0d0d;border:1px solid ${color};border-radius:8px;padding:10px 14px;min-width:170px;font-family:monospace;font-size:11px;color:#fff;line-height:1.9;"><div style="color:${color};font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:6px;">✈ ${pos.aircraft_ident ?? pos.icao24 ?? 'AT-CORE'}</div><div><span style="color:rgba(255,255,255,.45)">MODE </span><span style="color:${color};font-weight:700">${label}</span></div><div><span style="color:rgba(255,255,255,.45)">ALT  </span>${pos.alt_m ?? 0} m</div><div><span style="color:rgba(255,255,255,.45)">SPD  </span>${pos.spd_kt ?? 0} kt</div><div><span style="color:rgba(255,255,255,.45)">HDG  </span>${pos.hdg ?? 0}°</div><div><span style="color:rgba(255,255,255,.45)">RPM  </span>${pos.rpm ?? 0}</div><div><span style="color:rgba(255,255,255,.45)">CO   </span><span style="color:${coColor}">${pos.co_ppm ?? 0} ppm</span></div></div>`;
 }
 
 function makeElement(pos) {
@@ -28,7 +28,7 @@ function makeElement(pos) {
   icon.innerHTML = planeSVG(color, pos.hdg ?? 0);
   const label = document.createElement('div');
   label.className = 'atcore-label';
-  label.textContent = pos.flight_id ?? pos.icao24 ?? '';
+  label.textContent = pos.aircraft_ident ?? pos.icao24 ?? '';
   label.style.cssText = `color:${color};font-size:10px;font-weight:700;letter-spacing:.5px;text-shadow:0 1px 4px rgba(0,0,0,.95);margin-top:1px;white-space:nowrap;font-family:monospace;`;
   wrap.appendChild(icon);
   wrap.appendChild(label);
@@ -52,7 +52,7 @@ export function AtCoreMarkerLayer({ map }) {
         marker.setLngLat([pos.lon, pos.lat]);
         const { color } = modeOf(pos.mode);
         iconEl.innerHTML = planeSVG(color, pos.hdg ?? 0);
-        labelEl.textContent = pos.flight_id ?? pos.icao24 ?? '';
+        labelEl.textContent = pos.aircraft_ident ?? pos.icao24 ?? '';
         labelEl.style.color = color;
         popup.setHTML(popupHTML(pos));
       } else {
