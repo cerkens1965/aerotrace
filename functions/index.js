@@ -55,7 +55,7 @@ exports.safeskyTraffic = onRequest(
 
     try {
       const { default: fetch } = await import('node-fetch')
-      const url = `https://uav-api.safesky.app/v1/uav?viewport=${lat_min},${lon_min},${lat_max},${lon_max}&show_grounded=true`
+      const url = `https://uav-api.safesky.app/v1/uav?viewport=${lat_min},${lon_min},${lat_max},${lon_max}`
       const headers = generateAuthHeaders(key, 'GET', url)
       const response = await fetch(url, { method: 'GET', headers })
       if (!response.ok) {
