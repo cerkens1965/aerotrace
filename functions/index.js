@@ -49,13 +49,13 @@ exports.safeskyTraffic = onRequest(
   async (req, res) => {
     const { lat_min, lon_min, lat_max, lon_max } = req.query
     if (!lat_min || !lon_min || !lat_max || !lon_max) {
-      return res.status(400).json({ error: 'Missing viewport params: lat_min, lon_min, lat_max, lon_max' })
+      return res.status(400).json({ error: 'Missing bounds params' })
     }
     const key = SAFESKY_KEY.value()
 
     try {
       const { default: fetch } = await import('node-fetch')
-      const url = `https://uav-api.safesky.app/v1/uav?viewport=${lat_min},${lon_min},${lat_max},${lon_max}`
+      const url = `https://uav-api.safesky.app/v1/uav?viewport=${lat_min},${lon_min},${lat_max},${lon_max}&show_grounded=true`
       const headers = generateAuthHeaders(key, 'GET', url)
       const response = await fetch(url, { method: 'GET', headers })
       if (!response.ok) {

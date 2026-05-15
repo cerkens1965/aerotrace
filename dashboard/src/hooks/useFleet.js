@@ -3,46 +3,41 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 
 const POLL_INTERVAL_MS = 5000
-const IN_FLIGHT_ALT_FT = 50          // seuil altitude SafeSky → en vol
-const STALE_MS         = 3 * 60000   // 3 min sans signal → signal perdu
+const IN_FLIGHT_ALT_FT = 50          // seuil altitude → en vol
+const STALE_MS         = 3 * 60000   // 3 min sans signal → LTE_LOST
+
+// Fixed viewport covering Belgium + surroundings (~150 km radius)
+const FLEET_VIEWPORT = 'lat_min=49.40&lon_min=2.30&lat_max=51.80&lon_max=6.50'
 
 /**
  * Croise la flotte Firestore avec le trafic SafeSky.
  *
- * Retourne pour chaque appareil :
- *   status : 'IN_FLIGHT' | 'GROUNDED' | 'LTE_LOST' | 'UNKNOWN'
- *   - IN_FLIGHT  : SafeSky rapporte alt > 50ft  OU  FDR mode = MODE_FLIGHT
- *   - LTE_LOST   : FDR dit MODE_FLIGHT mais SafeSky muet depuis > 3 min
- *   - GROUNDED   : SafeSky alt ≤ 50ft ET FDR mode ≠ MODE_FLIGHT
- *   - UNKNOWN    : aucune donnée
+ * status : 'IN_FLIGHT' | 'GROUNDED' | 'LTE_LOST' | 'UNKNOWN'
+ * - IN_FLIGHT  : SafeSky airborne (alt > 50ft et speed > 0)  OU  FDR mode=MODE_FLIGHT
+ * - LTE_LOST   : FDR dit MODE_FLIGHT mais SafeSky muet depuis > 3 min
+ * - GROUNDED   : SafeSky status=GROUNDED ou (speed=0 et vrate=0)  OU  FDR mode=préflight/postflight/sleep
+ * - UNKNOWN    : aucune donnée
  */
 export default function useFleet(clubId) {
-  const [aircraft,    setAircraft]    = useState([])   // flotte Firestore
-  const [fdrStatus,   setFdrStatus]   = useState({})   // { icao24: { mode, ts, lat, lon, alt, spd } }
-  const [safesky,     setSafesky]     = useState([])   // trafic SafeSky brut
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState(null)
+  const [aircraft,  setAircraft]  = useState([])
+  const [fdrStatus, setFdrStatus] = useState({})
+  const [safesky,   setSafesky]   = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
   const timerRef = useRef(null)
 
-  // ── 1. Écoute flotte Firestore ─────────────────────────────────────────────
+  // ── 1. Flotte Firestore ────────────────────────────────────────────────────
   useEffect(() => {
     if (!clubId) return
     const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     const unsub = onSnapshot(q,
-      snap => {
-        setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-        setLoading(false)
-      },
-      err => {
-        console.error('[useFleet] aircraft listener:', err)
-        setError(err)
-        setLoading(false)
-      }
+      snap => { setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) },
+      err  => { console.error('[useFleet] aircraft:', err); setError(err); setLoading(false) }
     )
     return () => unsub()
   }, [clubId])
 
-  // ── 2. Écoute statut FDR en temps réel (ESP32 écrit ici) ──────────────────
+  // ── 2. FDR status (ESP32) ──────────────────────────────────────────────────
   useEffect(() => {
     if (!clubId) return
     const q = query(collection(db, 'fdr_status'), where('clubId', '==', clubId))
@@ -52,23 +47,20 @@ export default function useFleet(clubId) {
         snap.docs.forEach(d => { map[d.data().icao24] = { id: d.id, ...d.data() } })
         setFdrStatus(map)
       },
-      err => console.error('[useFleet] fdr_status listener:', err)
+      err => console.error('[useFleet] fdr_status:', err)
     )
     return () => unsub()
   }, [clubId])
 
-  // ── 3. Polling SafeSky via proxy ───────────────────────────────────────────
+  // ── 3. SafeSky polling — URL relative (dev: Vite proxy, prod: CF rewrite) ─
   const fetchSafeSky = useCallback(async () => {
     try {
-      // Centre Brussels par défaut — idéalement centré sur la flotte connue
-      const res = await fetch('http://localhost:3001/safesky/traffic?lat=50.9014&lon=4.4844')
-      if (!res.ok) throw new Error(`SafeSky proxy ${res.status}`)
+      const res = await fetch(`/safesky/traffic?${FLEET_VIEWPORT}&show_grounded=true`)
+      if (!res.ok) throw new Error(`SafeSky ${res.status}`)
       const data = await res.json()
-      // Le proxy renvoie { nearby_traffic: [...] } — pas un array brut
       setSafesky(Array.isArray(data?.nearby_traffic) ? data.nearby_traffic : [])
     } catch (err) {
       console.warn('[useFleet] SafeSky poll failed:', err.message)
-      // Ne pas crasher — SafeSky peut être indispo
     }
   }, [])
 
@@ -82,28 +74,32 @@ export default function useFleet(clubId) {
   const fleet = aircraft.map(ac => {
     const fdr = fdrStatus[ac.icao24] ?? null
     const sky = safesky.find(t =>
-      t.id === ac.icao24 ||
+      t.id?.toUpperCase() === ac.icao24?.toUpperCase() ||
       (ac.callSign && t.call_sign?.toUpperCase() === ac.callSign.toUpperCase())
     ) ?? null
 
-    const now       = Date.now()
-    const skyAlt    = sky?.altitude ?? 0
-    const fdrMode   = fdr?.mode ?? null
-    const fdrTs     = fdr?.updatedAt?.toMillis?.() ?? 0
-    const skyTs     = sky ? now : 0
-    const lastSeen  = Math.max(fdrTs, skyTs)
+    const now      = Date.now()
+    const skyAlt   = sky?.altitude ?? 0
+    const fdrMode  = fdr?.mode ?? null
+    const fdrTs    = fdr?.updatedAt?.toMillis?.() ?? 0
+    const skyTs    = sky ? now : 0
+
+    // SafeSky status=GROUNDED, ou immobile (speed=0 et vrate=0), ou sous le seuil
+    const skyGrounded =
+      sky?.status === 'GROUNDED' ||
+      (sky && (sky.ground_speed ?? 1) === 0 && (sky.vertical_rate ?? 1) === 0) ||
+      (sky && skyAlt <= IN_FLIGHT_ALT_FT)
 
     let status = 'UNKNOWN'
 
-    if (skyAlt > IN_FLIGHT_ALT_FT) {
+    if (sky && !skyGrounded) {
       status = 'IN_FLIGHT'
     } else if (fdrMode === 'MODE_FLIGHT') {
-      // FDR dit "en vol" mais SafeSky muet
       const stale = skyTs === 0 && (now - fdrTs) > STALE_MS
       status = stale ? 'LTE_LOST' : 'IN_FLIGHT'
-    } else if (fdrMode === 'MODE_POSTFLIGHT' || fdrMode === 'MODE_PREFLIGHT' || fdrMode === 'MODE_SLEEP') {
+    } else if (skyGrounded) {
       status = 'GROUNDED'
-    } else if (skyAlt <= IN_FLIGHT_ALT_FT && sky) {
+    } else if (fdrMode === 'MODE_POSTFLIGHT' || fdrMode === 'MODE_PREFLIGHT' || fdrMode === 'MODE_SLEEP') {
       status = 'GROUNDED'
     }
 
@@ -111,13 +107,13 @@ export default function useFleet(clubId) {
       ...ac,
       status,
       liveData: sky ? {
-        altitude:    sky.altitude,
-        speed:       sky.ground_speed,
-        heading:     sky.course,
-        lat:         sky.latitude,
-        lon:         sky.longitude,
-        beaconType:  sky.beacon_type,
-        lastSeen:    now,
+        altitude:   sky.altitude,
+        speed:      sky.ground_speed,
+        heading:    sky.course,
+        lat:        sky.latitude,
+        lon:        sky.longitude,
+        beaconType: sky.beacon_type,
+        lastSeen:   now,
       } : null,
       fdrData: fdr ? {
         mode:     fdr.mode,
@@ -130,14 +126,17 @@ export default function useFleet(clubId) {
         co:       fdr.co_ppm,
         lastSeen: fdrTs,
       } : null,
-      pilotName:  fdr?.pilotName  ?? ac.assignedPilot ?? null,
+      pilotName:   fdr?.pilotName  ?? ac.assignedPilot ?? null,
       flightStart: fdr?.flightStart ?? null,
     }
   })
 
-  const inFlight  = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST')
-  const grounded  = fleet.filter(a => a.status === 'GROUNDED')
-  const unknown   = fleet.filter(a => a.status === 'UNKNOWN')
-
-  return { fleet, inFlight, grounded, unknown, loading, error }
+  return {
+    fleet,
+    inFlight: fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST'),
+    grounded: fleet.filter(a => a.status === 'GROUNDED'),
+    unknown:  fleet.filter(a => a.status === 'UNKNOWN'),
+    loading,
+    error,
+  }
 }

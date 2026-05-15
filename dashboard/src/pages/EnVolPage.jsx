@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import useFleet from '../hooks/useFleet'
 
 // ─── Design tokens — WHITE theme (matches LogbookPage) ───────────────────────
@@ -113,7 +114,7 @@ function FilterTab({ label, count, active, color, onClick }) {
 }
 
 // ─── Aircraft card ────────────────────────────────────────────────────────────
-function AircraftCard({ ac, expanded, onToggle }) {
+function AircraftCard({ ac, expanded, onToggle, onLocate }) {
   const st  = STATUS[ac.status] ?? STATUS.UNKNOWN
   const dur = fmtDuration(ac.flightStart ?? null)
 
@@ -168,6 +169,24 @@ function AircraftCard({ ac, expanded, onToggle }) {
           </span>
         )}
 
+        {/* Locate button */}
+        {ac.liveData?.lat != null && (
+          <button
+            onClick={e => { e.stopPropagation(); onLocate(ac.liveData.lat, ac.liveData.lon) }}
+            title="Show on live map"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+              border: `1px solid ${C.amber}`, background: C.amber10,
+              fontFamily: C.mono, fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.05em', color: C.amber,
+              transition: 'all 0.15s', flexShrink: 0,
+            }}
+          >
+            ◎ MAP
+          </button>
+        )}
+
         {/* Status badge */}
         <span style={{
           fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
@@ -219,9 +238,14 @@ function AircraftCard({ ac, expanded, onToggle }) {
 export default function EnVolPage({ role }) {
   const CLUB_ID = 'club_aerobelgique'
   const { fleet, loading, error } = useFleet(CLUB_ID)
+  const navigate = useNavigate()
 
   const [expanded, setExpanded] = useState(null)
   const [filter,   setFilter]   = useState('ALL')
+
+  const handleLocate = (lat, lon) => {
+    navigate('/live', { state: { flyTo: { lat, lon, zoom: 13 } } })
+  }
 
   const inFlight = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST')
   const grounded = fleet.filter(a => a.status === 'GROUNDED')
@@ -300,6 +324,7 @@ export default function EnVolPage({ role }) {
               ac={ac}
               expanded={expanded === ac.id}
               onToggle={() => setExpanded(p => p === ac.id ? null : ac.id)}
+              onLocate={handleLocate}
             />
           ))}
         </div>

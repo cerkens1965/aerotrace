@@ -77,18 +77,28 @@ function generateAuthHeaders(apiKey, method, url, body = '') {
 // ──────────────────────────────────────────────────────────
 
 app.get('/safesky/traffic', async (req, res) => {
-  const { lat_min, lon_min, lat_max, lon_max } = req.query
-  if (!lat_min || !lon_min || !lat_max || !lon_max) {
-    return res.status(400).json({ error: 'Missing viewport params: lat_min, lon_min, lat_max, lon_max' })
+  const { lat_min, lat_max, lon_min, lon_max } = req.query
+  if (!lat_min || !lat_max || !lon_min || !lon_max) {
+    return res.status(400).json({ error: 'Missing bounds params' })
   }
+  // Centre de la bounding box pour le POST SafeSky
+  const lat = ((parseFloat(lat_min) + parseFloat(lat_max)) / 2).toFixed(4)
+  const lon = ((parseFloat(lon_min) + parseFloat(lon_max)) / 2).toFixed(4)
 
   try {
     const { default: fetch } = await import('node-fetch')
 
-    const url = `https://uav-api.safesky.app/v1/uav?viewport=${lat_min},${lon_min},${lat_max},${lon_max}`
-    const headers = generateAuthHeaders(SAFESKY_KEY, 'GET', url, '')
+    const url = 'https://uav-api.safesky.app/v1/uav?return_nearby_traffic=true&show_grounded=true'
+    const body = JSON.stringify([{
+      id: 'aerotrace-dashboard',
+      latitude: parseFloat(lat),
+      longitude: parseFloat(lon),
+      altitude: 300,
+      last_update: Math.floor(Date.now() / 1000),
+    }])
+    const headers = generateAuthHeaders(SAFESKY_KEY, 'POST', url, body)
 
-    const response = await fetch(url, { method: 'GET', headers })
+    const response = await fetch(url, { method: 'POST', headers, body })
 
     if (!response.ok) {
       const text = await response.text()

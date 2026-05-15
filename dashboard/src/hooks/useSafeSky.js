@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 
+// bounds: { latMin, lonMin, latMax, lonMax }
 export default function useSafeSky(bounds) {
   const [traffic, setTraffic] = useState([])
   const intervalRef = useRef(null)
 
   useEffect(() => {
     if (!bounds) return
-
     const { latMin, lonMin, latMax, lonMax } = bounds
 
     const fetchTraffic = async () => {

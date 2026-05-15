@@ -10,8 +10,8 @@ const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
 const CENTER = { lat: 50.6083, lon: 4.4650 } // EBBY
 const ALT_MAX = 35000
 
-// CSS filter: black SVG → amber #F5A623
-const AMBER_FILTER = 'brightness(0) saturate(100%) invert(72%) sepia(88%) saturate(600%) hue-rotate(5deg) brightness(107%)'
+// CSS filter: black SVG → red #ef4444
+const SCHOOL_FILTER = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
 
 const BASEMAPS = [
   { id: 'dataviz-light', label: 'Light' },
@@ -97,7 +97,7 @@ function SliderTrack({ value, max = 30, color, onChange }) {
   )
 }
 
-export default function AerotraceMap() {
+export default function AerotraceMap({ flyTo = null }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const markersRef = useRef({})
@@ -111,6 +111,11 @@ export default function AerotraceMap() {
   const [altRange, setAltRange] = useState([0, ALT_MAX])
   const [panelOpen, setPanelOpen] = useState({ layers: true, map: false })
   const [mapReady, setMapReady] = useState(false)
+
+  useEffect(() => {
+    if (!flyTo || !map.current || !mapReady) return
+    map.current.flyTo({ center: [flyTo.lon, flyTo.lat], zoom: flyTo.zoom ?? 13, duration: 1200 })
+  }, [flyTo, mapReady])
 
   useEffect(() => {
     const q = query(collection(db, 'aircraft'), where('active', '==', true))
@@ -205,11 +210,11 @@ export default function AerotraceMap() {
     filteredTraffic.forEach(ac => {
       const isSchool = schoolIcaos.has((ac.id || '').toUpperCase())
 
-      const iconFilter = isSchool ? AMBER_FILTER : (isDark ? 'invert(1)' : 'none')
-      const labelClr   = isSchool ? '#F5A623' : (isDark ? '#fff' : '#111')
+      const iconFilter = isSchool ? SCHOOL_FILTER : (isDark ? 'invert(1)' : 'none')
+      const labelClr   = isSchool ? '#ef4444' : (isDark ? '#fff' : '#111')
       const labelBg    = isDark || isSchool ? 'rgba(0,0,0,0.72)' : 'rgba(255,255,255,0.65)'
       const labelBdr   = isSchool
-        ? '1px solid rgba(245,166,35,0.5)'
+        ? '1px solid rgba(239,68,68,0.5)'
         : (isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)')
 
       const el = document.createElement('div')
@@ -226,7 +231,7 @@ export default function AerotraceMap() {
         .setLngLat([ac.longitude, ac.latitude])
         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${ac.call_sign || ac.id}</b>${isSchool ? ' <span style="color:#F5A623;">★ SCHOOL</span>' : ''}<br/>
+            <b>${ac.call_sign || ac.id}</b>${isSchool ? ' <span style="color:#ef4444;">★ SCHOOL</span>' : ''}<br/>
             Type: ${ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${ac.ground_speed} kt<br/>
