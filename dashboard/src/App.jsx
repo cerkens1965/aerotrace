@@ -90,7 +90,7 @@ export default function App() {
       }}>
         <Header user={user} role={role} />
 
-        <main style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+        <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
           <Routes>
             <Route path="/"         element={<Navigate to="/live" replace />} />
             <Route path="/live"     element={<LivePage />} />

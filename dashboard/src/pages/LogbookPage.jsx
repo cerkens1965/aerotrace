@@ -582,7 +582,7 @@ export default function LogbookPage() {
   ]
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f2f8', fontFamily: 'monospace' }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: '#f0f2f8', fontFamily: 'monospace' }}>
       <div style={{ padding: '80px 32px 48px', maxWidth: 1280, margin: '0 auto' }}>
 
         <div style={{ marginBottom: 28 }}>
