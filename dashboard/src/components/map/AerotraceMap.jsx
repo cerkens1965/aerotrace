@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { collection, getDocs, query, where } from 'firebase/firestore'
+import { db } from '../../firebase/config'
 import useSafeSky from '../../hooks/useSafeSky'
-import { AtCoreMarkerLayer } from '../live/AtCoreMarkerLayer'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
-const CENTER = { lat: 50.9014, lon: 4.4844 }
+const CENTER = { lat: 50.6083, lon: 4.4650 } // EBBY
 const ALT_MAX = 35000
+
+// CSS filter: black SVG → amber #F5A623
+const AMBER_FILTER = 'brightness(0) saturate(100%) invert(72%) sepia(88%) saturate(600%) hue-rotate(5deg) brightness(107%)'
 
 const BASEMAPS = [
   { id: 'dataviz-light', label: 'Light' },
@@ -97,7 +101,9 @@ export default function AerotraceMap() {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const markersRef = useRef({})
-  const traffic = useSafeSky(CENTER)
+  const [mapBounds, setMapBounds] = useState(null)
+  const traffic = useSafeSky(mapBounds)
+  const [schoolIcaos, setSchoolIcaos] = useState(new Set())
   const [activeBasemap, setActiveBasemap] = useState('dataviz-light')
   const [visible, setVisible] = useState({ ctr: true, tma: true, danger: true, airports: true, traffic: true })
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
@@ -105,6 +111,20 @@ export default function AerotraceMap() {
   const [altRange, setAltRange] = useState([0, ALT_MAX])
   const [panelOpen, setPanelOpen] = useState({ layers: true, map: false })
   const [mapReady, setMapReady] = useState(false)
+
+  useEffect(() => {
+    const q = query(collection(db, 'aircraft'), where('active', '==', true))
+    getDocs(q)
+      .then(snap => {
+        const icaos = new Set()
+        snap.forEach(doc => {
+          const { icao24 } = doc.data()
+          if (icao24) icaos.add(icao24.toUpperCase())
+        })
+        setSchoolIcaos(icaos)
+      })
+      .catch(err => console.error('[AerotraceMap] aircraft load:', err))
+  }, [])
 
   const filteredTraffic = traffic.filter(ac => {
     const alt = ac.altitude || 0
@@ -154,7 +174,23 @@ export default function AerotraceMap() {
       zoom: 9,
     })
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right')
-    map.current.on('load', () => { addOpenAIPLayers(map.current, activeAirports); setMapReady(true) })
+
+    const updateBounds = () => {
+      const b = map.current.getBounds()
+      setMapBounds({
+        latMin: b.getSouth().toFixed(4),
+        lonMin: b.getWest().toFixed(4),
+        latMax: b.getNorth().toFixed(4),
+        lonMax: b.getEast().toFixed(4),
+      })
+    }
+
+    map.current.on('load', () => {
+      addOpenAIPLayers(map.current, activeAirports)
+      updateBounds()
+      setMapReady(true)
+    })
+    map.current.on('moveend', updateBounds)
     return () => { map.current?.remove(); map.current = null }
   }, [])
 
@@ -163,12 +199,19 @@ export default function AerotraceMap() {
     Object.values(markersRef.current).forEach(m => m.remove())
     markersRef.current = {}
     if (!visible.traffic) return
+
     const isDark = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
-    const labelBg   = isDark ? 'rgba(0,0,0,0.72)'          : 'rgba(255,255,255,0.65)'
-    const labelBdr  = isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)'
-    const labelClr  = isDark ? '#fff'                       : '#111'
-    const iconFilter = isDark ? 'invert(1)'                 : 'none'
+
     filteredTraffic.forEach(ac => {
+      const isSchool = schoolIcaos.has((ac.id || '').toUpperCase())
+
+      const iconFilter = isSchool ? AMBER_FILTER : (isDark ? 'invert(1)' : 'none')
+      const labelClr   = isSchool ? '#F5A623' : (isDark ? '#fff' : '#111')
+      const labelBg    = isDark || isSchool ? 'rgba(0,0,0,0.72)' : 'rgba(255,255,255,0.65)'
+      const labelBdr   = isSchool
+        ? '1px solid rgba(245,166,35,0.5)'
+        : (isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)')
+
       const el = document.createElement('div')
       el.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
@@ -178,11 +221,12 @@ export default function AerotraceMap() {
             <div style="font-size:9px;font-weight:400;color:${labelClr};">${ac.altitude || 0} ft</div>
           </div>
         </div>`
+
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([ac.longitude, ac.latitude])
         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${ac.call_sign || ac.id}</b><br/>
+            <b>${ac.call_sign || ac.id}</b>${isSchool ? ' <span style="color:#F5A623;">★ SCHOOL</span>' : ''}<br/>
             Type: ${ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${ac.ground_speed} kt<br/>
@@ -192,7 +236,7 @@ export default function AerotraceMap() {
         .addTo(map.current)
       markersRef.current[ac.id] = marker
     })
-  }, [filteredTraffic, visible.traffic, activeBasemap])
+  }, [filteredTraffic, visible.traffic, activeBasemap, schoolIcaos])
 
   const panel = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
   const titleStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }
@@ -201,11 +245,9 @@ export default function AerotraceMap() {
     <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
   )
 
-
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
-      {mapReady && <AtCoreMarkerLayer map={map.current} />}
 
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10, minWidth: 172 }}>
 

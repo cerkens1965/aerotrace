@@ -1,0 +1,14 @@
+{
+  "name": "aerotrace-functions",
+  "description": "Firebase Cloud Functions for Aerotrace",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^6.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}
