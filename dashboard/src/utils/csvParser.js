@@ -10,8 +10,8 @@
 
 // Columns we extract from the G3X CSV
 const COLS = {
-  date:    'Lcl Date',
-  time:    'Lcl Time',
+  date:    'UTC Date',
+  time:    'UTC Time',
   lat:     'Latitude',
   lon:     'Longitude',
   altGps:  'AltGPS',
@@ -92,7 +92,7 @@ export function parseG3XCSV(content) {
     const timeStr = get('time')
     if (!dateStr || !timeStr) continue
 
-    const ts = new Date(`${dateStr}T${timeStr}`).getTime()
+    const ts = new Date(`${dateStr}T${timeStr}Z`).getTime()
     if (isNaN(ts)) continue
 
     const lat = num('lat')
