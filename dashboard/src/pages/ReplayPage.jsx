@@ -42,6 +42,15 @@ function fmtTime(ms) {
   return `${h > 0 ? h + ':' : ''}${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`
 }
 
+function fmtUTC(ts) {
+  if (!ts || isNaN(ts)) return ''
+  const d = new Date(ts)
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  const ss = String(d.getUTCSeconds()).padStart(2, '0')
+  return `${hh}:${mm}:${ss}Z`
+}
+
 function fmtDate(ts) {
   return new Date(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
 }
@@ -293,6 +302,9 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
         <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text, minWidth: 50 }}>
           {fmtTime(currentTs - startTs)}
         </span>
+        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.amber, minWidth: 70 }}>
+          {fmtUTC(currentTs)}
+        </span>
 
         {/* Speed selector */}
         <div style={{ display: 'flex', gap: 4 }}>
@@ -310,6 +322,9 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
         </div>
 
         <div style={{ flex: 1 }} />
+        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.amber, minWidth: 70, textAlign: 'right' }}>
+          {fmtUTC(startTs + total)}
+        </span>
         <span style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>
           {fmtTime(total)}
         </span>
