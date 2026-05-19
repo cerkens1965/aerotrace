@@ -50,10 +50,14 @@ const EMPTY_PILOT = {
   isInstructor: false,
   birthDate: '', licenceDate: '',
   licences: [], trigram: '', pin: '',
+  clubId: '',
 }
 const EMPTY_AIRCRAFT = {
   registration: '', callSign: '', typeDesig: '', icao24: '', homeBase: '',
   photoUrl: '', photoStoragePath: '',
+}
+const EMPTY_CLUB = {
+  code: '', name: '', icao: '',
 }
 
 // ─── Reusable form components ─────────────────────────────────────────────────
@@ -106,7 +110,7 @@ function generateTrigram(firstName, lastName, existing = []) {
 }
 
 // ─── Pilot form panel ─────────────────────────────────────────────────────────
-function PilotForm({ form, setForm, allTrigrams, saving, error, onSave, onCancel, isEdit }) {
+function PilotForm({ form, setForm, allTrigrams, clubs, saving, error, onSave, onCancel, isEdit }) {
   const toggleLicence = (lic) => {
     setForm(p => ({
       ...p,
@@ -146,6 +150,19 @@ function PilotForm({ form, setForm, allTrigrams, saving, error, onSave, onCancel
         <div style={{ gridColumn: '1/-1' }}>
           <Label>EMAIL</Label>
           <Input value={form.email} onChange={v => setForm(p => ({ ...p, email: v }))} placeholder="john@example.com" type="email" />
+        </div>
+
+        {/* Club */}
+        <div style={{ gridColumn: '1/-1' }}>
+          <Label>CLUB *</Label>
+          <Select value={form.clubId || ''} onChange={v => setForm(p => ({ ...p, clubId: v }))}
+            options={[
+              { value: '', label: clubs.length ? '— select a club —' : '⚠ No clubs yet (create in CLUBS tab)' },
+              ...clubs.map(c => ({ value: c.id, label: `${c.code} — ${c.name}` })),
+            ]} />
+          <div style={{ fontFamily: C.mono, fontSize: 8, color: C.low, marginTop: 3 }}>
+            Determines PIN uniqueness scope
+          </div>
         </div>
 
         {/* Platform role */}
@@ -509,12 +526,26 @@ function PilotRow({ pilot, onEdit, onDelete }) {
           {pilot.licences?.map(l => (
             <span key={l} style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{l}</span>
           ))}
+          {/* PIN conflict warning — set by Cloud Function dedupPilotPin */}
+          {pilot.pinConflict && (
+            <span style={{
+              fontFamily: C.mono, fontSize: 9, fontWeight: 700,
+              color: C.red, background: C.red10,
+              padding: '1px 7px', borderRadius: 4,
+              border: `1px solid ${C.red}44`,
+            }} title="Another pilot in the same club has the same PIN — edit one of them to fix.">
+              ⚠ PIN CONFLICT
+            </span>
+          )}
         </div>
       </div>
 
       {/* PIN indicator */}
       {pilot.pin && (
-        <span style={{ fontFamily: C.mono, fontSize: 9, color: C.low }}>
+        <span style={{
+          fontFamily: C.mono, fontSize: 9,
+          color: pilot.pinConflict ? C.red : C.low,
+        }}>
           PIN ••••
         </span>
       )}
@@ -587,6 +618,103 @@ function AircraftRow({ ac, onEdit, onDelete }) {
   )
 }
 
+// ─── Club form panel ─────────────────────────────────────────────────────────
+function ClubForm({ form, setForm, saving, error, onSave, onCancel, isEdit }) {
+  return (
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 10, padding: 20,
+    }}>
+      <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.14em', color: C.low, marginBottom: 18 }}>
+        {isEdit ? 'EDIT CLUB' : 'NEW CLUB'}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div>
+          <Label>CODE (short) *</Label>
+          <Input value={form.code}
+            onChange={v => setForm(p => ({ ...p, code: v.toUpperCase().slice(0, 12) }))}
+            placeholder="EBBY-01" maxLength={12} />
+          <div style={{ fontFamily: C.mono, fontSize: 8, color: C.low, marginTop: 3 }}>
+            Used by AT-CORE / SafeSky
+          </div>
+        </div>
+        <div>
+          <Label>ICAO (airfield)</Label>
+          <Input value={form.icao}
+            onChange={v => setForm(p => ({ ...p, icao: v.toUpperCase().slice(0, 4) }))}
+            placeholder="EBBY" maxLength={4} />
+        </div>
+        <div style={{ gridColumn: '1/-1' }}>
+          <Label>NAME *</Label>
+          <Input value={form.name}
+            onChange={v => setForm(p => ({ ...p, name: v }))}
+            placeholder="ULM Baisy-Thy" />
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ fontFamily: C.mono, fontSize: 10, color: C.red, margin: '12px 0' }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} style={{
+          padding: '8px 18px', borderRadius: 6, cursor: 'pointer',
+          background: 'transparent', border: `1px solid ${C.border}`,
+          fontFamily: C.mono, fontSize: 10, color: C.mid,
+        }}>CANCEL</button>
+        <button type="button" onClick={onSave} disabled={saving} style={{
+          padding: '8px 22px', borderRadius: 6, cursor: saving ? 'not-allowed' : 'pointer',
+          background: saving ? C.bg : C.text, border: `1px solid ${saving ? C.border : C.text}`,
+          fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+          color: saving ? C.mid : '#ffffff',
+        }}>{saving ? '…' : isEdit ? '✓ UPDATE' : '✓ CREATE'}</button>
+      </div>
+    </div>
+  )
+}
+
+function ClubRow({ club, pilotCount, onEdit, onDelete }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '12px 16px', background: C.surface,
+      border: `1px solid ${C.border}`, borderRadius: 8,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+        background: C.blue10, border: `1px solid ${C.blue}44`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: C.blue,
+      }}>
+        {club.icao || club.code?.slice(0, 4) || '?'}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
+          {club.name || club.code}
+        </div>
+        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, marginTop: 3 }}>
+          {club.code}{club.icao ? ` · ${club.icao}` : ''} · {pilotCount} pilot{pilotCount !== 1 ? 's' : ''}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button onClick={() => onEdit(club)} style={{
+          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+          background: 'transparent', border: `1px solid ${C.border}`,
+          fontFamily: C.mono, fontSize: 9, color: C.mid,
+        }}>EDIT</button>
+        <button onClick={() => onDelete(club)} style={{
+          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+          background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
+          fontFamily: C.mono, fontSize: 9, color: C.red,
+        }}>✕</button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tab button ───────────────────────────────────────────────────────────────
 function TabBtn({ label, count, active, onClick }) {
   return (
@@ -616,11 +744,13 @@ export default function AdminPage({ role }) {
   const [tab,      setTab]      = useState('PILOTS')
   const [pilots,   setPilots]   = useState([])
   const [aircraft, setAircraft] = useState([])
+  const [clubs,    setClubs]    = useState([])
   const [loading,  setLoading]  = useState(true)
 
   // Form state
   const [pilotForm,    setPilotForm]    = useState(null)   // null = closed
   const [aircraftForm, setAircraftForm] = useState(null)
+  const [clubForm,     setClubForm]     = useState(null)
   const [editId,       setEditId]       = useState(null)
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
@@ -630,9 +760,11 @@ export default function AdminPage({ role }) {
     Promise.all([
       getDocs(query(collection(db, 'pilots'),   orderBy('lastName'))),
       getDocs(query(collection(db, 'aircraft'), orderBy('registration'))),
-    ]).then(([ps, as]) => {
+      getDocs(query(collection(db, 'clubs'),    orderBy('code'))),
+    ]).then(([ps, as, cs]) => {
       setPilots(ps.docs.map(d => ({ id: d.id, ...d.data() })))
       setAircraft(as.docs.map(d => ({ id: d.id, ...d.data() })))
+      setClubs(cs.docs.map(d => ({ id: d.id, ...d.data() })))
       setLoading(false)
     }).catch(e => { console.error(e); setLoading(false) })
   }, [])
@@ -646,6 +778,7 @@ export default function AdminPage({ role }) {
   const savePilot = async () => {
     if (!pilotForm.firstName || !pilotForm.lastName) return setError('First and last name required')
     if (!pilotForm.trigram || pilotForm.trigram.length !== 3) return setError('Trigram must be 3 characters')
+    if (!pilotForm.clubId) return setError('Club required — create one in CLUBS tab if needed')
     setSaving(true); setError('')
     try {
       const data = {
@@ -660,6 +793,7 @@ export default function AdminPage({ role }) {
         licences:      pilotForm.licences,
         trigram:       pilotForm.trigram.toUpperCase(),
         pin:           pilotForm.pin,
+        clubId:        pilotForm.clubId,
         updatedAt:     serverTimestamp(),
       }
       if (editId) {
@@ -716,6 +850,67 @@ export default function AdminPage({ role }) {
     setAircraft(prev => prev.filter(x => x.id !== a.id))
   }
 
+  // ── Club CRUD ──────────────────────────────────────────────────────────────
+  const openNewClub  = () => { setEditId(null); setClubForm({ ...EMPTY_CLUB }); setError('') }
+  const openEditClub = (c) => { setEditId(c.id); setClubForm({ ...EMPTY_CLUB, ...c }); setError('') }
+
+  const saveClub = async () => {
+    if (!clubForm.code) return setError('Code required (e.g. EBBY-01)')
+    if (!clubForm.name) return setError('Name required')
+    // Code unicity check (case-insensitive)
+    const codeUp = clubForm.code.toUpperCase()
+    const dup = clubs.find(c => c.id !== editId && (c.code || '').toUpperCase() === codeUp)
+    if (dup) return setError(`Code "${clubForm.code}" already used by another club`)
+    setSaving(true); setError('')
+    try {
+      const data = {
+        code: codeUp,
+        name: clubForm.name,
+        icao: (clubForm.icao || '').toUpperCase(),
+        updatedAt: serverTimestamp(),
+      }
+      if (editId) {
+        await updateDoc(doc(db, 'clubs', editId), data)
+        setClubs(prev => prev.map(c => c.id === editId ? { ...c, ...data, id: editId } : c))
+      } else {
+        const ref = await addDoc(collection(db, 'clubs'), { ...data, createdAt: serverTimestamp() })
+        setClubs(prev => [...prev, { ...data, id: ref.id }])
+      }
+      setClubForm(null); setEditId(null)
+    } catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const deleteClub = async (c) => {
+    const linked = pilots.filter(p => p.clubId === c.id).length
+    if (linked > 0) {
+      window.alert(`Cannot delete: ${linked} pilot(s) still linked to this club. Reassign them first.`)
+      return
+    }
+    if (!window.confirm(`Delete club ${c.name} (${c.code})? This cannot be undone.`)) return
+    await updateDoc(doc(db, 'clubs', c.id), { archived: true, updatedAt: serverTimestamp() })
+    setClubs(prev => prev.filter(x => x.id !== c.id))
+  }
+
+  // Backfill : assigne le clubId du club par défaut aux pilotes legacy (sans clubId).
+  const backfillClubId = async (defaultClubId) => {
+    const legacy = pilots.filter(p => !p.clubId)
+    if (legacy.length === 0) return window.alert('No legacy pilots to backfill.')
+    if (!window.confirm(`Assign ${legacy.length} pilot(s) without clubId to this club?`)) return
+    setSaving(true)
+    try {
+      for (const p of legacy) {
+        await updateDoc(doc(db, 'pilots', p.id), {
+          clubId: defaultClubId,
+          updatedAt: serverTimestamp(),
+        })
+      }
+      setPilots(prev => prev.map(p => p.clubId ? p : { ...p, clubId: defaultClubId }))
+      window.alert(`Backfilled ${legacy.length} pilot(s).`)
+    } catch (e) { window.alert(`Backfill failed: ${e.message}`) }
+    finally { setSaving(false) }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{
@@ -730,8 +925,9 @@ export default function AdminPage({ role }) {
         padding: '12px 24px', flexShrink: 0,
         display: 'flex', alignItems: 'center', gap: 10,
       }}>
-        <TabBtn label="PILOTS"   count={pilots.length}   active={tab === 'PILOTS'}   onClick={() => { setTab('PILOTS'); setPilotForm(null); setAircraftForm(null) }} />
-        <TabBtn label="AIRCRAFT" count={aircraft.length} active={tab === 'AIRCRAFT'} onClick={() => { setTab('AIRCRAFT'); setPilotForm(null); setAircraftForm(null) }} />
+        <TabBtn label="PILOTS"   count={pilots.length}   active={tab === 'PILOTS'}   onClick={() => { setTab('PILOTS');   setPilotForm(null); setAircraftForm(null); setClubForm(null) }} />
+        <TabBtn label="AIRCRAFT" count={aircraft.length} active={tab === 'AIRCRAFT'} onClick={() => { setTab('AIRCRAFT'); setPilotForm(null); setAircraftForm(null); setClubForm(null) }} />
+        <TabBtn label="CLUBS"    count={clubs.length}    active={tab === 'CLUBS'}    onClick={() => { setTab('CLUBS');    setPilotForm(null); setAircraftForm(null); setClubForm(null) }} />
 
         <div style={{ flex: 1 }} />
 
@@ -750,6 +946,14 @@ export default function AdminPage({ role }) {
             fontFamily: C.mono, fontSize: 10, fontWeight: 700,
             color: '#ffffff', letterSpacing: '0.05em',
           }}>+ NEW AIRCRAFT</button>
+        )}
+        {tab === 'CLUBS' && !clubForm && (
+          <button onClick={openNewClub} style={{
+            padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
+            background: C.text, border: 'none',
+            fontFamily: C.mono, fontSize: 10, fontWeight: 700,
+            color: '#ffffff', letterSpacing: '0.05em',
+          }}>+ NEW CLUB</button>
         )}
       </div>
 
@@ -774,6 +978,7 @@ export default function AdminPage({ role }) {
                 form={pilotForm}
                 setForm={setPilotForm}
                 allTrigrams={allTrigrams}
+                clubs={clubs}
                 saving={saving}
                 error={error}
                 onSave={savePilot}
@@ -824,6 +1029,65 @@ export default function AdminPage({ role }) {
                 key={a.id} ac={a}
                 onEdit={openEditAircraft}
                 onDelete={deleteAircraft}
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && tab === 'CLUBS' && (
+          <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {clubForm && (
+              <ClubForm
+                form={clubForm}
+                setForm={setClubForm}
+                saving={saving}
+                error={error}
+                onSave={saveClub}
+                onCancel={() => { setClubForm(null); setEditId(null); setError('') }}
+                isEdit={!!editId}
+              />
+            )}
+
+            {clubs.length === 0 && !clubForm && (
+              <div style={{ textAlign: 'center', color: C.low, fontSize: 12, paddingTop: 40 }}>
+                No clubs yet. Click + NEW CLUB to create the first one (e.g. EBBY-01).
+              </div>
+            )}
+
+            {/* Backfill helper — visible si pilotes legacy sans clubId */}
+            {!clubForm && pilots.some(p => !p.clubId) && clubs.length > 0 && (
+              <div style={{
+                background: C.amber10, border: `1px solid ${C.amber}44`,
+                borderRadius: 8, padding: '12px 16px',
+                display: 'flex', alignItems: 'center', gap: 12,
+              }}>
+                <div style={{ flex: 1, fontFamily: C.mono, fontSize: 11, color: C.text }}>
+                  <strong>{pilots.filter(p => !p.clubId).length}</strong> pilot(s) without clubId.
+                  Pick a default club to backfill them:
+                </div>
+                <select
+                  defaultValue=""
+                  onChange={e => { if (e.target.value) backfillClubId(e.target.value); e.target.value = '' }}
+                  style={{
+                    background: C.surface, border: `1px solid ${C.amber}`,
+                    color: C.text, fontFamily: C.mono, fontSize: 11, fontWeight: 700,
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                  }}
+                >
+                  <option value="">Backfill to…</option>
+                  {clubs.map(c => (
+                    <option key={c.id} value={c.id}>{c.code}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {clubs.map(c => (
+              <ClubRow
+                key={c.id} club={c}
+                pilotCount={pilots.filter(p => p.clubId === c.id).length}
+                onEdit={openEditClub}
+                onDelete={deleteClub}
               />
             ))}
           </div>
