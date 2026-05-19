@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useFleet from '../hooks/useFleet'
+import { useClub } from '../contexts/ClubContext'
 
 // ─── Design tokens — WHITE theme (matches LogbookPage) ───────────────────────
 const C = {
@@ -236,8 +237,8 @@ function AircraftCard({ ac, expanded, onToggle, onLocate }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function EnVolPage({ role }) {
-  const CLUB_ID = 'club_aerobelgique'
-  const { fleet, loading, error } = useFleet(CLUB_ID)
+  const { clubId } = useClub()
+  const { fleet, loading, error } = useFleet(clubId)
   const navigate = useNavigate()
 
   const [expanded, setExpanded] = useState(null)

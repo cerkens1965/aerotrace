@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import useSafeSky from '../../hooks/useSafeSky'
+import { useClub } from '../../contexts/ClubContext'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
@@ -98,6 +99,7 @@ function SliderTrack({ value, max = 30, color, onChange }) {
 }
 
 export default function AerotraceMap({ flyTo = null }) {
+  const { clubId } = useClub()
   const mapContainer = useRef(null)
   const map = useRef(null)
   const markersRef = useRef({})
@@ -117,8 +119,11 @@ export default function AerotraceMap({ flyTo = null }) {
     map.current.flyTo({ center: [flyTo.lon, flyTo.lat], zoom: flyTo.zoom ?? 13, duration: 1200 })
   }, [flyTo, mapReady])
 
+  // School aircraft (highlight rouge sur la carte SafeSky) — filtré par clubId
+  // courant pour que super_admin voit la flotte du club sélectionné, pas tout.
   useEffect(() => {
-    const q = query(collection(db, 'aircraft'), where('active', '==', true))
+    if (!clubId) { setSchoolIcaos(new Set()); return }
+    const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     getDocs(q)
       .then(snap => {
         const icaos = new Set()
@@ -129,7 +134,7 @@ export default function AerotraceMap({ flyTo = null }) {
         setSchoolIcaos(icaos)
       })
       .catch(err => console.error('[AerotraceMap] aircraft load:', err))
-  }, [])
+  }, [clubId])
 
   const filteredTraffic = traffic.filter(ac => {
     const alt = ac.altitude || 0

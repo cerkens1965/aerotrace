@@ -1,21 +1,26 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '../../firebase/config'
+import { useClub } from '../../contexts/ClubContext'
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 const AMBER   = '#F5A623'
 const AMBER10 = 'rgba(245,166,35,0.10)'
 const AMBER20 = 'rgba(245,166,35,0.20)'
+const BLUE    = '#60a5fa'
+const BLUE10  = 'rgba(96,165,250,0.10)'
 
 const ROLE_LABELS = {
-  admin:      'ADMIN',
-  instructor: 'INSTRUCTEUR',
-  user:       'MEMBRE',
+  super_admin: 'SUPER',
+  admin:       'ADMIN',
+  instructor:  'INSTRUCTEUR',
+  user:        'MEMBRE',
 }
 const ROLE_COLORS = {
-  admin:      '#ef4444',
-  instructor: '#F5A623',
-  user:       '#60a5fa',
+  super_admin: '#F5A623',
+  admin:       '#ef4444',
+  instructor:  '#F5A623',
+  user:        '#60a5fa',
 }
 
 // Tabs visibles selon rôle
@@ -24,11 +29,11 @@ function getTabs(role) {
     { path: '/live',   label: 'LIVE',    icon: '◉' },
     { path: '/replay', label: 'REPLAY',  icon: '▶' },
   ]
-  if (role === 'instructor' || role === 'admin') {
+  if (role === 'instructor' || role === 'admin' || role === 'super_admin') {
     tabs.splice(1, 0, { path: '/en-vol',  label: 'IN FLIGHT', icon: '✈' })
     tabs.push(        { path: '/logbook', label: 'LOGBOOK',   icon: '📋' })
   }
-  if (role === 'admin') {
+  if (role === 'admin' || role === 'super_admin') {
     tabs.push({ path: '/admin', label: 'ADMIN', icon: '⚙' })
   }
   return tabs
@@ -39,9 +44,15 @@ export default function Header({ user, role }) {
   const location = useLocation()
   const navigate  = useNavigate()
   const tabs      = getTabs(role)
+  const { club, isSuperAdmin, setClub } = useClub()
 
   const handleSignOut = async () => {
     try { await signOut(auth) } catch (err) { console.error('[Header] signOut:', err) }
+  }
+
+  const handleSwitchClub = () => {
+    setClub('')
+    navigate('/select-club')
   }
 
   return (
@@ -57,23 +68,21 @@ export default function Header({ user, role }) {
       backdropFilter: 'blur(12px)',
     }}>
 
-      {/* Logo */}
+      {/* Logo wordmark — remplace l'icône maison + texte par le logo brand */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
+        display: 'flex', alignItems: 'center',
         marginRight: 20, flexShrink: 0,
       }}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2L3 9v13h18V9L12 2z" stroke={AMBER} strokeWidth="1.5" fill="none"/>
-          <path d="M9 22V12h6v10" stroke={AMBER} strokeWidth="1.5" strokeOpacity="0.5"/>
-          <circle cx="12" cy="7" r="1.5" fill={AMBER}/>
-        </svg>
-        <span style={{
-          fontFamily: 'monospace', fontWeight: 700,
-          fontSize: 12, letterSpacing: '0.2em',
-          color: 'rgba(255,255,255,0.9)',
-        }}>
-          AEROTRACE
-        </span>
+        <img
+          src="/AerotrAce_AeroTrace.png"
+          alt="Aerotrace"
+          style={{
+            height: 22,
+            // wordmark = A bleu + texte noir → on inverse en blanc pour fond sombre
+            filter: 'brightness(0) invert(1)',
+            opacity: 0.92,
+          }}
+        />
       </div>
 
       {/* Séparateur */}
@@ -125,8 +134,54 @@ export default function Header({ user, role }) {
         })}
       </nav>
 
-      {/* Droite : rôle + user + logout */}
+      {/* Droite : club + rôle + user + logout */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+
+        {/* Badge club courant (toujours visible quand on est in-context) */}
+        {club && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '3px 8px', borderRadius: 5,
+            background: isSuperAdmin ? AMBER10 : BLUE10,
+            border: `1px solid ${isSuperAdmin ? AMBER20 : 'rgba(96,165,250,0.3)'}`,
+            fontFamily: 'monospace', fontSize: 10,
+          }}>
+            <span style={{
+              fontWeight: 700, fontSize: 8, letterSpacing: '0.12em',
+              color: isSuperAdmin ? AMBER : BLUE, opacity: 0.7,
+            }}>
+              CLUB
+            </span>
+            <span style={{
+              fontWeight: 700, letterSpacing: '0.08em',
+              color: isSuperAdmin ? AMBER : BLUE,
+            }}>
+              {club.code}
+            </span>
+            {isSuperAdmin && (
+              <button onClick={handleSwitchClub} title="Switch club"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
+                  padding: '1px 6px', marginLeft: 4, borderRadius: 4,
+                  fontFamily: 'monospace', fontSize: 9, fontWeight: 700,
+                  letterSpacing: '0.1em',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#fff'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.4)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.6)'
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'
+                }}
+              >
+                SWITCH
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Badge rôle */}
         {role && (

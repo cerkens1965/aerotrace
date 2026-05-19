@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { collection, addDoc, getDocs, getDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, getDocs, getDoc, doc, onSnapshot, query, orderBy, serverTimestamp, where } from 'firebase/firestore'
+import { useClub } from '../contexts/ClubContext'
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
@@ -394,6 +395,7 @@ function DataStrip({ frame }) {
 // ─── Main REPLAY page ─────────────────────────────────────────────────────────
 export default function ReplayPage({ user }) {
   const { flightId }  = useParams()
+  const { clubId }    = useClub()
   const [flights,      setFlights]      = useState([])
   const [selected,     setSelected]     = useState(null)
   const [parsed,       setParsed]       = useState(null)
@@ -429,24 +431,34 @@ export default function ReplayPage({ user }) {
     }
   }, [])
 
-  // ── Charger tous les vols ─────────────────────────────────────────────────
+  // ── Charger les vols du club courant ─────────────────────────────────────
+  // Note : firmware ESP32 écrit `club_id` (snake_case), dashboard écrit
+  // `clubId` (camelCase). On filtre sur `clubId` ici ; les vols legacy
+  // sans ce champ ne s'afficheront pas tant qu'ils ne sont pas backfillés.
+  // orderBy retiré (tri client-side) pour ne pas dépendre d'index composite.
   useEffect(() => {
-    const q = query(collection(db, 'flights'), orderBy('startTs', 'desc'))
-    return onSnapshot(q, snap => setFlights(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
-  }, [])
+    if (!clubId) { setFlights([]); return }
+    const q = query(collection(db, 'flights'), where('clubId', '==', clubId))
+    return onSnapshot(q, snap => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      docs.sort((a, b) => (b.startTs || 0) - (a.startTs || 0))
+      setFlights(docs)
+    })
+  }, [clubId])
 
-  // ── Charger pilots + aircraft pour AssignAfterUpload ──────────────────────
+  // ── Charger pilots + aircraft du club courant pour AssignAfterUpload ─────
   useEffect(() => {
+    if (!clubId) { setPilots([]); setAircraft([]); return }
     async function load() {
       const [ps, as] = await Promise.all([
-        getDocs(collection(db, 'pilots')),
-        getDocs(collection(db, 'aircraft')),
+        getDocs(query(collection(db, 'pilots'),   where('clubId', '==', clubId))),
+        getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
       ])
       setPilots(ps.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true))
       setAircraft(as.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true))
     }
     load()
-  }, [])
+  }, [clubId])
 
   // ── Auto-load depuis URL /replay/:flightId (vient du Logbook) ─────────────
   useEffect(() => {

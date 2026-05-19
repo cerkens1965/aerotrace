@@ -6,9 +6,10 @@
 //   TOUS LES VOLS→ matrice admin filtrable (Qui-Quoi-Comment), assignation inline
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { collection, getDocs } from 'firebase/firestore'
+import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
+import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import {
   formatDate, formatDuration, sortByDateDesc,
@@ -463,6 +464,7 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign }) {
 // ─── LogbookPage ──────────────────────────────────────────────────────────────
 
 export default function LogbookPage() {
+  const { clubId } = useClub()
   const [tab,          setTab]          = useState('pilots')
   const [pilots,       setPilots]       = useState([])
   const [aircraft,     setAircraft]     = useState([])
@@ -473,20 +475,24 @@ export default function LogbookPage() {
 
   const [loadError, setLoadError] = useState(null)
 
+  // Charge pilots/aircraft/flights scopés sur le club courant.
+  // Vols legacy ESP32 (champ club_id snake_case) ne s'affichent pas — backfill
+  // requis pour les voir dans le carnet.
   useEffect(() => {
+    if (!clubId) { setPilots([]); setAircraft([]); setFlights([]); setLoading(false); return }
     async function load() {
       setLoading(true)
       setLoadError(null)
       try {
         const [pilotsSnap, aircraftSnap, flightsSnap] = await Promise.all([
-          getDocs(collection(db, 'pilots')),
-          getDocs(collection(db, 'aircraft')),
-          getDocs(collection(db, 'flights')),
+          getDocs(query(collection(db, 'pilots'),   where('clubId', '==', clubId))),
+          getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
+          getDocs(query(collection(db, 'flights'),  where('clubId', '==', clubId))),
         ])
         const p = pilotsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true)
         const a = aircraftSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true)
         const f = flightsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-        console.log('[Logbook] pilots:', p.length, 'aircraft:', a.length, 'flights:', f.length)
+        console.log('[Logbook] club:', clubId, 'pilots:', p.length, 'aircraft:', a.length, 'flights:', f.length)
         setPilots(p)
         setAircraft(a)
         setFlights(f)
@@ -498,7 +504,7 @@ export default function LogbookPage() {
       }
     }
     load()
-  }, [])
+  }, [clubId])
 
   // ── Sort state ───────────────────────────────────────────────────────────────
   const [sortPilots,   setSortPilots]   = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'

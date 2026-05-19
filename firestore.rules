@@ -8,18 +8,23 @@ service cloud.firestore {
     }
 
     // Lit le rôle plateforme depuis /users/{uid}
-    // Valeurs attendues : 'user' | 'instructor' | 'admin'
+    // Valeurs attendues : 'user' | 'instructor' | 'admin' | 'super_admin'
     function userRole() {
       let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
       return userDoc.data == null ? 'user' : userDoc.data.get('role', 'user');
     }
 
+    function isSuperAdmin() {
+      return isSignedIn() && userRole() == 'super_admin';
+    }
+
+    // admin (club admin) inclut super_admin (super_admin = admin transitif)
     function isAdmin() {
-      return isSignedIn() && userRole() == 'admin';
+      return isSignedIn() && userRole() in ['admin', 'super_admin'];
     }
 
     function isInstructorOrAdmin() {
-      return isSignedIn() && userRole() in ['instructor', 'admin'];
+      return isSignedIn() && userRole() in ['instructor', 'admin', 'super_admin'];
     }
 
     // ── Users ──────────────────────────────────────────────────────────────────
@@ -33,9 +38,11 @@ service cloud.firestore {
     }
 
     // ── Clubs ──────────────────────────────────────────────────────────────────
+    // Création/édition réservée à super_admin (gouvernance plateforme cross-club).
+    // Read pour tout user authentifié (les admins de club doivent voir leur club).
     match /clubs/{clubId} {
       allow read:  if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isSuperAdmin();
     }
 
     // ── Aircraft ───────────────────────────────────────────────────────────────
