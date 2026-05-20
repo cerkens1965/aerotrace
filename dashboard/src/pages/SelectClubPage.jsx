@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
-import { collection, addDoc, updateDoc, doc, serverTimestamp, getDocs, writeBatch } from 'firebase/firestore'
+import { collection, setDoc, updateDoc, doc, getDoc, serverTimestamp, getDocs, writeBatch } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 
@@ -43,8 +43,12 @@ export default function SelectClubPage() {
   const handleSave = async () => {
     if (!form.code) return setError('Code required (e.g. EBBY-01)')
     if (!form.name) return setError('Name required')
-    const codeUp = form.code.toUpperCase()
-    // Conflit de code (excluant le club en cours d'édition)
+    // Code = doc id pour les nouveaux clubs → permet à AT-CORE d'écrire
+    // directement clubId: "EBBY-01" sans table de mapping.
+    // Sanitize : uppercase, et caractères safes pour un doc id Firestore.
+    const codeUp = form.code.toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+    if (!codeUp) return setError('Code must contain letters/digits/dash/underscore')
+    // Conflit de code dans la liste mémoire (exclusion editingId pour le mode edit)
     if (clubs.find(c => c.id !== editingId && (c.code || '').toUpperCase() === codeUp)) {
       return setError(`Code "${form.code}" already used`)
     }
@@ -57,15 +61,23 @@ export default function SelectClubPage() {
         updatedAt: serverTimestamp(),
       }
       if (isEditing) {
+        // En mode edit, on garde le doc id existant. Le code field est verrouillé
+        // dans l'UI pour éviter la confusion (changement code = recréation).
         await updateDoc(doc(db, 'clubs', editingId), data)
         cancelEdit()
       } else {
-        const ref = await addDoc(collection(db, 'clubs'), {
-          ...data, createdAt: serverTimestamp(),
-        })
+        // En mode create : doc id = code. Pre-check via getDoc pour éviter
+        // qu'un setDoc silencieusement écrase un club existant orphelin.
+        const ref = doc(db, 'clubs', codeUp)
+        const existing = await getDoc(ref)
+        if (existing.exists()) {
+          setError(`A club with id "${codeUp}" already exists in Firestore. Pick another code or delete the existing one first.`)
+          setSaving(false); return
+        }
+        await setDoc(ref, { ...data, createdAt: serverTimestamp() })
         cancelEdit()
         // Auto-select le club fraîchement créé
-        setClub(ref.id)
+        setClub(codeUp)
         navigate('/live')
       }
     } catch (e) { setError(e.message) }
@@ -319,6 +331,7 @@ export default function SelectClubPage() {
 
 // ─── Sous-composant : form inline pour create/edit ────────────────────────────
 function ClubFormPanel({ mode, form, setForm, saving, error, onSave, onCancel }) {
+  const isEdit = mode === 'edit'
   return (
     <div style={{
       padding: 16, borderRadius: 10,
@@ -327,12 +340,22 @@ function ClubFormPanel({ mode, form, setForm, saving, error, onSave, onCancel })
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
       <div style={{ fontSize: 10, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.5)' }}>
-        {mode === 'edit' ? 'EDIT CLUB' : 'NEW CLUB'}
+        {isEdit ? 'EDIT CLUB' : 'NEW CLUB'}
       </div>
-      <input value={form.code}
-        onChange={e => setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
-        placeholder="Code (e.g. EBBY-01)" maxLength={12}
-        style={inputStyle} />
+      {/* Code : verrouillé en edit (code = doc id Firestore, immutable) */}
+      <div>
+        <input value={form.code}
+          onChange={e => isEdit ? null : setForm(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+          placeholder="Code (e.g. EBBY-01)" maxLength={12}
+          disabled={isEdit}
+          style={{ ...inputStyle, width: '100%',
+            opacity: isEdit ? 0.5 : 1, cursor: isEdit ? 'not-allowed' : 'text' }} />
+        {isEdit && (
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
+            Code locked — it's the Firestore document id. To change, delete and recreate.
+          </div>
+        )}
+      </div>
       <input value={form.name}
         onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
         placeholder="Name (e.g. ULM Baisy-Thy)"
@@ -348,7 +371,7 @@ function ClubFormPanel({ mode, form, setForm, saving, error, onSave, onCancel })
         <button onClick={onCancel} style={btnSecondary}>CANCEL</button>
         <button onClick={onSave} disabled={saving}
           style={{ ...btnPrimary, opacity: saving ? 0.5 : 1 }}>
-          {saving ? '…' : mode === 'edit' ? 'UPDATE' : 'CREATE'}
+          {saving ? '…' : isEdit ? 'UPDATE' : 'CREATE'}
         </button>
       </div>
     </div>
