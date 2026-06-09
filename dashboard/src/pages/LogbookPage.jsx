@@ -334,6 +334,12 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
 function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete, onDelete }) {
   const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e supprime
+  // Désarme automatiquement après 5 s (pas de dépendance au survol → pas de course).
+  useEffect(() => {
+    if (!confirmDelId) return
+    const t = setTimeout(() => setConfirmDelId(''), 5000)
+    return () => clearTimeout(t)
+  }, [confirmDelId])
   const [filterPilot,    setFilterPilot]    = useState('')
   const [filterInstr,    setFilterInstr]    = useState('')
   const [filterAircraft, setFilterAircraft] = useState('')
@@ -464,7 +470,6 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete
                     {canDelete && (
                       confirmDelId === f.id
                         ? <button onClick={() => { onDelete(f.id); setConfirmDelId('') }}
-                                  onMouseLeave={() => setConfirmDelId('')}
                                   style={DEL_CONFIRM_BTN}>CONFIRMER ?</button>
                         : <button onClick={() => setConfirmDelId(f.id)} title="Supprimer définitivement"
                                   style={DEL_BTN}>SUPPR</button>

@@ -7,7 +7,7 @@
 //   C'est l'indicateur anti-cache : si la date affichée sur la tablette n'est pas
 //   celle du dernier build, le navigateur sert un bundle périmé → hard reload.
 
-export const APP_VERSION = 'v1'
+export const APP_VERSION = 'v2'
 export const APP_CHANNEL = 'dev'
 // eslint-disable-next-line no-undef
 export const BUILD_DATE = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : 'dev'
