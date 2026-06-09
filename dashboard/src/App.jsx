@@ -158,7 +158,7 @@ function AppLayout({ user, role, userClubId }) {
           {/* LOGBOOK — instructeur + admin (+ super_admin) */}
           <Route path="/logbook" element={
             <RequireRole user={user} role={role} allowed={['instructor', 'admin', 'super_admin']}>
-              <LogbookPage />
+              <LogbookPage role={role} />
             </RequireRole>
           } />
 

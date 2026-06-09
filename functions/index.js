@@ -1,5 +1,5 @@
 const { onRequest } = require('firebase-functions/v2/https')
-const { onDocumentWritten } = require('firebase-functions/v2/firestore')
+const { onDocumentWritten, onDocumentDeleted } = require('firebase-functions/v2/firestore')
 const { defineSecret } = require('firebase-functions/params')
 const { initializeApp, getApps } = require('firebase-admin/app')
 const { getFirestore, FieldValue } = require('firebase-admin/firestore')
@@ -288,6 +288,31 @@ exports.normalizeFlight = onDocumentWritten(
     if (!after.aircraft_ident) return                      // doc dashboard-natif (camelCase) → ignore
     if (after._normalized === true) return                 // déjà normalisé → anti-loop
     await normalizeFlightDoc(getFirestore(), event.params.flightId, after)
+  }
+)
+
+// ─── Nettoyage Storage à la suppression d'un vol ──────────────────────────────
+// La suppression du doc /flights (admin, depuis le carnet) ne supprime pas les
+// CSV sur Storage → ce trigger efface les objets associés pour éviter les orphelins.
+// Best-effort : un objet déjà absent (vol jamais uploadé, ou LTE désactivé) est ignoré.
+exports.onFlightDeleted = onDocumentDeleted(
+  { document: 'flights/{flightId}', region: 'europe-west1' },
+  async (event) => {
+    const data = event.data?.data() || {}
+    const fid = data.flight_id || event.params.flightId
+    const paths = [
+      data.csvStoragePath    || `flights/${fid}.csv`,
+      data.csvLteStoragePath || `flights_lte/${fid}.csv`,
+    ]
+    const bucket = getStorage().bucket(STORAGE_BUCKET)
+    for (const p of paths) {
+      try {
+        await bucket.file(p).delete()
+        console.log(`onFlightDeleted ${event.params.flightId}: removed ${p}`)
+      } catch (e) {
+        if (e.code !== 404) console.warn(`onFlightDeleted ${event.params.flightId}: ${p} → ${e.message}`)
+      }
+    }
   }
 )
 

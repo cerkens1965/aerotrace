@@ -69,12 +69,13 @@ service cloud.firestore {
     // ── Flights ────────────────────────────────────────────────────────────────
     // Create : tout utilisateur connecté (upload CSV via ReplayPage).
     // Update : instructeur ou admin (assignation pilote/avion, validation).
-    // Delete : jamais (soft-delete non applicable ici, les docs restent).
+    // Delete : admin uniquement (purge de vols de test). Une Cloud Function
+    //          onFlightDeleted nettoie les CSV Storage associés.
     match /flights/{flightId} {
       allow read:   if isSignedIn();
       allow create: if isSignedIn();
       allow update: if isInstructorOrAdmin();
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
   }
 }

@@ -6,7 +6,7 @@
 //   TOUS LES VOLS→ matrice admin filtrable (Qui-Quoi-Comment), assignation inline
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNavigate } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
@@ -82,6 +82,14 @@ const ASSIGN_BTN = {
   background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)',
   color: '#60a5fa', fontFamily: 'monospace', fontSize: 11, padding: '3px 10px',
   borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+}
+const DEL_BTN = {
+  background: 'transparent', border: '1px solid rgba(239,68,68,0.3)',
+  color: 'rgba(239,68,68,0.85)', fontFamily: 'monospace', fontSize: 11,
+  padding: '3px 9px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+}
+const DEL_CONFIRM_BTN = {
+  ...DEL_BTN, background: '#ef4444', border: '1px solid #ef4444', color: '#fff', fontWeight: 700,
 }
 const CARD_STYLE = { background: '#ffffff', borderRadius: 8, overflow: 'hidden' }
 
@@ -324,7 +332,8 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
 // ─── FlightMatrix ─────────────────────────────────────────────────────────────
 
-function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign }) {
+function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete, onDelete }) {
+  const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e supprime
   const [filterPilot,    setFilterPilot]    = useState('')
   const [filterInstr,    setFilterInstr]    = useState('')
   const [filterAircraft, setFilterAircraft] = useState('')
@@ -448,9 +457,19 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign }) {
                 <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                 <td style={TD}><ValidBadge validated={f.validated} /></td>
                 <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                  {f.validated
-                    ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                    : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                  <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                    {f.validated
+                      ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                    {canDelete && (
+                      confirmDelId === f.id
+                        ? <button onClick={() => { onDelete(f.id); setConfirmDelId('') }}
+                                  onMouseLeave={() => setConfirmDelId('')}
+                                  style={DEL_CONFIRM_BTN}>CONFIRMER ?</button>
+                        : <button onClick={() => setConfirmDelId(f.id)} title="Supprimer définitivement"
+                                  style={DEL_BTN}>SUPPR</button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -463,8 +482,9 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign }) {
 
 // ─── LogbookPage ──────────────────────────────────────────────────────────────
 
-export default function LogbookPage() {
+export default function LogbookPage({ role }) {
   const { clubId } = useClub()
+  const canDelete = role === 'admin' || role === 'super_admin'
   const [tab,          setTab]          = useState('pilots')
   const [pilots,       setPilots]       = useState([])
   const [aircraft,     setAircraft]     = useState([])
@@ -516,6 +536,18 @@ export default function LogbookPage() {
 
   const handleReplay = useCallback(id => navigate(`/replay/${id}`), [navigate])
   const handleAssign = useCallback(f => setAssignFlight(f), [])
+
+  // Suppression définitive (admin) — efface le doc Firestore ; la Cloud Function
+  // onFlightDeleted nettoie les CSV Storage. Retire la ligne de l'état local.
+  const handleDelete = useCallback(async (id) => {
+    try {
+      await deleteDoc(doc(db, 'flights', id))
+      setFlights(prev => prev.filter(f => f.id !== id))
+    } catch (e) {
+      console.error('Delete flight:', e)
+      alert('Suppression refusée : ' + e.message)
+    }
+  }, [])
 
   const totalSeconds  = useMemo(() => flights.reduce((s, f) => s + (f.duration || 0), 0), [flights])
   const pendingCount  = useMemo(() => flights.filter(f => !f.validated).length, [flights])
@@ -677,7 +709,7 @@ export default function LogbookPage() {
               </div>
             )}
             {tab === 'matrix' && (
-              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} onReplay={handleReplay} onAssign={handleAssign} />
+              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
             )}
           </>
         )}
