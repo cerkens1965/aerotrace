@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
@@ -51,6 +51,9 @@ export default function App() {
   const [loading, setLoading]       = useState(true)
 
   useEffect(() => {
+    // Login par redirect (mobile/tablette) : remonte une éventuelle erreur au retour.
+    // La session elle-même est récupérée par onAuthStateChanged ci-dessous.
+    getRedirectResult(auth).catch((e) => console.error('Redirect login error:', e))
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser)
       if (currentUser) {

@@ -1,10 +1,13 @@
-import { signInWithPopup } from 'firebase/auth'
+import { signInWithRedirect } from 'firebase/auth'
 import { auth, provider } from '../../firebase/config'
 
 export default function LoginPage() {
   const handleLogin = async () => {
+    // Redirect (et non popup) : fiable sur tablette/mobile où les popups sont
+    // souvent bloqués. La session est récupérée au retour par onAuthStateChanged
+    // (App.jsx) + getRedirectResult pour remonter une éventuelle erreur.
     try {
-      await signInWithPopup(auth, provider)
+      await signInWithRedirect(auth, provider)
     } catch (error) {
       console.error('Login error:', error)
     }
