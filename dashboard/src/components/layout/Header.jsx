@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { signOut } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
+import { APP_VERSION, APP_CHANNEL, BUILD_DATE } from '../../version'
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 const AMBER   = '#F5A623'
@@ -84,6 +85,23 @@ export default function Header({ user, role }) {
           }}
         />
       </div>
+
+      {/* Badge version — channel + n° (bump manuel) + date de build (anti-cache) */}
+      <span
+        title={`Build ${BUILD_DATE} · recharge en hard si la date ne correspond pas au dernier déploiement`}
+        style={{
+          display: 'flex', alignItems: 'baseline', gap: 5,
+          marginRight: 14, flexShrink: 0,
+          fontFamily: 'monospace', fontSize: 10, letterSpacing: 0.5,
+          padding: '2px 8px', borderRadius: 5,
+          color: APP_CHANNEL === 'dev' ? '#F5A623' : 'rgba(255,255,255,0.7)',
+          border: `1px solid ${APP_CHANNEL === 'dev' ? 'rgba(245,166,35,0.35)' : 'rgba(255,255,255,0.15)'}`,
+          background: APP_CHANNEL === 'dev' ? 'rgba(245,166,35,0.08)' : 'transparent',
+        }}
+      >
+        <strong style={{ fontWeight: 700 }}>{APP_CHANNEL.toUpperCase()} {APP_VERSION}</strong>
+        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9 }}>{BUILD_DATE}</span>
+      </span>
 
       {/* Séparateur */}
       <div style={{ width: 1, height: 20, background: '#ffffff', marginRight: 12 }} />
