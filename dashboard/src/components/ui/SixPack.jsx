@@ -482,7 +482,7 @@ export default function SixPack({ frame, size = 110 }) {
       </Instrument>
 
       <Instrument label="ALTITUDE" size={size}>
-        <Altimeter alt={frame.altInd} size={size} />
+        <Altimeter alt={frame.alt} size={size} />
       </Instrument>
 
       <Instrument label="VSI" size={size}>

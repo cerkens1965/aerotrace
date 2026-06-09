@@ -367,7 +367,7 @@ function DataStrip({ frame }) {
   if (!frame) return null
   const items = [
     { l: 'IAS',   v: `${Math.round(frame.ias)}kt` },
-    { l: 'ALT',   v: `${Math.round(frame.altInd)}ft` },
+    { l: 'ALT',   v: `${Math.round(frame.alt)}ft` },
     { l: 'AGL',   v: `${Math.round(frame.agl)}ft` },
     { l: 'VSI',   v: `${frame.vspd > 0 ? '+' : ''}${Math.round(frame.vspd)}fpm` },
     { l: 'HDG',   v: `${Math.round(frame.hdg)}°` },
@@ -418,9 +418,17 @@ export default function ReplayPage({ user }) {
     const { signal } = csvAbortRef.current
     setSelected(fl)
     setParsed(null)
-    if (!fl.csvUrl) return
+    // Les vols uploadés par boîtier n'ont pas de csvUrl (seulement csvStoragePath) :
+    // on reconstruit l'URL de download à la volée depuis Storage. GCS sert le CSV
+    // décompressé (transcoding gzip) → parseG3XCSV inchangé.
+    let url = fl.csvUrl
+    if (!url && fl.csvStoragePath) {
+      try { url = await getDownloadURL(ref(storage, fl.csvStoragePath)) }
+      catch (e) { console.error('CSV URL from storage path:', e); return }
+    }
+    if (!url) return
     try {
-      const res  = await fetch(fl.csvUrl, { signal })
+      const res  = await fetch(url, { signal })
       const text = await res.text()
       const p    = parseG3XCSV(text)
       setParsed(p)

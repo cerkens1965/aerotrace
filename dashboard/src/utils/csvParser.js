@@ -136,6 +136,11 @@ export function parseG3XCSV(content) {
       ? frame.trk
       : frame.truHdg
 
+    // Altitude MSL affichable (ft) : baro/indiquée (QNH) si dispo, SINON GPS. Les boîtiers
+    // AT-CORE n'ont pas de capteur baro → AltInd=NaN ; il faut retomber sur AltGPS (déjà en
+    // pieds), sinon ALT/maxAlt/altimètre/charts affichaient 0/NaN ou une valeur fausse.
+    frame.alt = frame.altInd ?? frame.altGps
+
     // Phase detection — utilise AGL si dispo, sinon vitesse sol comme proxy
     const aglFt = frame.agl ?? (frame.gndSpd < 5 ? 0 : null)
     if (frame.rpm < 800 || (aglFt !== null && aglFt < 50)) frame.phase = 'GROUND'
@@ -158,7 +163,7 @@ export function parseG3XCSV(content) {
     if (lat > maxLat) maxLat = lat
     if (lon < minLon) minLon = lon
     if (lon > maxLon) maxLon = lon
-    if (frame.altInd > maxAlt) maxAlt = frame.altInd
+    if (frame.alt > maxAlt) maxAlt = frame.alt
     if (frame.ias > maxSpd)    maxSpd = frame.ias
     if (g > maxG)              maxG = g
     if (frame.rpm > maxRpm)    maxRpm = frame.rpm

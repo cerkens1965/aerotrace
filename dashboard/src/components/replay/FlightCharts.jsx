@@ -11,7 +11,7 @@ const C = {
 }
 
 const PARAMS = [
-  { key: 'altInd', label: 'ALT',   unit: 'ft',  color: '#60a5fa', defaultOn: true  },
+  { key: 'alt',    label: 'ALT',   unit: 'ft',  color: '#60a5fa', defaultOn: true  },
   { key: 'ias',    label: 'IAS',   unit: 'kt',  color: '#22c55e', defaultOn: true  },
   { key: 'vspd',   label: 'VSI',   unit: 'fpm', color: '#a78bfa', defaultOn: false },
   { key: 'normAc', label: 'G',     unit: 'g',   color: '#f97316', defaultOn: false },
