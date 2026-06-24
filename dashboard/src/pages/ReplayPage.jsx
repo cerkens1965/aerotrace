@@ -366,7 +366,7 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
 function DataStrip({ frame }) {
   if (!frame) return null
   const items = [
-    { l: 'IAS',   v: `${Math.round(frame.ias)}kt` },
+    { l: 'GS',    v: `${Math.round(frame.spd)}kt` },
     { l: 'ALT',   v: `${Math.round(frame.alt)}ft` },
     { l: 'AGL',   v: `${Math.round(frame.agl)}ft` },
     { l: 'VSI',   v: `${frame.vspd > 0 ? '+' : ''}${Math.round(frame.vspd)}fpm` },
