@@ -12,7 +12,7 @@ const C = {
 
 const PARAMS = [
   { key: 'alt',    label: 'ALT',   unit: 'ft',  color: '#60a5fa', defaultOn: true  },
-  { key: 'ias',    label: 'IAS',   unit: 'kt',  color: '#22c55e', defaultOn: true  },
+  { key: 'spd',    label: 'GS',    unit: 'kt',  color: '#22c55e', defaultOn: true  },
   { key: 'vspd',   label: 'VSI',   unit: 'fpm', color: '#a78bfa', defaultOn: false },
   { key: 'normAc', label: 'G',     unit: 'g',   color: '#f97316', defaultOn: false },
   { key: 'rpm',    label: 'RPM',   unit: '',    color: '#F5A623', defaultOn: false },
