@@ -141,6 +141,11 @@ export function parseG3XCSV(content) {
     // pieds), sinon ALT/maxAlt/altimètre/charts affichaient 0/NaN ou une valeur fausse.
     frame.alt = frame.altInd ?? frame.altGps
 
+    // Vitesse affichable (kt) : IAS (pitot) si dispo, SINON vitesse sol GPS. Les boîtiers
+    // AT-CORE n'ont pas de pitot → IAS=NaN (→0 via numOr0) ; il faut retomber sur GndSpd,
+    // sinon l'indicateur de vitesse / la lecture IAS affichaient 0 (alt OK car déjà fallback).
+    frame.spd = frame.ias || frame.gndSpd
+
     // Phase detection — utilise AGL si dispo, sinon vitesse sol comme proxy
     const aglFt = frame.agl ?? (frame.gndSpd < 5 ? 0 : null)
     if (frame.rpm < 800 || (aglFt !== null && aglFt < 50)) frame.phase = 'GROUND'
@@ -164,7 +169,7 @@ export function parseG3XCSV(content) {
     if (lon < minLon) minLon = lon
     if (lon > maxLon) maxLon = lon
     if (frame.alt > maxAlt) maxAlt = frame.alt
-    if (frame.ias > maxSpd)    maxSpd = frame.ias
+    if (frame.spd > maxSpd)    maxSpd = frame.spd
     if (g > maxG)              maxG = g
     if (frame.rpm > maxRpm)    maxRpm = frame.rpm
   }

@@ -478,7 +478,7 @@ export default function SixPack({ frame, size = 110 }) {
       </Instrument>
 
       <Instrument label="AIRSPEED" size={size}>
-        <AirspeedIndicator ias={frame.ias} size={size} />
+        <AirspeedIndicator ias={frame.spd} size={size} />
       </Instrument>
 
       <Instrument label="ALTITUDE" size={size}>
