@@ -58,7 +58,12 @@ export default function useFleet(clubId) {
       const res = await fetch(`/safesky/traffic?${FLEET_VIEWPORT}&show_grounded=true`)
       if (!res.ok) throw new Error(`SafeSky ${res.status}`)
       const data = await res.json()
-      setSafesky(Array.isArray(data?.nearby_traffic) ? data.nearby_traffic : [])
+      // ⚠️ L'API REST SafeSky /traffic renvoie l'altitude en MÈTRES (le viewer live.safesky.app
+      // convertit en pieds, mais pas l'API). Tout le dashboard l'affiche en « ft » → on convertit
+      // m→ft ICI, à la source, pour que tous les consommateurs (carte, En Vol) soient justes.
+      const tr = Array.isArray(data?.nearby_traffic) ? data.nearby_traffic.map(t =>
+        ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude })) : []
+      setSafesky(tr)
     } catch (err) {
       console.warn('[useFleet] SafeSky poll failed:', err.message)
     }
