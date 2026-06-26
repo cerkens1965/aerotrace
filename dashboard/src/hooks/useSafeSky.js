@@ -15,7 +15,10 @@ export default function useSafeSky(bounds) {
           `/safesky/traffic?lat_min=${latMin}&lon_min=${lonMin}&lat_max=${latMax}&lon_max=${lonMax}`
         )
         const data = await res.json()
-        if (data.nearby_traffic) setTraffic(data.nearby_traffic)
+        // ⚠️ API REST SafeSky /traffic = altitude en MÈTRES (le viewer live.safesky.app convertit
+        // en pieds, pas l'API). Le dashboard affiche en « ft » → conversion m→ft à la source.
+        if (data.nearby_traffic) setTraffic(data.nearby_traffic.map(t =>
+          ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude })))
       } catch (error) {
         console.error('SafeSky fetch error:', error)
       }
