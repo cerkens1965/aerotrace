@@ -1,13 +1,14 @@
 rules_version = '2';
 
 // Règles Cloud Storage AeroTrace.
-// - firmware/atv/** : PUBLIC en lecture (OTA cloud-pull de l'écran AT-VIEW, sans token ;
-//   le binaire n'est pas secret — cf MITM déjà non couvert par setInsecure côté boîtier).
-// - tout le reste (flights, firmware/{wrover,s3}, ...) : lecture/écriture si authentifié
-//   (provider Anonyme — upload vol, OTA boîtier avec Bearer token).
+// - firmware/** (atv + wrover + s3) : PUBLIC en lecture (OTA cloud-pull ATV *et* boîtier, sans
+//   token — binaire non secret, MITM déjà non couvert par setInsecure). CRITIQUE côté WROVER : le
+//   check version en 1 SEUL TLS public tient avec le BLE actif (heap fragmenté), là où auth(TLS)+
+//   GET(TLS) = 2 TLS échouait (-1). Écriture (publish) toujours authentifiée.
+// - tout le reste (flights, ...) : lecture/écriture si authentifié (provider Anonyme).
 service firebase.storage {
   match /b/{bucket}/o {
-    match /firmware/atv/{allPaths=**} {
+    match /firmware/{allPaths=**} {
       allow read: if true;
       allow write: if request.auth != null;
     }
