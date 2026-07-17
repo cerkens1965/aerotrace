@@ -151,12 +151,28 @@ exports.dedupPilotPin = onDocumentWritten(
 const norm = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
 // Parse minimal d'un CSV Garmin G3X (3 lignes d'en-tête) → stats. Best-effort.
+/** "+02:00" | "-05:30" → minutes (120 | -330). null si illisible/absent. */
+function parseUtcOffsetMin(s) {
+  const m = /^([+-])(\d{1,2}):(\d{2})$/.exec((s || '').trim())
+  if (!m) return null
+  const min = parseInt(m[2], 10) * 60 + parseInt(m[3], 10)
+  return m[1] === '-' ? -min : min
+}
+
 function parseG3XStats(text) {
   const lines = text.split('\n').filter((l) => l.trim())
   if (lines.length < 4) throw new Error('too few lines')
   const headers = lines[2].split(',').map((h) => h.trim())
   const idx = (name) => headers.indexOf(name)
-  const iDate = idx('UTC Date'), iTime = idx('UTC Time')
+  // date/heure : AT-CORE écrit 'UTC Date'+'UTC Time' ; un G3X natif n'a PAS de 'UTC Date',
+  // seulement 'Lcl Date'+'Lcl Time'+'UTCOfst' → on lit la paire locale et on retranche
+  // l'offset. (Le G3X a bien une colonne 'UTC Time', mais sans date : l'associer à
+  // 'Lcl Date' serait faux d'un jour quand l'offset fait franchir minuit.)
+  const utcDate = idx('UTC Date')
+  const isLocal = utcDate < 0
+  const iDate = isLocal ? idx('Lcl Date') : utcDate
+  const iTime = isLocal ? idx('Lcl Time') : idx('UTC Time')
+  const iOfst = isLocal ? idx('UTCOfst')  : -1
   const iAltG = idx('AltGPS'),   iAltI = idx('AltInd')
   const iIas = idx('IAS'),       iGs = idx('GndSpd')
   const iNz = idx('NormAc'),     iRpm = idx('E1 RPM')
@@ -175,8 +191,12 @@ function parseG3XStats(text) {
     const ds = iDate >= 0 ? (parts[iDate] || '').trim() : ''
     const tk = iTime >= 0 ? (parts[iTime] || '').trim() : ''
     if (!ds || !tk) continue
-    const ts = new Date(`${ds}T${tk}Z`).getTime()
+    let ts = new Date(`${ds}T${tk}Z`).getTime()
     if (isNaN(ts)) continue
+    if (isLocal) {
+      const ofs = iOfst >= 0 ? parseUtcOffsetMin(parts[iOfst]) : null
+      if (ofs !== null) ts -= ofs * 60000   // offset illisible → on garde tel quel
+    }
     const lat = numAt(parts, iLat), lon = numAt(parts, iLon)
     if (lat === 0 && lon === 0) continue
     if (startTs === null) startTs = ts

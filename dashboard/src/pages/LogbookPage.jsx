@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import {
-  formatDate, formatDuration, sortByDateDesc,
+  formatDate, formatDuration, sortByDateDesc, tsMillis,
   FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge,
 } from '../utils/logbookUtils'
 
@@ -360,7 +360,7 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete
     if (filterStatus === 'pending')   list = list.filter(f => !f.validated)
     list.sort((a, b) => {
       let va, vb
-      if (sortKey === 'date')     { va = a.startTs?.toDate?.() || 0; vb = b.startTs?.toDate?.() || 0 }
+      if (sortKey === 'date')     { va = tsMillis(a.startTs); vb = tsMillis(b.startTs) }
       if (sortKey === 'duration') { va = a.duration || 0; vb = b.duration || 0 }
       if (sortKey === 'aircraft') { va = a.aircraftIdent || ''; vb = b.aircraftIdent || '' }
       if (va < vb) return sortDir === 'asc' ? -1 : 1
@@ -563,8 +563,8 @@ export default function LogbookPage({ role }) {
   const sortedPilots = useMemo(() => {
     const withStats = regularPilots.map(p => {
       const pFlights = flights.filter(f => f.pilotId === p.id)
-      const last = pFlights.sort((a, b) => (b.startTs?.toDate?.() || 0) - (a.startTs?.toDate?.() || 0))[0]
-      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last?.startTs?.toDate?.() || null }
+      const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
+      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => a.lastName.localeCompare(b.lastName))
     if (sortPilots === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
@@ -575,8 +575,8 @@ export default function LogbookPage({ role }) {
   const sortedInstructors = useMemo(() => {
     const withStats = instructors.map(p => {
       const pFlights = flights.filter(f => f.instructorId === p.id)
-      const last = pFlights.sort((a, b) => (b.startTs?.toDate?.() || 0) - (a.startTs?.toDate?.() || 0))[0]
-      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last?.startTs?.toDate?.() || null }
+      const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
+      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => a.lastName.localeCompare(b.lastName))
     if (sortPilots === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
@@ -587,8 +587,8 @@ export default function LogbookPage({ role }) {
   const sortedAircraft = useMemo(() => {
     const withStats = aircraft.map(ac => {
       const acFlights = flights.filter(f => f.aircraftIdent === ac.registration)
-      const last = acFlights.sort((a, b) => (b.startTs?.toDate?.() || 0) - (a.startTs?.toDate?.() || 0))[0]
-      return { ...ac, _totalSecs: acFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last?.startTs?.toDate?.() || null }
+      const last = acFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
+      return { ...ac, _totalSecs: acFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortAircraft === 'alpha')      return [...withStats].sort((a, b) => (a.callSign || a.registration).localeCompare(b.callSign || b.registration))
     if (sortAircraft === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))

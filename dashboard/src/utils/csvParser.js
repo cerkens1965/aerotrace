@@ -9,9 +9,8 @@
  */
 
 // Columns we extract from the G3X CSV
+// (date/heure résolues à part — cf resolveTimeCols : les deux sources ne les nomment pas pareil)
 const COLS = {
-  date:    'UTC Date',
-  time:    'UTC Time',
   lat:     'Latitude',
   lon:     'Longitude',
   altGps:  'AltGPS',
@@ -36,6 +35,38 @@ const COLS = {
   egt2:    'E1 EGT2',
   wndSpd:  'WndSpd',
   wndDir:  'WndDr',
+}
+
+/**
+ * "+02:00" | "-05:30" → minutes (120 | -330). null si illisible/absent.
+ */
+function parseUtcOffsetMin(s) {
+  const m = /^([+-])(\d{1,2}):(\d{2})$/.exec((s || '').trim())
+  if (!m) return null
+  const min = parseInt(m[2], 10) * 60 + parseInt(m[3], 10)
+  return m[1] === '-' ? -min : min
+}
+
+/**
+ * Résout les colonnes date/heure. Les deux sources ne les nomment pas pareil :
+ *  - AT-CORE écrit 'UTC Date' + 'UTC Time' → lecture directe.
+ *  - un G3X natif écrit 'Lcl Date' + 'Lcl Time' + 'UTCOfst' et n'a PAS de 'UTC Date'.
+ * Dans le 2e cas on lit la paire LOCALE et on retranche l'offset. Il y a bien une colonne
+ * 'UTC Time' dans le G3X natif, mais elle est sans date : l'associer à 'Lcl Date' donnerait
+ * un timestamp faux d'un jour dès que l'offset fait franchir minuit.
+ * Retourne des index de colonnes (-1 = absente) + le mode.
+ */
+function resolveTimeCols(shortHeaders) {
+  const utcDate = shortHeaders.indexOf('UTC Date')
+  if (utcDate !== -1) {
+    return { date: utcDate, time: shortHeaders.indexOf('UTC Time'), local: false, ofst: -1 }
+  }
+  return {
+    date:  shortHeaders.indexOf('Lcl Date'),
+    time:  shortHeaders.indexOf('Lcl Time'),
+    local: true,
+    ofst:  shortHeaders.indexOf('UTCOfst'),
+  }
 }
 
 /**
@@ -67,6 +98,7 @@ export function parseG3XCSV(content) {
     const idx = shortHeaders.indexOf(colName)
     if (idx !== -1) colIndex[key] = idx
   })
+  const tcol = resolveTimeCols(shortHeaders)
 
   // Parse data rows
   const frames = []
@@ -88,12 +120,18 @@ export function parseG3XCSV(content) {
     }
     const numOr0 = (key) => num(key) ?? 0
 
-    const dateStr = get('date')
-    const timeStr = get('time')
+    const dateStr = tcol.date !== -1 ? parts[tcol.date]?.trim() : null
+    const timeStr = tcol.time !== -1 ? parts[tcol.time]?.trim() : null
     if (!dateStr || !timeStr) continue
 
-    const ts = new Date(`${dateStr}T${timeStr}Z`).getTime()
+    let ts = new Date(`${dateStr}T${timeStr}Z`).getTime()
     if (isNaN(ts)) continue
+    if (tcol.local) {
+      // paire locale → UTC. Offset illisible/absent : on garde tel quel (mieux que rejeter
+      // la frame ; un G3X réglé en UTC a UTCOfst=+00:00, donc no-op).
+      const ofs = tcol.ofst !== -1 ? parseUtcOffsetMin(parts[tcol.ofst]) : null
+      if (ofs !== null) ts -= ofs * 60000
+    }
 
     const lat = num('lat')
     const lon = num('lon')

@@ -43,12 +43,23 @@ export function formatDate(ts, short = false) {
   } catch { return '—' }
 }
 
+/**
+ * startTs → epoch ms. Tolère les DEUX types présents en base : un nombre (epoch ms — ce
+ * qu'écrivent normalizeFlight et l'upload dashboard) ou un Timestamp Firestore (docs
+ * historiques). Indispensable : `ts?.toDate?.() || 0` sur un nombre donne 0 silencieusement
+ * et tue le tri. 0 si absent/illisible → l'élément part en fin de tri desc.
+ */
+export function tsMillis(ts) {
+  if (ts == null) return 0
+  if (typeof ts === 'number') return ts
+  if (typeof ts.toMillis === 'function') return ts.toMillis()
+  if (typeof ts.toDate === 'function') return ts.toDate().getTime()
+  const t = new Date(ts).getTime()
+  return isNaN(t) ? 0 : t
+}
+
 export function sortByDateDesc(arr) {
-  return [...arr].sort((a, b) => {
-    const ta = a.startTs?.toDate?.() || new Date(a.startTs || 0)
-    const tb = b.startTs?.toDate?.() || new Date(b.startTs || 0)
-    return tb - ta
-  })
+  return [...arr].sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))
 }
 
 // Derive flightType from assignment fields
@@ -67,6 +78,10 @@ export const FLIGHT_TYPES = {
   dual:            { label: 'Double commande',   short: 'DBL CMD', color: '#F5A623' },
   solo_supervised: { label: 'Solo supervisé',    short: 'SUPERVISÉ', color: '#60a5fa' },
   rental:          { label: 'Location',          short: 'LOCATION', color: '#a78bfa' },
+  // Pas un vol : démarrage/roulage/artefact d'enregistrement (jamais décollé). Marqué à
+  // l'import pour rester filtrable et supprimable en lot, sans polluer les totaux d'heures.
+  // deriveFlightType ne le produit jamais — il n'est posé que par un import explicite.
+  ground:          { label: 'Sol / roulage',     short: 'SOL',    color: '#6b7c8d' },
 }
 
 export function getPilotName(pilots, id) {
