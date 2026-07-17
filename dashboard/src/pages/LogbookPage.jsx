@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import {
-  formatDate, formatDuration, sortByDateDesc, tsMillis,
+  formatDate, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
   FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge,
 } from '../utils/logbookUtils'
 
@@ -71,6 +71,23 @@ function ValidBadge({ validated }) {
   )
 }
 
+/**
+ * Terrain (OACI) + drapeau de son pays. `icao` null → tiret : normalizeFlight n'a
+ * trouvé aucun terrain à moins de 5 km du 1er/dernier point GPS (hors base AIP, ou
+ * log qui ne démarre pas au sol). On préfère l'aveu au terrain faux.
+ * Le drapeau ne s'affiche pas sous Windows (pas de police) → les 2 lettres du pays
+ * apparaissent à la place, ce qui reste lisible.
+ */
+function Airfield({ icao }) {
+  if (!icao) return <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>
+  const flag = icaoFlag(icao)
+  return (
+    <span title={icaoCountry(icao) || 'pays inconnu'} style={{ color: '#0a0e1e' }}>
+      {flag && <span style={{ marginRight: 4 }}>{flag}</span>}{icao}
+    </span>
+  )
+}
+
 const TH = { textAlign: 'left', padding: '5px 10px', fontWeight: 400, fontSize: 10, letterSpacing: 1.5, color: 'rgba(10,14,30,0.45)', whiteSpace: 'nowrap' }
 const TD = { padding: '9px 10px', color: '#0a0e1e', fontFamily: 'monospace', fontSize: 12, verticalAlign: 'middle' }
 const REPLAY_BTN = {
@@ -95,7 +112,7 @@ const CARD_STYLE = { background: '#ffffff', borderRadius: 8, overflow: 'hidden' 
 
 // ─── PilotCard ────────────────────────────────────────────────────────────────
 
-function PilotCard({ pilot, flights, pilots, mode, onReplay, onAssign }) {
+function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }) {
   const [open, setOpen] = useState(false)
 
   const myFlights = useMemo(() => {
@@ -219,7 +236,7 @@ function PilotCard({ pilot, flights, pilots, mode, onReplay, onAssign }) {
               {myFlights.map((f, i) => (
                 <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.06)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDate(f.startTs)}</td>
-                  <td style={{ ...TD, color: '#0a0e1e' }}>{f.aircraftIdent || '—'}</td>
+                  <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</td>
                   {mode === 'instructor' && <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>}
                   {mode === 'pilot' && <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.instructorId ? getPilotName(pilots, f.instructorId) : '—'}</td>}
                   <td style={TD}>{formatDuration(f.duration)}</td>
@@ -332,7 +349,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
 // ─── FlightMatrix ─────────────────────────────────────────────────────────────
 
-function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete, onDelete }) {
+function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, canDelete, onDelete }) {
   const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e supprime
   // Désarme automatiquement après 5 s (pas de dépendance au survol → pas de course).
   useEffect(() => {
@@ -424,6 +441,7 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete
             <tr>
               <SortTH skey="date">DATE</SortTH>
               <SortTH skey="aircraft">AVION</SortTH>
+              <th style={TH}>TRAJET</th>
               <th style={TH}>PILOTE</th>
               <th style={TH}>RÔLE</th>
               <th style={TH}>INSTRUCTEUR</th>
@@ -437,7 +455,7 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={11} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>Aucun vol correspondant</td></tr>
+              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>Aucun vol correspondant</td></tr>
             )}
             {filtered.map((f, i) => (
               <tr key={f.id} style={{
@@ -445,7 +463,16 @@ function FlightMatrix({ flights, pilots, aircraft, onReplay, onAssign, canDelete
                 background: !f.validated ? 'rgba(245,166,35,0.02)' : i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)',
               }}>
                 <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDate(f.startTs)}</td>
-                <td style={{ ...TD, color: '#0a0e1e' }}>{f.aircraftIdent || '—'}</td>
+                <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel(f.aircraftIdent)}</td>
+                {/* Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
+                    moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol. */}
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                  {(f.depIcao || f.arrIcao)
+                    ? <><Airfield icao={f.depIcao} />
+                        <span style={{ color: 'rgba(10,14,30,0.35)' }}> → </span>
+                        <Airfield icao={f.arrIcao} /></>
+                    : <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>}
+                </td>
                 <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>
                 <td style={TD}>
                   {f.pilotRole === 'student'
@@ -499,6 +526,13 @@ export default function LogbookPage({ role }) {
   const navigate = useNavigate()
 
   const [loadError, setLoadError] = useState(null)
+
+  // Affichage avion = indicatif (callSign) si déclaré, sinon immat. f.aircraftIdent
+  // reste la clé (filtre/tri) ; partagé avec FlightMatrix et les cartes.
+  const acLabel = useMemo(() => {
+    const byReg = new Map(aircraft.map(a => [a.registration, a.callSign]))
+    return reg => (reg ? (byReg.get(reg) || reg) : '—')
+  }, [aircraft])
 
   // Charge pilots/aircraft/flights scopés sur le club courant.
   // Vols legacy ESP32 (champ club_id snake_case) ne s'affichent pas — backfill
@@ -691,7 +725,7 @@ export default function LogbookPage({ role }) {
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {sortedPilots.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>Aucun pilote dans le club</div>}
-                  {sortedPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" onReplay={handleReplay} onAssign={handleAssign} />)}
+                  {sortedPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}
@@ -700,7 +734,7 @@ export default function LogbookPage({ role }) {
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {sortedInstructors.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>Aucun instructeur — vérifier isInstructor dans ADMIN</div>}
-                  {sortedInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" onReplay={handleReplay} onAssign={handleAssign} />)}
+                  {sortedInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}
@@ -714,7 +748,7 @@ export default function LogbookPage({ role }) {
               </div>
             )}
             {tab === 'matrix' && (
-              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
+              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
             )}
           </>
         )}

@@ -1,0 +1,12 @@
+{
+  "_why": "Terrains ABSENTS de la base openAIP embarquee (aerodromes.json). Saisie MANUELLE.",
+  "_why2": "Ce fichier est SEPARE de aerodromes.json parce que ce dernier est GENERE depuis les blobs ADP2 du firmware ecran : une regeneration (nouveau cycle AIRAC) l'ecrase entierement. Les entrees ci-dessous survivent, elles sont fusionnees au chargement dans index.js (elles gagnent sur une entree de meme code OACI).",
+  "_when_to_remove": "Si openAIP finit par publier ces terrains ET que la base est regeneree avec les pays concernes (GG/IS/FO n'ont JAMAIS ete telecharges : ni dans public/aip, ni dans le dump aip_debug), retirer l'entree correspondante ici pour reprendre la donnee officielle.",
+  "_fields": "[icao, lat, lon, type] — meme format que aerodromes.json ; type openAIP (2 = aerodrome)",
+  "ads": [
+    ["EGJB", 49.435, -2.6019, 2]
+  ],
+  "_notes": {
+    "EGJB": "Guernsey Airport (iles anglo-normandes, pays GG). Absent de aerodromes.bin ET de aerodromes_iceland.bin. Sans lui, le 1er point GPS des vols du 20/06/2026 (49.43257/-2.59859) faisait repondre LFAU a 59 km — c'est ce cas qui a motive le plafond ICAO_MAX_KM. Coordonnees = point de reference officiel de l'aerodrome (49 26 06 N / 002 36 07 W) ; ecart mesure au 1er point GPS reel : ~0.35 km."
+  }
+}

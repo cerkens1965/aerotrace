@@ -151,6 +151,52 @@ exports.dedupPilotPin = onDocumentWritten(
 const norm = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
 // Parse minimal d'un CSV Garmin G3X (3 lignes d'en-tête) → stats. Best-effort.
+// ── Terrain le plus proche (OACI) d'une position ─────────────────────────────
+// Base : aerodromes.json = fusion des 2 blobs ADP2 du firmware écran (3568 terrains,
+// ICAO + lat/lon). Même source que l'écran → dashboard et écran restent cohérents.
+// aerodromes.json est GÉNÉRÉ (écrasé à chaque régénération AIRAC) ; aerodromes_manual.json
+// est saisi à la main et lui survit → il est fusionné ici et gagne à code OACI égal.
+const AERODROMES = (() => {
+  const byIcao = new Map()
+  for (const a of require('./aerodromes.json').ads) byIcao.set(a[0], a)
+  for (const a of require('./aerodromes_manual.json').ads) byIcao.set(a[0], a)
+  return [...byIcao.values()]   // [[icao, lat, lon, type], ...]
+})()
+
+// Rayon max accepté. AU-DELÀ ON RENVOIE null, ET C'EST LE POINT CLÉ : sans plafond,
+// un terrain absent de la base fait répondre le suivant "le moins loin" — mesuré à
+// 59 km (Guernesey → LFAU) sur les vols de test. Mieux vaut "—" qu'un terrain faux.
+// 5 km couvre le décalage entre le point de référence openAIP et le seuil de piste
+// (max observé sur 45 départs justes : 1,86 km à ENZV).
+const ICAO_MAX_KM = 5
+
+function haversineKm(aLat, aLon, bLat, bLon) {
+  const R = 6371, r = Math.PI / 180
+  const dLat = (bLat - aLat) * r, dLon = (bLon - aLon) * r
+  const h = Math.sin(dLat / 2) ** 2 +
+            Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+/**
+ * pos {lat,lon} → code OACI du terrain à moins de ICAO_MAX_KM, sinon null.
+ * Le pré-filtre en boîte évite 3568 haversine par appel (~0.05° de lat ≈ 5,5 km ;
+ * la longitude est élargie par 1/cos(lat) — indispensable en Islande où un degré de
+ * longitude ne fait plus que ~48 km).
+ */
+function nearestIcao(pos) {
+  if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lon)) return null
+  const dLat = ICAO_MAX_KM / 111
+  const dLon = dLat / Math.max(0.05, Math.cos(pos.lat * Math.PI / 180))
+  let best = null, bestKm = Infinity
+  for (const [icao, lat, lon] of AERODROMES) {
+    if (Math.abs(lat - pos.lat) > dLat || Math.abs(lon - pos.lon) > dLon) continue
+    const km = haversineKm(pos.lat, pos.lon, lat, lon)
+    if (km < bestKm) { bestKm = km; best = icao }
+  }
+  return bestKm <= ICAO_MAX_KM ? best : null
+}
+
 /** "+02:00" | "-05:30" → minutes (120 | -330). null si illisible/absent. */
 function parseUtcOffsetMin(s) {
   const m = /^([+-])(\d{1,2}):(\d{2})$/.exec((s || '').trim())
@@ -185,6 +231,7 @@ function parseG3XStats(text) {
   let startTs = null, endTs = null
   let maxAlt = -Infinity, maxSpd = -Infinity, maxG = -Infinity, maxRpm = -Infinity
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity
+  let startPos = null, endPos = null
   for (let i = 3; i < lines.length; i++) {
     const parts = lines[i].split(',')
     if (parts.length < 10) continue
@@ -201,6 +248,11 @@ function parseG3XStats(text) {
     if (lat === 0 && lon === 0) continue
     if (startTs === null) startTs = ts
     endTs = ts
+    // 1re / dernière position fixée → terrain de départ / d'arrivée (cf nearestIcao)
+    if (lat != null && lon != null) {
+      if (!startPos) startPos = { lat, lon }
+      endPos = { lat, lon }
+    }
     const altI = numAt(parts, iAltI), altG = numAt(parts, iAltG)
     const alt = altI != null ? altI : altG                 // baro si dispo, sinon GPS
     if (alt != null && alt > maxAlt) maxAlt = alt
@@ -223,22 +275,36 @@ function parseG3XStats(text) {
     maxG:   isFinite(maxG)   ? Math.round(maxG * 10) / 10 : null,
     maxRpm: isFinite(maxRpm) ? Math.round(maxRpm) : null,
     bounds: isFinite(minLat) ? { minLat, maxLat, minLon, maxLon } : null,
+    depIcao: nearestIcao(startPos),
+    arrIcao: nearestIcao(endPos),
   }
 }
 
 // Résout le club d'un vol via la flotte. icao24 prioritaire (id transpondeur,
 // plus fiable qu'une immat de test), puis immat normalisée.
+/**
+ * Rattache un vol à un aéronef de la flotte. `reg` = ce que l'appareil a émis, qui peut
+ * être l'immat OU l'indicatif (un G3X écrit son callsign : "FJFVB"), voire une valeur de
+ * test. On accepte donc les 3 alias, par ordre de confiance :
+ *   immat exacte > indicatif (callSign) > icao24.
+ * Le callSign est indispensable : sans lui, un boîtier qui émet "FJFVB" ne se rattachait
+ * que par l'icao24 — or les ULM sans transpondeur n'en ont pas (FW v67 : plus de hex
+ * fabriqué) → le vol serait parti avec clubId=null, donc invisible au carnet.
+ * Retourne TOUJOURS l'immat canonique de la flotte : c'est la clé de filtrage du carnet
+ * (l'affichage, lui, préfère le callSign côté dashboard).
+ */
 async function resolveClubByAircraft(db, icao24, reg) {
   const icaoN = norm(icao24), regN = norm(reg)
   const snap = await db.collection('aircraft').get()
-  let byIcao = null, byReg = null
+  let byIcao = null, byReg = null, byCall = null
   for (const d of snap.docs) {
     const a = d.data()
     if (a.archived === true) continue
     if (icaoN && norm(a.icao24) === icaoN) byIcao = a
     if (regN && norm(a.registration) === regN) byReg = a
+    if (regN && norm(a.callSign) === regN) byCall = a
   }
-  const m = byReg || byIcao                                // immat exacte > icao
+  const m = byReg || byCall || byIcao
   return m ? { clubId: m.clubId || null, registration: m.registration || reg } : null
 }
 
@@ -293,11 +359,15 @@ async function normalizeFlightDoc(db, flightId, data) {
     maxG:   stats?.maxG ?? null,
     maxRpm: stats?.maxRpm ?? null,
     bounds: stats?.bounds ?? null,
+    // Terrains déduits de la 1re / dernière position GPS (null si rien à <5 km : le
+    // boîtier n'a pas cette info, et un terrain hors base donnerait un faux — cf nearestIcao).
+    depIcao: stats?.depIcao ?? null,
+    arrIcao: stats?.arrIcao ?? null,
     _normalized: true,
     normalizedAt: FieldValue.serverTimestamp(),
   }
   await db.collection('flights').doc(flightId).set(patch, { merge: true })
-  console.log(`normalizeFlight ${flightId}: club=${clubId} ac=${aircraftIdent} start=${startTs} dur=${patch.duration} maxAlt=${patch.maxAlt}`)
+  console.log(`normalizeFlight ${flightId}: club=${clubId} ac=${aircraftIdent} start=${startTs} dur=${patch.duration} maxAlt=${patch.maxAlt} ${patch.depIcao || '?'}->${patch.arrIcao || '?'}`)
 }
 
 exports.normalizeFlight = onDocumentWritten(

@@ -31,6 +31,44 @@ export function formatDuration(seconds) {
   return `${h}h ${String(m).padStart(2, '0')}m`
 }
 
+// ── Pays d'un aérodrome, déduit de son préfixe OACI ──────────────────────────
+// La base AIP (format ADP2) ne stocke que ICAO + lat/lon + type : pas de pays. Le
+// préfixe est la seule source. Fiable en Europe, sauf pour les dépendances, d'où
+// ICAO_COUNTRY_EXACT ci-dessous.
+const ICAO_COUNTRY = {
+  BI: 'IS', EB: 'BE', ED: 'DE', EF: 'FI', EG: 'GB', EH: 'NL', EI: 'IE', EK: 'DK',
+  EL: 'LU', EN: 'NO', EP: 'PL', ES: 'SE', ET: 'DE', GC: 'ES', GE: 'ES', LD: 'HR',
+  LE: 'ES', LF: 'FR', LG: 'GR', LH: 'HU', LI: 'IT', LJ: 'SI', LK: 'CZ', LO: 'AT',
+  LP: 'PT', LR: 'RO', LS: 'CH', LZ: 'SK',
+}
+// Exceptions : le préfixe désigne l'État responsable, pas le territoire.
+// EKVG = Vágar, seul aéroport des Féroé, sous préfixe danois (les autres EKV* sont
+// bien danois → ne surtout pas généraliser EKV → FO).
+// EGJ* = îles anglo-normandes (absentes de la base au 2026-07-17, mais prêtes).
+const ICAO_COUNTRY_EXACT = { EKVG: 'FO', EGJB: 'GG', EGJA: 'GG', EGJJ: 'JE' }
+
+/** Code OACI → code pays ISO 3166-1 alpha-2, ou null si préfixe inconnu. */
+export function icaoCountry(icao) {
+  if (!icao || icao.length < 2) return null
+  const up = icao.toUpperCase()
+  return ICAO_COUNTRY_EXACT[up] || ICAO_COUNTRY[up.slice(0, 2)] || null
+}
+
+/**
+ * ISO 3166-1 alpha-2 → drapeau (indicateurs régionaux Unicode).
+ * ⚠️ Windows n'a pas de police drapeau : le navigateur y affichera les 2 lettres
+ * (« BE ») au lieu de 🇧🇪. Dégradation acceptable — l'info reste lisible.
+ */
+export function countryFlag(iso2) {
+  if (!iso2 || iso2.length !== 2) return ''
+  return String.fromCodePoint(...[...iso2.toUpperCase()].map(c => 0x1f1e6 + c.charCodeAt(0) - 65))
+}
+
+/** Code OACI → drapeau de son pays ('' si inconnu). */
+export function icaoFlag(icao) {
+  return countryFlag(icaoCountry(icao))
+}
+
 export function formatDate(ts, short = false) {
   if (!ts) return '—'
   try {
