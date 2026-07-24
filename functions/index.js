@@ -1,4 +1,4 @@
-const { onRequest } = require('firebase-functions/v2/https')
+const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentWritten, onDocumentDeleted } = require('firebase-functions/v2/firestore')
 const { defineSecret } = require('firebase-functions/params')
 const { initializeApp, getApps } = require('firebase-admin/app')
@@ -433,3 +433,54 @@ exports.safeskyTraffic = onRequest(
     }
   }
 )
+
+// ─── Contrôle d'accès web « personnes désignées » (allowlist / invitation) ─────
+// Appelé par le dashboard à chaque login. Provisionne l'utilisateur CÔTÉ SERVEUR
+// (admin SDK, bypass des règles) uniquement s'il a été INVITÉ par un admin :
+//   invites/{email}  →  { clubId, role, invitedByEmail, ... }
+// Retour : { authorized, role, clubId, email }.
+//  - super_admin OU user déjà rattaché à un club  → authorized (inchangé).
+//  - email présent dans invites/                  → provisionné + invite marquée acceptée.
+//  - sinon                                        → authorized:false → écran « accès en attente ».
+// AUCUN rôle/club n'est jamais écrit par le client → pas d'escalade de privilège possible.
+exports.claimAccess = onCall({ region: 'europe-west1' }, async (req) => {
+  const uid = req.auth?.uid
+  const email = (req.auth?.token?.email || '').toLowerCase()
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+
+  const db = getFirestore()
+  const userRef = db.doc(`users/${uid}`)
+  const userSnap = await userRef.get()
+
+  // Déjà autorisé : super_admin (multi-club) ou un clubId rattaché.
+  if (userSnap.exists) {
+    const u = userSnap.data()
+    if (u.role === 'super_admin' || u.clubId) {
+      return { authorized: true, role: u.role || 'user', clubId: u.clubId || '', email }
+    }
+  }
+
+  // Invitation en attente pour cet email ?
+  if (email) {
+    const invRef = db.doc(`invites/${email}`)
+    const invSnap = await invRef.get()
+    if (invSnap.exists) {
+      const inv = invSnap.data()
+      const role = inv.role || 'user'
+      const clubId = inv.clubId || ''
+      await userRef.set({
+        email,
+        displayName: req.auth.token.name || userSnap.data()?.displayName || null,
+        role, clubId,
+        invitedBy: inv.invitedByEmail || null,
+        provisionedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
+      await invRef.set({ status: 'accepted', acceptedUid: uid, acceptedAt: FieldValue.serverTimestamp() }, { merge: true })
+      return { authorized: true, role, clubId, email }
+    }
+  }
+
+  // Non désigné → accès en attente. On NE crée PAS de doc user (base propre).
+  const u = userSnap.exists ? userSnap.data() : {}
+  return { authorized: false, role: u.role || 'user', clubId: u.clubId || '', email }
+})

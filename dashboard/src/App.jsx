@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
-import { doc, getDoc } from 'firebase/firestore'
-import { auth, db } from './firebase/config'
+import { httpsCallable } from 'firebase/functions'
+import { auth, functions } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
 import Header from './components/layout/Header'
 import LivePage from './pages/LivePage'
@@ -48,6 +48,7 @@ export default function App() {
   const [user, setUser]             = useState(null)
   const [role, setRole]             = useState(null)   // 'user' | 'instructor' | 'admin' | 'super_admin'
   const [userClubId, setUserClubId] = useState('')      // clubId imposé pour admin/user (vide pour super_admin)
+  const [authorized, setAuthorized] = useState(false)   // (allowlist) désigné par un admin ?
   const [loading, setLoading]       = useState(true)
 
   useEffect(() => {
@@ -58,28 +59,22 @@ export default function App() {
       setUser(currentUser)
       if (currentUser) {
         try {
-          const snap = await getDoc(doc(db, 'users', currentUser.uid))
-          if (snap.exists()) {
-            setRole(snap.data().role ?? 'user')
-            setUserClubId(snap.data().clubId ?? '')
-          } else {
-            // First login — create user doc with default role
-            const { setDoc, serverTimestamp } = await import('firebase/firestore')
-            await setDoc(doc(db, 'users', currentUser.uid), {
-              displayName: currentUser.displayName,
-              email:       currentUser.email,
-              role:        'user',
-              createdAt:   serverTimestamp(),
-            })
-            setRole('user')
-            setUserClubId('')
-          }
+          // Contrôle d'accès « personnes désignées » : le serveur (claimAccess) décide
+          // et PROVISIONNE (rôle/club) uniquement si l'email a été invité par un admin.
+          // Aucun rôle n'est écrit par le client → pas d'auto-attribution possible.
+          const claim = httpsCallable(functions, 'claimAccess')
+          const { data } = await claim()
+          setAuthorized(!!data?.authorized)
+          setRole(data?.role ?? 'user')
+          setUserClubId(data?.clubId ?? '')
         } catch (err) {
-          console.error('[App] Failed to fetch user role:', err)
+          console.error('[App] claimAccess failed:', err)
+          setAuthorized(false)
           setRole('user')
           setUserClubId('')
         }
       } else {
+        setAuthorized(false)
         setRole(null)
         setUserClubId('')
       }
@@ -90,6 +85,7 @@ export default function App() {
 
   if (loading)  return <LoadingScreen />
   if (!user)    return <LoginPage />
+  if (!authorized) return <AccessPendingScreen user={user} />
 
   return (
     <BrowserRouter>
@@ -172,6 +168,49 @@ function AppLayout({ user, role, userClubId }) {
           <Route path="*" element={<Navigate to="/live" replace />} />
         </Routes>
       </main>
+    </div>
+  )
+}
+
+// ─── AccessPendingScreen ──────────────────────────────────────────────────────
+// Connecté avec Google mais PAS désigné (aucune invitation admin pour cet email).
+// L'utilisateur ne voit aucune donnée : il doit être invité par un admin.
+function AccessPendingScreen({ user }) {
+  const handleSignOut = async () => {
+    const { signOut } = await import('firebase/auth')
+    try { await signOut(auth) } catch (err) { console.error('[Pending] signOut:', err) }
+  }
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      height: '100vh', background: '#050814',
+      fontFamily: 'monospace', color: '#fff',
+      padding: 40, textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 9, letterSpacing: '0.3em', color: 'rgba(245,166,35,0.7)', marginBottom: 16 }}>
+        AEROTRACE
+      </div>
+      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
+        Access pending
+      </h1>
+      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 12, maxWidth: 440, lineHeight: 1.6 }}>
+        You are signed in as <strong style={{ color: '#F5A623' }}>{user?.email}</strong>, but this
+        account has not been granted access yet. Ask an administrator to invite your email,
+        then sign in again.
+      </div>
+      <button onClick={handleSignOut}
+        style={{
+          marginTop: 32, padding: '10px 22px', borderRadius: 6,
+          background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+          color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
+          fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+      >
+        SIGN OUT
+      </button>
     </div>
   )
 }

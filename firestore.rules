@@ -32,9 +32,23 @@ service cloud.firestore {
     // Update : soi-même (profil) ou admin (promotion rôle).
     match /users/{uid} {
       allow read:   if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if isSignedIn() && request.auth.uid == uid;
-      allow update: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      // (allowlist) Le provisioning (rôle/club) est fait CÔTÉ SERVEUR par la
+      // Cloud Function claimAccess (admin SDK, bypass des règles) — plus de
+      // self-create côté client. Un admin peut créer/éditer un membre.
+      allow create: if isAdmin();
+      // Self-update : uniquement des champs de PROFIL (jamais role ni clubId).
+      allow update: if isAdmin()
+                    || (isSignedIn() && request.auth.uid == uid
+                        && request.resource.data.get('role','user') == resource.data.get('role','user')
+                        && request.resource.data.get('clubId','')   == resource.data.get('clubId',''));
       allow delete: if false;
+    }
+
+    // ── Invites (allowlist « personnes désignées ») ──────────────────────────────
+    // doc id = email (minuscule). Créés/gérés par un admin ; lus/consommés par la
+    // Cloud Function claimAccess (admin SDK). Aucun accès client direct nécessaire.
+    match /invites/{email} {
+      allow read, write: if isAdmin();
     }
 
     // ── Clubs ──────────────────────────────────────────────────────────────────

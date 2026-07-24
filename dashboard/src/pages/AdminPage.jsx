@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import {
-  collection, getDocs, addDoc, updateDoc,
+  collection, getDocs, addDoc, updateDoc, setDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy, where,
 } from 'firebase/firestore'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage } from '../firebase/config'
+import { db, storage, auth } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 
 // ─── Design tokens — WHITE theme ─────────────────────────────────────────────
@@ -653,11 +653,14 @@ export default function AdminPage() {
   const [tab,      setTab]      = useState('PILOTS')
   const [pilots,   setPilots]   = useState([])
   const [aircraft, setAircraft] = useState([])
+  const [invites,  setInvites]  = useState([])   // (accès) invitations en attente/acceptées
+  const [members,  setMembers]  = useState([])   // (accès) users rattachés à ce club
   const [loading,  setLoading]  = useState(true)
 
   // Form state
   const [pilotForm,    setPilotForm]    = useState(null)   // null = closed
   const [aircraftForm, setAircraftForm] = useState(null)
+  const [inviteForm,   setInviteForm]   = useState(null)   // (accès) {email, role} ou null
   const [editId,       setEditId]       = useState(null)
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
@@ -670,16 +673,62 @@ export default function AdminPage() {
     Promise.all([
       getDocs(query(collection(db, 'pilots'),   where('clubId', '==', clubId))),
       getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
-    ]).then(([ps, as]) => {
+      getDocs(query(collection(db, 'invites'),  where('clubId', '==', clubId))),
+      getDocs(query(collection(db, 'users'),    where('clubId', '==', clubId))),
+    ]).then(([ps, as, iv, us]) => {
       const pilotDocs    = ps.docs.map(d => ({ id: d.id, ...d.data() }))
       const aircraftDocs = as.docs.map(d => ({ id: d.id, ...d.data() }))
+      const inviteDocs   = iv.docs.map(d => ({ id: d.id, ...d.data() }))
+      const memberDocs   = us.docs.map(d => ({ id: d.id, ...d.data() }))
       pilotDocs.sort((a, b)    => (a.lastName     || '').localeCompare(b.lastName     || ''))
       aircraftDocs.sort((a, b) => (a.registration || '').localeCompare(b.registration || ''))
+      inviteDocs.sort((a, b)   => (a.email        || '').localeCompare(b.email        || ''))
+      memberDocs.sort((a, b)   => (a.email        || '').localeCompare(b.email        || ''))
       setPilots(pilotDocs)
       setAircraft(aircraftDocs)
+      setInvites(inviteDocs)
+      setMembers(memberDocs)
       setLoading(false)
     }).catch(e => { console.error('[AdminPage] load:', e); setLoading(false) })
   }, [clubId])
+
+  // ── Accès (invitations) ───────────────────────────────────────────────────────
+  const sendInvite = async () => {
+    const email = (inviteForm?.email || '').trim().toLowerCase()
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setError('Valid email required')
+    if (!clubId) return setError('No club context — please select a club first')
+    setSaving(true); setError('')
+    try {
+      const data = {
+        email, clubId, role: inviteForm.role || 'user',
+        invitedByEmail: auth.currentUser?.email || null,
+        status: 'pending', createdAt: serverTimestamp(),
+      }
+      await setDoc(doc(db, 'invites', email), data)   // id = email (allowlist)
+      setInvites(prev => [...prev.filter(i => i.id !== email), { id: email, ...data }].sort((a, b) => a.email.localeCompare(b.email)))
+      setInviteForm(null)
+    } catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const revokeInvite = async (inv) => {
+    if (!window.confirm(`Revoke invitation for ${inv.email}?`)) return
+    try { await deleteDoc(doc(db, 'invites', inv.id)); setInvites(prev => prev.filter(i => i.id !== inv.id)) }
+    catch (e) { setError(e.message) }
+  }
+
+  const changeMemberRole = async (m, role) => {
+    try { await updateDoc(doc(db, 'users', m.id), { role, updatedAt: serverTimestamp() })
+      setMembers(prev => prev.map(x => x.id === m.id ? { ...x, role } : x)) }
+    catch (e) { setError(e.message) }
+  }
+
+  const revokeMember = async (m) => {
+    if (!window.confirm(`Revoke access for ${m.email}? They will lose access at next login.`)) return
+    try { await updateDoc(doc(db, 'users', m.id), { clubId: '', role: 'user', updatedAt: serverTimestamp() })
+      setMembers(prev => prev.filter(x => x.id !== m.id)) }
+    catch (e) { setError(e.message) }
+  }
 
   const allTrigrams = pilots.map(p => p.trigram).filter(Boolean)
 
@@ -782,6 +831,7 @@ export default function AdminPage() {
       }}>
         <TabBtn label="PILOTS"   count={pilots.length}   active={tab === 'PILOTS'}   onClick={() => { setTab('PILOTS');   setPilotForm(null); setAircraftForm(null) }} />
         <TabBtn label="AIRCRAFT" count={aircraft.length} active={tab === 'AIRCRAFT'} onClick={() => { setTab('AIRCRAFT'); setPilotForm(null); setAircraftForm(null) }} />
+        <TabBtn label="ACCESS"   count={members.length + invites.length} active={tab === 'ACCESS'} onClick={() => { setTab('ACCESS'); setPilotForm(null); setAircraftForm(null) }} />
 
         <div style={{ flex: 1 }} />
 
@@ -800,6 +850,14 @@ export default function AdminPage() {
             fontFamily: C.mono, fontSize: 10, fontWeight: 700,
             color: '#ffffff', letterSpacing: '0.05em',
           }}>+ NEW AIRCRAFT</button>
+        )}
+        {tab === 'ACCESS' && !inviteForm && (
+          <button onClick={() => { setInviteForm({ email: '', role: 'user' }); setError('') }} style={{
+            padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
+            background: C.text, border: 'none',
+            fontFamily: C.mono, fontSize: 10, fontWeight: 700,
+            color: '#ffffff', letterSpacing: '0.05em',
+          }}>+ INVITE PERSON</button>
         )}
       </div>
 
@@ -877,6 +935,91 @@ export default function AdminPage() {
                 onDelete={deleteAircraft}
               />
             ))}
+          </div>
+        )}
+
+        {!loading && tab === 'ACCESS' && (
+          <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Invite form */}
+            {inviteForm && (
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.text, letterSpacing: '0.05em', marginBottom: 12 }}>INVITE A PERSON</div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <label style={{ flex: 2, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid }}>EMAIL (Google account)</span>
+                    <input type="email" value={inviteForm.email} autoFocus
+                      onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
+                      placeholder="person@gmail.com"
+                      style={{ padding: '8px 10px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 13, color: C.text }} />
+                  </label>
+                  <label style={{ flex: 1, minWidth: 130, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid }}>ROLE</span>
+                    <select value={inviteForm.role}
+                      onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))}
+                      style={{ padding: '8px 10px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 13, color: C.text, background: '#fff' }}>
+                      <option value="user">user — replay only</option>
+                      <option value="instructor">instructor — logbook</option>
+                      <option value="admin">admin — full club</option>
+                    </select>
+                  </label>
+                  <button onClick={sendInvite} disabled={saving}
+                    style={{ padding: '9px 16px', borderRadius: 7, cursor: 'pointer', background: C.text, border: 'none', color: '#fff', fontFamily: C.mono, fontSize: 10, fontWeight: 700 }}>
+                    {saving ? '...' : 'SEND INVITE'}
+                  </button>
+                  <button onClick={() => { setInviteForm(null); setError('') }}
+                    style={{ padding: '9px 14px', borderRadius: 7, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, fontFamily: C.mono, fontSize: 10 }}>
+                    CANCEL
+                  </button>
+                </div>
+                {error && <div style={{ color: '#ef4444', fontSize: 11, marginTop: 10 }}>{error}</div>}
+                <div style={{ fontSize: 10.5, color: C.low, marginTop: 12, lineHeight: 1.5 }}>
+                  The person signs in with this Google account and gets access to <strong>{club?.name || 'this club'}</strong> automatically. Until invited, they see an “access pending” screen.
+                </div>
+              </div>
+            )}
+
+            {/* Members (people with access now) */}
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.mid, letterSpacing: '0.08em', marginBottom: 8 }}>MEMBERS · {members.length}</div>
+              {members.length === 0 && <div style={{ color: C.low, fontSize: 12 }}>No one has access to this club yet.</div>}
+              {members.map(m => (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: C.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.displayName || m.email}</div>
+                    <div style={{ fontSize: 11, color: C.mid, fontFamily: C.mono }}>{m.email}</div>
+                  </div>
+                  <select value={m.role || 'user'} onChange={e => changeMemberRole(m, e.target.value)}
+                    style={{ padding: '6px 8px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 11, color: C.text, background: '#fff' }}>
+                    <option value="user">user</option>
+                    <option value="instructor">instructor</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button onClick={() => revokeMember(m)}
+                    style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: '#ef4444', fontFamily: C.mono, fontSize: 10 }}>
+                    REVOKE
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Pending invites */}
+            {invites.filter(i => i.status !== 'accepted').length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: C.mid, letterSpacing: '0.08em', marginBottom: 8 }}>PENDING INVITES</div>
+                {invites.filter(i => i.status !== 'accepted').map(inv => (
+                  <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.amber10, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: C.text, fontFamily: C.mono, overflow: 'hidden', textOverflow: 'ellipsis' }}>{inv.email}</div>
+                      <div style={{ fontSize: 10, color: C.mid }}>invited as {inv.role || 'user'} · waiting for first sign-in</div>
+                    </div>
+                    <button onClick={() => revokeInvite(inv)}
+                      style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: '#ef4444', fontFamily: C.mono, fontSize: 10 }}>
+                      REVOKE
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
