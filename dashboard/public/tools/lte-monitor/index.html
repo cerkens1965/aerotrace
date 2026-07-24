@@ -1,0 +1,3882 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDR · LTE MONITOR</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" crossorigin="anonymous"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Saira:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ============================================================
+     FDR LTE MONITOR — DESIGN TOKENS
+     ============================================================ */
+  :root {
+    /* ============================================================
+       💡 VS Code tip: click any hex value below to open a color
+       picker and preview changes live. All UI surfaces inherit
+       these variables — change one number, the whole UI follows.
+       ============================================================ */
+
+    /* ═══ SURFACE PALETTE — deep navy, no pure black ═══
+       Use these for backgrounds. Lower number = deeper / further back.
+       Each step is a touch lighter than the previous, gives subtle depth.   */
+    --bg-0:        #1a2f4e;   /* main canvas (deepest)                       */
+    --bg-1:        #21395f;   /* header, KPI strip, sidebar                  */
+    --bg-2:        #2a4470;   /* cards, panels, toolbar buttons              */
+    --bg-3:        #34507f;   /* hover / elevated                            */
+    --bg-elev:     #3b5990;   /* tooltips, popovers                          */
+    --border:      #2e4773;   /* visible separators                          */
+    --border-soft: #243d65;   /* subtle dividers                             */
+
+    /* ═══ TEXT — high contrast on navy background ═══ */
+    --text-1: #ffffff;   /* primary readings (KPI numbers, values)   */
+    --text-2: #ffffff;   /* body / secondary                          */
+    --text-3: #9cebff;   /* labels                                    */
+    --text-4: #d9dcff;   /* muted captions                            */
+
+    /* ═══ ACCENT COLORS ═══
+       These drive highlights, the alert pills, and a few state cues.       */
+    --cyan:    #22d3ee;   /* primary accent (currently barely used)        */
+    --cyan-dim:#0891b2;
+    --amber:   #f5b301;   /* warnings, demo badge                          */
+    --amber-dim:#a07700;
+
+    /* ═══ SIGNAL QUALITY (RSRP bands) — used on map trace ═══ */
+    --q-good:      #16a34a;   /* RSRP ≥ −85 dBm  (green)               */
+    --q-medium:    #f59e0b;   /* −100 ≤ RSRP < −85 (amber)             */
+    --q-low:       #dc2626;   /* RSRP < −100  (red)                    */
+    --q-none:      #94a3b8;   /* no coverage — legend only, no line    */
+
+    /* Legacy aliases — KPI bar fill richer palette */
+    --q-excellent: #16a34a;
+    --q-fair:      #f59e0b;
+    --q-poor:      #dc2626;
+    --q-bad:       #b91c1c;
+
+    /* ═══ HANDOVER DIAMONDS ═══ */
+    --ho-intra:    #dc2626;   /* same operator, new cell  */
+    --ho-inter:    #b91c1c;   /* different operator       */
+
+    /* ═══ RADIO TECHNOLOGY PALETTE ═══ */
+    --tech-5g:     #a855f7;   /* violet  — newest             */
+    --tech-ltea:   #22d3ee;   /* cyan    — LTE-A / LTE+        */
+    --tech-lte:    #0ea5e9;   /* sky     — LTE / 4G            */
+    --tech-hspap:  #14b8a6;   /* teal    — HSPA+ / 3.5G        */
+    --tech-3g:     #eab308;   /* yellow  — WCDMA / HSPA / 3G   */
+    --tech-edge:   #f97316;   /* orange  — EDGE / 2.5G         */
+    --tech-2g:     #ef4444;   /* red     — GSM / 2G            */
+    --tech-none:   #6b7280;   /* gray    — no service          */
+    --tech-up:     #16a34a;   /* upgrade triangle              */
+    --tech-down:   #dc2626;   /* downgrade triangle            */
+
+    /* ═══ STATE (live LED, alerts) ═══ */
+    --ok:    #22c55e;   /* was #00ff88 — toned down for refined look */
+    --warn:  #f5b301;
+    --err:   #ef4444;   /* was #ff3355 — softer red                  */
+
+    /* ═══ MISC ═══ */
+    --radius: 4px;
+    --radius-lg: 8px;
+    --shadow-glow-cyan:  0 0 20px rgba(34, 211, 238, 0.25);
+    --shadow-glow-amber: 0 0 20px rgba(245, 179, 1, 0.25);
+    --mono:    'JetBrains Mono', ui-monospace, monospace;
+    --display: 'Saira', system-ui, sans-serif;
+    --brand:   'Major Mono Display', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--bg-0);
+    color: var(--text-1);
+    font-family: var(--display);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    /* subtle grain + radial vignette */
+    background-image:
+      radial-gradient(ellipse at top, rgba(34, 211, 238, 0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(245, 179, 1, 0.02) 0%, transparent 50%);
+  }
+
+  /* ============================================================
+     LAYOUT
+     ============================================================ */
+  .app {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 48px auto 1fr;
+    grid-template-columns: 1fr;
+  }
+
+  /* ---------- HEADER ---------- */
+  .header {
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    padding: 0 24px;
+    gap: 40px;
+    position: relative;
+  }
+  /* No gradient ornament under the header — kept clean */
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  /* Minimal brand mark: a thin square outline, no cross, no glow */
+  .brand-mark {
+    width: 14px; height: 14px;
+    border: 1px solid var(--text-3);
+    transform: rotate(45deg);
+  }
+
+  .brand-text {
+    display: flex; flex-direction: column; line-height: 1;
+  }
+  .brand-text .name {
+    font-family: var(--brand);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    color: var(--text-1);
+  }
+  .brand-text .sub {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--text-3);
+    margin-top: 5px;
+    text-transform: uppercase;
+  }
+
+  .header-meta {
+    display: flex;
+    gap: 36px;
+    justify-content: center;
+    align-items: center;
+  }
+  .meta-block {
+    display: flex; flex-direction: column; align-items: flex-start;
+    line-height: 1.1;
+    gap: 4px;
+  }
+  .meta-label {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    color: var(--text-4);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+  .meta-value {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-1);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  .meta-value.accent { color: var(--text-1); }   /* no cyan tint, refined contrast handles it */
+
+  .header-status {
+    display: flex; align-items: center; gap: 10px;
+  }
+  /* Status pill: borderless, just a tiny dot + label */
+  .status-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-soft);
+    border-radius: 3px;
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    background: transparent;
+  }
+  .status-pill .led {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--ok);
+    color: var(--ok);
+  }
+  .status-pill[data-state="warn"] .led { color: var(--warn); background: var(--warn); }
+  .status-pill[data-state="err"]  .led { color: var(--err);  background: var(--err); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+
+  /* ---------- KPI STRIP ---------- */
+  .kpi-strip {
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    padding: 0;
+  }
+  .kpi {
+    padding: 16px 24px;
+    border-right: 1px solid var(--border-soft);
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi:last-child { border-right: 0; }
+  .kpi-label {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-4);
+    text-transform: uppercase;
+  }
+  .kpi-value {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-top: 10px;
+  }
+  .kpi-num {
+    font-family: var(--mono);
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--text-1);
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    transition: color 0.4s ease;
+  }
+  .kpi-unit {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    color: var(--text-4);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  /* Hairline indicator below number — replaces the chunky progress bar */
+  .kpi-bar {
+    height: 1px;
+    background: var(--border-soft);
+    margin-top: 12px;
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-bar-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 0%;
+    background: var(--text-3);
+    transition: width 0.5s ease, background-color 0.5s ease;
+  }
+  .kpi-trend {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    color: var(--text-4);
+    margin-top: 6px;
+    letter-spacing: 0.08em;
+  }
+
+  /* ---------- MAIN ---------- */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .stage {
+    position: relative;
+    background: var(--bg-0);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stage-tabs {
+    display: flex;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    padding: 0 12px;
+    gap: 0;
+  }
+  .stage-tab {
+    padding: 12px 20px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+    position: relative;
+  }
+  .stage-tab:hover { color: var(--text-1); }
+  .stage-tab.active {
+    color: var(--cyan);
+    border-bottom-color: var(--cyan);
+  }
+  .stage-tab .count {
+    margin-left: 8px;
+    color: var(--text-3);
+    font-size: 10px;
+  }
+
+  .stage-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    padding-right: 8px;
+  }
+  .toolbar-btn {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    padding: 5px 12px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.15s;
+  }
+  .toolbar-btn:hover { color: var(--text-1); border-color: var(--cyan-dim); }
+  .toolbar-btn.active { color: var(--cyan); border-color: var(--cyan); background: rgba(34, 211, 238, 0.08); }
+
+  .demo-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--border-soft);
+    color: var(--amber);
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    border-radius: 3px;
+  }
+  .demo-badge .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--amber);
+    /* No glow shadow — refined */
+  }
+
+  .stage-body {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .view {
+    position: absolute; inset: 0;
+    display: none;
+  }
+  .view.active { display: block; }
+
+  /* ---------- MAP ---------- */
+  #map, #heatmap {
+    height: 100%; width: 100%;
+    background: var(--bg-0);
+  }
+
+  /* Leaflet dark overrides */
+  .leaflet-container {
+    background: var(--bg-0) !important;
+    font-family: var(--mono) !important;
+  }
+  .leaflet-control-attribution {
+    background: rgba(19, 29, 49, 0.85) !important;   /* matches --bg-1 */
+    color: var(--text-3) !important;
+    font-size: 9px !important;
+    border: 1px solid var(--border) !important;
+    border-bottom: 0; border-right: 0;
+  }
+  .leaflet-control-attribution a { color: var(--text-2) !important; }
+  .leaflet-control-zoom a {
+    background: var(--bg-2) !important;
+    color: var(--text-1) !important;
+    border: 1px solid var(--border) !important;
+    width: 32px !important; height: 32px !important; line-height: 32px !important;
+    font-family: var(--mono) !important;
+  }
+  .leaflet-control-zoom a:hover {
+    background: var(--bg-3) !important;
+    color: var(--cyan) !important;
+  }
+
+  /* Aircraft marker — high-contrast on light maps */
+  .ac-icon {
+    width: 22px; height: 22px;
+    background: var(--bg-1);
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 0 1px var(--bg-1), 0 2px 8px rgba(0,0,0,0.35);
+    clip-path: polygon(50% 0%, 100% 100%, 50% 75%, 0 100%);
+    transform-origin: center;
+  }
+  .ac-icon-wrapper {
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* Handover diamond marker */
+  .ho-icon {
+    width: 14px; height: 14px;
+    background: var(--ho-intra);
+    border: 1.5px solid #ffffff;
+    box-shadow: 0 0 0 1px var(--ho-intra), 0 1px 4px rgba(0,0,0,0.4);
+    transform: rotate(45deg);
+  }
+  .ho-icon.inter {
+    background: var(--ho-inter);
+    box-shadow: 0 0 0 1px var(--ho-inter), 0 0 0 3px var(--amber), 0 1px 4px rgba(0,0,0,0.4);
+    width: 16px; height: 16px;
+  }
+  .ho-icon-wrapper {
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* Tech-change triangle marker (downgrade ▼ / upgrade ▲) */
+  .tech-tri {
+    width: 0; height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+  }
+  .tech-tri.down {
+    border-top: 13px solid var(--tech-down);
+    border-bottom: 0;
+  }
+  .tech-tri.up {
+    border-bottom: 13px solid var(--tech-up);
+    border-top: 0;
+  }
+  .tech-tri-wrapper {
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* Tech badge — used in header + sidebar + tooltips */
+  .tech-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 38px;
+    padding: 3px 9px;
+    border-radius: 3px;
+    background: var(--tech-none);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset;
+  }
+  .tech-badge.t-5g     { background: var(--tech-5g); }
+  .tech-badge.t-ltea   { background: var(--tech-ltea);  color: #052e3a; text-shadow: none; }
+  .tech-badge.t-lte    { background: var(--tech-lte); }
+  .tech-badge.t-hspap  { background: var(--tech-hspap); }
+  .tech-badge.t-3g     { background: var(--tech-3g);    color: #3a2e00; text-shadow: none; }
+  .tech-badge.t-edge   { background: var(--tech-edge); }
+  .tech-badge.t-2g     { background: var(--tech-2g); }
+  .tech-badge.t-none   { background: var(--tech-none); }
+  .tech-badge.large {
+    min-width: 56px;
+    padding: 5px 12px;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+  }
+
+  /* Tech distribution bar (in stats panel) */
+  .tech-dist {
+    display: flex;
+    width: 100%;
+    height: 12px;
+    background: var(--bg-3);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .tech-dist-seg {
+    height: 100%;
+    transition: width 0.4s ease;
+  }
+  .tech-dist-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-2);
+    letter-spacing: 0.1em;
+  }
+  .tech-dist-legend-item {
+    display: flex; align-items: center; gap: 5px;
+  }
+  .tech-dist-legend-item .swatch {
+    width: 8px; height: 8px; border-radius: 1px;
+  }
+  .leaflet-tooltip.ho-tooltip {
+    background: rgba(13, 17, 23, 0.96);
+    border: 1px solid var(--border);
+    color: var(--text-1);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    line-height: 1.5;
+  }
+  .leaflet-tooltip.ho-tooltip::before { display: none; }
+  .leaflet-tooltip.ho-tooltip .ho-time { color: var(--cyan); letter-spacing: 0.15em; font-size: 9px; }
+  .leaflet-tooltip.ho-tooltip .ho-arrow { color: var(--text-3); margin: 0 4px; }
+  .leaflet-tooltip.ho-tooltip .ho-meta { color: var(--text-2); font-size: 9px; margin-top: 4px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+  /* Legend */
+  .map-legend {
+    position: absolute;
+    left: 12px; bottom: 24px;
+    z-index: 500;
+    background: rgba(13, 17, 23, 0.92);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    backdrop-filter: blur(10px);
+  }
+  .legend-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.25em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .legend-row {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-2);
+    padding: 2px 0;
+  }
+  .legend-swatch {
+    width: 18px; height: 4px;
+    border-radius: 1px;
+  }
+
+  /* Map info overlay */
+  .map-info {
+    position: absolute;
+    right: 12px; top: 12px;
+    z-index: 500;
+    background: rgba(13, 17, 23, 0.92);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-2);
+    backdrop-filter: blur(10px);
+  }
+  .map-info .lbl { color: var(--text-3); letter-spacing: 0.2em; text-transform: uppercase; font-size: 9px; }
+  .map-info .val { color: var(--text-1); margin-left: 6px; }
+
+  /* Layer control */
+  .layer-ctrl {
+    position: absolute;
+    right: 12px; top: 130px;
+    z-index: 500;
+    background: rgba(13, 17, 23, 0.92);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+    min-width: 175px;
+  }
+  .layer-ctrl-section {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .layer-ctrl-section:last-child { border-bottom: 0; }
+  .layer-ctrl-title {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.25em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .layer-ctrl-row {
+    display: flex; align-items: center;
+    padding: 4px 0;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-2);
+    user-select: none;
+  }
+  .layer-ctrl-row:hover { color: var(--text-1); }
+  .layer-ctrl-row input {
+    margin-right: 8px;
+    accent-color: var(--cyan);
+    cursor: pointer;
+  }
+  .layer-ctrl-row.active { color: var(--cyan); }
+
+  /* ---------- ANALYTICS VIEW ---------- */
+  .analytics-grid {
+    display: grid;
+    grid-template-rows: 1fr 1fr 1fr;
+    height: 100%;
+    gap: 1px;
+    background: var(--border-soft);
+  }
+  .chart-panel {
+    background: var(--bg-1);
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .chart-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .chart-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    color: var(--text-2);
+    text-transform: uppercase;
+  }
+  .chart-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+  }
+  .chart-body {
+    flex: 1; min-height: 0;
+    position: relative;
+  }
+
+  /* ---------- SIDEBAR ---------- */
+  .sidebar {
+    background: var(--bg-1);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* Drag handle on the sidebar's left edge — 6 px wide hit area, 1 px visible.
+     Cursor changes to col-resize on hover. body.resizing disables select.    */
+  .sidebar-resizer {
+    position: absolute;
+    left: -3px; top: 0; bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  .sidebar-resizer:hover,
+  body.resizing .sidebar-resizer {
+    background: var(--cyan-dim);
+  }
+  body.resizing { user-select: none; cursor: col-resize; }
+
+  .panel {
+    border-bottom: 1px solid var(--border-soft);
+    padding: 20px 24px;
+  }
+  .panel:last-child { border-bottom: 0; }
+  .panel-title {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--text-3);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  /* No green dot ornament before titles — removed for refined minimalism */
+
+  .data-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 20px;
+  }
+  .data-cell { min-width: 0; }
+  .data-cell.full { grid-column: 1 / -1; }
+  .data-label {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--text-4);
+    text-transform: uppercase;
+  }
+  .data-value {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-1);
+    margin-top: 6px;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .data-value.accent { color: var(--text-1); }       /* refined: same color, contrast comes from weight */
+  .data-value.warn   { color: var(--amber); }
+  .data-value.err    { color: var(--err); }
+
+  /* CSQ gauge — circular */
+  .csq-gauge {
+    width: 100%;
+    aspect-ratio: 1;
+    max-width: 180px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .csq-gauge svg {
+    width: 100%; height: 100%;
+    transform: rotate(135deg);
+  }
+  .csq-track {
+    fill: none;
+    stroke: var(--border-soft);
+    stroke-width: 4;
+  }
+  .csq-fill {
+    fill: none;
+    stroke: var(--q-good);
+    stroke-width: 4;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.6s ease, stroke 0.6s ease;
+    /* No drop-shadow glow — refined minimalism */
+  }
+  .csq-center {
+    position: absolute;
+    inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .csq-center .num {
+    font-family: var(--mono);
+    font-size: 36px;
+    font-weight: 300;
+    color: var(--text-1);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .csq-center .label {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--text-4);
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+  .csq-center .quality {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 10px;
+  }
+
+  /* Alerts */
+  .alerts-list {
+    display: flex; flex-direction: column;
+    gap: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .alert {
+    padding: 10px 12px 10px 14px;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--warn);
+    border-radius: 0;
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--text-2);
+    line-height: 1.5;
+  }
+  .alert[data-severity="err"] { border-left-color: var(--err); }
+  .alert[data-severity="ok"]  { border-left-color: var(--ok); }
+  .alert .alert-time {
+    color: var(--text-4);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .alert .alert-msg {
+    color: var(--text-1);
+    margin-top: 4px;
+    font-weight: 300;
+  }
+  .alerts-empty {
+    text-align: center;
+    padding: 16px 0;
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    color: var(--text-4);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  /* Scrollbars */
+  .sidebar::-webkit-scrollbar, .alerts-list::-webkit-scrollbar { width: 6px; }
+  .sidebar::-webkit-scrollbar-track, .alerts-list::-webkit-scrollbar-track { background: var(--bg-1); }
+  .sidebar::-webkit-scrollbar-thumb, .alerts-list::-webkit-scrollbar-thumb {
+    background: var(--bg-3);
+    border-radius: 3px;
+  }
+  .sidebar::-webkit-scrollbar-thumb:hover, .alerts-list::-webkit-scrollbar-thumb:hover {
+    background: var(--border);
+  }
+
+  /* Phase pill — refined to text-only with a subtle leading dot */
+  .phase-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  .phase-pill::before {
+    content: '';
+    width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor;
+  }
+  .phase-pill[data-phase="GROUND"]   { color: var(--text-3); }
+  .phase-pill[data-phase="CRUISE"]   { color: var(--text-1); }
+  .phase-pill[data-phase="MANEUVER"] { color: var(--amber); }
+  .phase-pill[data-phase="APPROACH"] { color: var(--amber); }
+  .phase-pill[data-phase="CRITICAL"] { color: var(--err); animation: pulse 1s infinite; }
+
+  /* Flash animation kept but ultra subtle (was bg flash, now removed) */
+  @keyframes flash {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.85; }
+  }
+
+  /* ============================================================
+     AIRCRAFT HEALTH PANEL — battery, GPS, flight mode, distance home
+     ============================================================ */
+  .health-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 18px;
+  }
+  .health-cell {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .health-cell.full { grid-column: 1 / -1; }
+  .health-label {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--text-4);
+    text-transform: uppercase;
+  }
+  .health-value {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .health-value .unit {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    color: var(--text-4);
+    margin-left: 3px;
+    letter-spacing: 0.08em;
+  }
+  .health-value.warn { color: var(--amber); }
+  .health-value.err  { color: var(--err); }
+  .health-value.ok   { color: var(--ok); }
+
+  /* Battery bar — horizontal fill */
+  .batt-bar {
+    height: 4px;
+    background: var(--border-soft);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 2px;
+  }
+  .batt-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--ok);
+    transition: width 0.5s ease, background 0.5s ease;
+  }
+
+  /* Flight mode pill */
+  .mode-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--bg-3);
+    color: var(--text-1);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+  .mode-pill[data-mode="MANUAL"] { background: var(--cyan-dim); }
+  .mode-pill[data-mode="AUTO"]   { background: var(--ok); color: #052812; }
+  .mode-pill[data-mode="RTL"]    { background: var(--amber); color: #3a2a00; }
+  .mode-pill[data-mode="LAND"]   { background: var(--amber-dim); }
+  .mode-pill[data-mode="HOLD"]   { background: var(--text-3); color: #0a1830; }
+  .mode-pill[data-mode="FAIL"]   { background: var(--err); animation: pulse 1s infinite; }
+
+  /* GPS fix indicator */
+  .gps-fix {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .gps-fix .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .gps-fix[data-fix="NO_FIX"] .dot { background: var(--err); animation: pulse 1s infinite; }
+  .gps-fix[data-fix="FIX_2D"] .dot { background: var(--amber); }
+  .gps-fix[data-fix="FIX_3D"] .dot { background: var(--ok); }
+  .gps-fix[data-fix="RTK"]    .dot { background: var(--cyan); }
+
+  /* ============================================================
+     CELL QUALITY TABLE — top cells by time-on
+     ============================================================ */
+  .cell-table {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-2);
+    border-collapse: collapse;
+  }
+  .cell-table th {
+    text-align: left;
+    font-weight: 400;
+    color: var(--text-4);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 4px 8px 6px 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .cell-table td {
+    padding: 5px 8px 5px 0;
+    border-bottom: 1px solid var(--border-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .cell-table tr:last-child td { border-bottom: 0; }
+  .cell-table td.right { text-align: right; }
+  .cell-table .cell-id { color: var(--text-1); }
+  .cell-table .ping-pong { color: var(--amber); }
+  .cell-table .ping-pong::before { content: '⇄ '; }
+  .cell-table-empty {
+    color: var(--text-4);
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-align: center;
+    padding: 12px 0;
+    text-transform: uppercase;
+  }
+
+  /* ============================================================
+     HEARTBEAT / STALENESS — header
+     ============================================================ */
+  .heartbeat {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-soft);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+    font-variant-numeric: tabular-nums;
+  }
+  .heartbeat .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .heartbeat[data-state="warn"] { color: var(--amber); border-color: var(--amber-dim); }
+  .heartbeat[data-state="warn"] .dot { background: var(--amber); }
+  .heartbeat[data-state="err"] { color: var(--err); border-color: var(--err); }
+  .heartbeat[data-state="err"] .dot { background: var(--err); animation: pulse 0.8s infinite; }
+
+  /* ============================================================
+     CLICKABLE ALERTS
+     ============================================================ */
+  .alert.clickable {
+    cursor: pointer;
+    transition: background 0.15s, border-left-width 0.15s;
+  }
+  .alert.clickable:hover {
+    background: rgba(255,255,255,0.04);
+    border-left-width: 3px;
+    padding-left: 12px;
+  }
+  .alert.clickable .alert-pin {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-4);
+    letter-spacing: 0.1em;
+    margin-top: 3px;
+  }
+
+  /* Flash highlight when alert click recenters the map */
+  @keyframes ping {
+    0%   { transform: scale(0.5); opacity: 1; }
+    100% { transform: scale(3); opacity: 0; }
+  }
+  .alert-ping {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: rgba(245, 179, 1, 0.45);
+    border: 2px solid var(--amber);
+    animation: ping 1.2s ease-out forwards;
+    pointer-events: none;
+  }
+  .alert-ping-wrapper {
+    background: transparent !important;
+    border: none !important;
+  }
+
+  /* ============================================================
+     HOME / GEOFENCE EDITOR
+     ============================================================ */
+  .home-ctrl-row.inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .home-ctrl-row.inputs.single { grid-template-columns: 1fr; }
+  .home-ctrl-input {
+    background: var(--bg-2);
+    border: 1px solid var(--border-soft);
+    color: var(--text-1);
+    padding: 4px 6px;
+    font-family: var(--mono);
+    font-size: 10px;
+    border-radius: 2px;
+    width: 100%;
+    min-width: 0;
+  }
+  .home-ctrl-input::placeholder { color: var(--text-4); }
+  .home-ctrl-input:focus { outline: none; border-color: var(--cyan-dim); }
+  .home-ctrl-buttons {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+  }
+  .home-ctrl-btn {
+    flex: 1;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .home-ctrl-btn:hover { color: var(--text-1); border-color: var(--cyan-dim); }
+  .home-ctrl-btn.active { color: var(--cyan); border-color: var(--cyan); background: rgba(34, 211, 238, 0.08); }
+  /* When in "pick on map" mode, the cursor over the map signals it. */
+  .map-pick-mode .leaflet-container { cursor: crosshair !important; }
+
+  /* ============================================================
+     SCRUB TIMELINE — replay slider at the bottom of the live view
+     ============================================================ */
+  .scrub-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: rgba(13, 17, 23, 0.92);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(10px);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-2);
+    min-width: 580px;
+    max-width: calc(100% - 280px);  /* leave room for legend on left and layer ctrl on right */
+  }
+  .scrub-bar.scrubbing { border-color: var(--amber); }
+  .scrub-btn {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    padding: 4px 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    border-radius: var(--radius);
+    min-width: 24px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .scrub-btn:hover { color: var(--text-1); border-color: var(--cyan-dim); }
+  .scrub-btn.live { color: var(--ok); border-color: var(--ok); padding: 4px 12px; }
+  .scrub-btn.live.disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+  .scrub-btn.playing { color: var(--amber); border-color: var(--amber); }
+  .scrub-time {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-1);
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+    min-width: 80px;
+    text-align: center;
+  }
+  .scrub-slider {
+    flex: 1;
+    height: 24px;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .scrub-slider::-webkit-slider-runnable-track {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+  }
+  .scrub-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    border: 2px solid var(--bg-1);
+    margin-top: -6px;
+    box-shadow: 0 0 0 1px var(--cyan-dim);
+  }
+  .scrub-slider::-moz-range-track {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    border: none;
+  }
+  .scrub-slider::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--cyan);
+    border: 2px solid var(--bg-1);
+    box-shadow: 0 0 0 1px var(--cyan-dim);
+  }
+  .scrub-pos {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 0.1em;
+    min-width: 70px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Playhead marker on the trajectory — yellow ring, distinct from aircraft icon */
+  .playhead-icon {
+    width: 18px; height: 18px;
+    border: 2.5px solid var(--amber);
+    background: rgba(245, 179, 1, 0.25);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--bg-1), 0 0 12px rgba(245, 179, 1, 0.6);
+  }
+  .playhead-icon-wrapper { background: transparent !important; border: none !important; }
+
+  /* ============================================================
+     HOME MARKER + GEOFENCE
+     ============================================================ */
+  .home-icon {
+    width: 16px; height: 16px;
+    background: var(--cyan);
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px var(--cyan-dim), 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .home-icon::after {
+    content: 'H';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 10px;
+    color: #06222d;
+    line-height: 1;
+  }
+  .home-icon-wrapper {
+    background: transparent !important;
+    border: none !important;
+    position: relative;
+  }
+
+  /* Responsive: collapse sidebar on narrow screens */
+  @media (max-width: 1100px) {
+    .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .sidebar { border-left: 0; border-top: 1px solid var(--border); max-height: 320px; }
+    .kpi-strip { grid-template-columns: repeat(3, 1fr); }
+    .kpi:nth-child(3) { border-right: 0; }
+    .kpi:nth-child(n+4) { border-top: 1px solid var(--border-soft); }
+  }
+  @media (max-width: 700px) {
+    .header { grid-template-columns: auto 1fr; gap: 12px; padding: 0 12px; }
+    .header-meta { display: none; }
+    .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+    .kpi { padding: 10px 14px; }
+    .kpi-num { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================ HEADER ============================ -->
+  <header class="header">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-text">
+        <span class="name">FDR</span>
+        <span class="sub">LTE / Network Monitor · v3.3 navy</span>
+      </div>
+    </div>
+
+    <div class="header-meta">
+      <div class="meta-block">
+        <span class="meta-label">Flight ID</span>
+        <span class="meta-value accent" id="m-flight">FDR-26-0427-A</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">UTC</span>
+        <span class="meta-value" id="m-utc">--:--:--</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Radio</span>
+        <span class="tech-badge large t-none" id="m-tech">—</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Phase</span>
+        <span class="phase-pill" data-phase="GROUND" id="m-phase">GROUND</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Duration</span>
+        <span class="meta-value" id="m-duration">00:00:00</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Samples</span>
+        <span class="meta-value" id="m-samples">0</span>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <span class="demo-badge" id="demo-badge"><span class="dot"></span>Demo Mode</span>
+      <div class="heartbeat" data-state="ok" id="heartbeat" title="Time since last received frame">
+        <span class="dot"></span><span id="heartbeat-text">--</span>
+      </div>
+      <div class="status-pill" data-state="ok" id="status-conn">
+        <span class="led"></span><span>Live</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ KPI STRIP ============================ -->
+  <div class="kpi-strip">
+    <div class="kpi">
+      <div class="kpi-label">Throughput ↓</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-thr">--</span>
+        <span class="kpi-unit">kbps</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-thr-bar"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">RSRP</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-rsrp">--</span>
+        <span class="kpi-unit">dBm</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-rsrp-bar"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">RSRQ</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-rsrq">--</span>
+        <span class="kpi-unit">dB</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-rsrq-bar"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">SINR</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-sinr">--</span>
+        <span class="kpi-unit">dB</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-sinr-bar"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">HTTP Latency</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-lat">--</span>
+        <span class="kpi-unit">ms</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-lat-bar"></div></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Frame Loss</div>
+      <div class="kpi-value">
+        <span class="kpi-num" id="kpi-loss">--</span>
+        <span class="kpi-unit">%</span>
+      </div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi-loss-bar"></div></div>
+    </div>
+  </div>
+
+  <!-- ============================ MAIN ============================ -->
+  <main class="main">
+
+    <section class="stage">
+      <div class="stage-tabs">
+        <button class="stage-tab active" data-view="live">Live · Track</button>
+        <button class="stage-tab" data-view="heatmap">Coverage Heatmap</button>
+        <button class="stage-tab" data-view="analytics">Analytics</button>
+
+        <div class="stage-toolbar">
+          <button class="toolbar-btn" id="btn-follow" title="Follow aircraft">FOLLOW</button>
+          <button class="toolbar-btn active" id="btn-pause" title="Pause/Resume stream">PAUSE</button>
+          <button class="toolbar-btn" id="btn-load-sd" title="Charger ATCORE_LTE_*.csv depuis la carte SD">LOAD SD</button>
+          <button class="toolbar-btn" id="btn-export" title="Export flight as JSON or CSV">EXPORT</button>
+          <input type="file" id="sd-file-input" accept=".csv,text/csv" style="display:none" />
+        </div>
+      </div>
+
+      <div class="stage-body">
+
+        <!-- LIVE VIEW -->
+        <div class="view active" data-view="live">
+          <div id="map"></div>
+          <div class="map-legend">
+            <div class="legend-title">RSRP — LTE signal</div>
+            <div class="legend-row"><span class="legend-swatch" style="background:var(--q-good)"></span>Good · ≥ −85 dBm</div>
+            <div class="legend-row"><span class="legend-swatch" style="background:var(--q-medium)"></span>Medium · −85 → −100</div>
+            <div class="legend-row"><span class="legend-swatch" style="background:var(--q-low)"></span>Low · &lt; −100 dBm</div>
+            <div class="legend-row"><span class="legend-swatch" style="background:transparent;border:1px dashed var(--text-3)"></span>No coverage · gap in track</div>
+            <div class="legend-title" style="margin-top:10px">Events</div>
+            <div class="legend-row">
+              <span style="display:inline-block;width:11px;height:11px;background:var(--ho-intra);transform:rotate(45deg);border:1.5px solid #fff;margin-right:6px"></span>
+              Cell handover
+            </div>
+            <div class="legend-row">
+              <span style="display:inline-block;width:13px;height:13px;background:var(--ho-inter);transform:rotate(45deg);border:1.5px solid #fff;outline:1.5px solid var(--amber);outline-offset:0px;margin-right:6px"></span>
+              Operator change
+            </div>
+            <div class="legend-row">
+              <span style="display:inline-block;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid var(--tech-down);margin-right:8px;margin-left:1px"></span>
+              Tech downgrade (LTE→3G…)
+            </div>
+            <div class="legend-row">
+              <span style="display:inline-block;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:9px solid var(--tech-up);margin-right:8px;margin-left:1px"></span>
+              Tech upgrade (3G→LTE…)
+            </div>
+          </div>
+          <div class="map-info">
+            <div><span class="lbl">LAT</span><span class="val" id="info-lat">--</span></div>
+            <div><span class="lbl">LON</span><span class="val" id="info-lon">--</span></div>
+            <div><span class="lbl">ALT</span><span class="val" id="info-alt">--</span></div>
+            <div><span class="lbl">AGL</span><span class="val" id="info-agl">--</span></div>
+            <div><span class="lbl">V/S</span><span class="val" id="info-vs">--</span></div>
+            <div><span class="lbl">SPD</span><span class="val" id="info-spd">--</span></div>
+            <div><span class="lbl">HDG</span><span class="val" id="info-hdg">--</span></div>
+            <div><span class="lbl">HOME</span><span class="val" id="info-home">--</span></div>
+          </div>
+          <div class="scrub-bar" id="scrub-bar">
+            <button class="scrub-btn" id="scrub-prev" title="Step back">◀</button>
+            <button class="scrub-btn" id="scrub-play" title="Play / pause">▶</button>
+            <button class="scrub-btn" id="scrub-next" title="Step forward">▶│</button>
+            <span class="scrub-time" id="scrub-time">--:--:--</span>
+            <input type="range" class="scrub-slider" id="scrub-slider" min="0" max="0" value="0" step="1" />
+            <span class="scrub-pos" id="scrub-pos">0 / 0</span>
+            <button class="scrub-btn live disabled" id="scrub-live" title="Resume live position">⏵ LIVE</button>
+          </div>
+          <div class="layer-ctrl">
+            <div class="layer-ctrl-section">
+              <div class="layer-ctrl-title">Basemap</div>
+              <label class="layer-ctrl-row"><input type="radio" name="basemap" value="voyager" checked> Voyager (CARTO)</label>
+              <label class="layer-ctrl-row"><input type="radio" name="basemap" value="positron"> Positron (CARTO)</label>
+              <label class="layer-ctrl-row"><input type="radio" name="basemap" value="topo"> ESRI Topo</label>
+              <label class="layer-ctrl-row"><input type="radio" name="basemap" value="sat"> ESRI Satellite</label>
+            </div>
+            <div class="layer-ctrl-section">
+              <div class="layer-ctrl-title">Overlays</div>
+              <label class="layer-ctrl-row"><input type="checkbox" id="ov-openaip" checked> OpenAIP airspace</label>
+              <label class="layer-ctrl-row"><input type="checkbox" id="ov-handovers" checked> Handover markers</label>
+              <label class="layer-ctrl-row"><input type="checkbox" id="ov-techchange" checked> Tech change markers</label>
+            </div>
+            <div class="layer-ctrl-section">
+              <div class="layer-ctrl-title">Home / Geofence</div>
+              <div class="home-ctrl-row inputs">
+                <input type="number" class="home-ctrl-input" id="home-lat" step="0.0001" placeholder="lat" />
+                <input type="number" class="home-ctrl-input" id="home-lon" step="0.0001" placeholder="lon" />
+              </div>
+              <div class="home-ctrl-row inputs single">
+                <input type="number" class="home-ctrl-input" id="home-radius" step="100" min="100" placeholder="radius (m)" />
+              </div>
+              <div class="home-ctrl-buttons">
+                <button class="home-ctrl-btn" id="home-pick" title="Click on the map to set Home">PICK</button>
+                <button class="home-ctrl-btn" id="home-apply">APPLY</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- HEATMAP VIEW -->
+        <div class="view" data-view="heatmap">
+          <div id="heatmap"></div>
+          <div class="map-legend">
+            <div class="legend-title">Coverage gap intensity</div>
+            <div class="legend-row"><span class="legend-swatch" style="background:linear-gradient(90deg,transparent,var(--q-medium),var(--q-low))"></span>Bad coverage zones</div>
+            <div class="legend-row" style="margin-top:6px;color:var(--text-3);font-size:9px;">Highlights problem zones · stronger = worse signal</div>
+            <div class="legend-row" style="color:var(--text-3);font-size:9px;">Aggregated from <span id="heatmap-points-count" style="color:var(--text-1)">0</span> samples</div>
+          </div>
+        </div>
+
+        <!-- ANALYTICS VIEW -->
+        <div class="view" data-view="analytics">
+          <div class="analytics-grid">
+            <div class="chart-panel">
+              <div class="chart-header">
+                <div class="chart-title">RSRP / RSRQ / SINR over time</div>
+                <div class="chart-meta" id="chart-1-meta">window: last 5 min</div>
+              </div>
+              <div class="chart-body"><canvas id="chart-signal"></canvas></div>
+            </div>
+            <div class="chart-panel">
+              <div class="chart-header">
+                <div class="chart-title">Signal vs Altitude — correlation</div>
+                <div class="chart-meta" id="chart-2-meta">samples: 0</div>
+              </div>
+              <div class="chart-body"><canvas id="chart-altitude"></canvas></div>
+            </div>
+            <div class="chart-panel">
+              <div class="chart-header">
+                <div class="chart-title">HTTP Latency · Frame loss · Speed</div>
+                <div class="chart-meta" id="chart-3-meta">window: last 5 min</div>
+              </div>
+              <div class="chart-body"><canvas id="chart-net"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ============================ SIDEBAR ============================ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-resizer" id="sidebar-resizer"></div>
+
+      <div class="panel">
+        <div class="panel-title">Aircraft Health</div>
+        <div class="health-grid">
+          <div class="health-cell full">
+            <span class="health-label">Battery</span>
+            <span class="health-value" id="h-batt"><span id="h-batt-soc">--</span><span class="unit">%</span> · <span id="h-batt-v">--</span><span class="unit">V</span> · <span id="h-batt-a">--</span><span class="unit">A</span></span>
+            <div class="batt-bar"><div class="batt-bar-fill" id="h-batt-bar"></div></div>
+            <span class="health-label" style="margin-top:2px">Time remaining · <span id="h-batt-time" style="color:var(--text-1);font-family:var(--mono);letter-spacing:0">--:--</span></span>
+          </div>
+          <div class="health-cell">
+            <span class="health-label">Flight mode</span>
+            <span class="mode-pill" data-mode="MANUAL" id="h-mode">MANUAL</span>
+          </div>
+          <div class="health-cell">
+            <span class="health-label">GPS</span>
+            <span class="gps-fix" data-fix="NO_FIX" id="h-gps"><span class="dot"></span><span id="h-gps-text">--</span></span>
+          </div>
+          <div class="health-cell">
+            <span class="health-label">Sats / HDOP</span>
+            <span class="health-value"><span id="h-sats">--</span> · <span id="h-hdop">--</span></span>
+          </div>
+          <div class="health-cell">
+            <span class="health-label">Home distance</span>
+            <span class="health-value" id="h-home-dist">--<span class="unit">m</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Link Quality Score</div>
+        <div class="csq-gauge">
+          <svg viewBox="0 0 100 100">
+            <circle class="csq-track" cx="50" cy="50" r="42"
+                    stroke-dasharray="197.92 263.89"></circle>
+            <circle class="csq-fill" id="csq-fill" cx="50" cy="50" r="42"
+                    stroke-dasharray="0 263.89"></circle>
+          </svg>
+          <div class="csq-center">
+            <span class="num" id="csq-num">--</span>
+            <span class="label">LQS / 100</span>
+            <span class="quality" id="csq-quality" style="color:var(--text-3)">— —</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Cell · Network</div>
+        <div class="data-grid">
+          <div class="data-cell full">
+            <div class="data-label">Operator</div>
+            <div class="data-value accent" id="d-operator">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Tech</div>
+            <div class="data-value" id="d-tech">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Band</div>
+            <div class="data-value" id="d-band">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Cell ID</div>
+            <div class="data-value" id="d-cellid">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">TAC</div>
+            <div class="data-value" id="d-tac">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">EARFCN</div>
+            <div class="data-value" id="d-earfcn">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Registration</div>
+            <div class="data-value" id="d-reg">—</div>
+          </div>
+          <div class="data-cell full">
+            <div class="data-label">IP (CGPADDR)</div>
+            <div class="data-value" id="d-ip">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Coverage Stats — Flight</div>
+        <div class="data-grid">
+          <div class="data-cell">
+            <div class="data-label">Time on signal</div>
+            <div class="data-value" id="s-on">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Time no signal</div>
+            <div class="data-value err" id="s-off">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">RSRP avg</div>
+            <div class="data-value" id="s-rsrp-avg">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">RSRP min</div>
+            <div class="data-value" id="s-rsrp-min">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Latency avg</div>
+            <div class="data-value" id="s-lat-avg">—</div>
+          </div>
+          <div class="data-cell">
+            <div class="data-label">Handovers</div>
+            <div class="data-value" id="s-handovers">—</div>
+          </div>
+          <div class="data-cell full">
+            <div class="data-label">Time on radio technology</div>
+            <div class="tech-dist" id="tech-dist"></div>
+            <div class="tech-dist-legend" id="tech-dist-legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Top Cells · Time on</div>
+        <table class="cell-table" id="cell-table">
+          <thead>
+            <tr><th>Cell ID</th><th class="right">Time</th><th class="right">RSRP min</th><th class="right">⇄</th></tr>
+          </thead>
+          <tbody id="cell-table-body">
+            <tr><td colspan="4" class="cell-table-empty">— No cells yet —</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Alerts</div>
+        <div class="alerts-list" id="alerts-list">
+          <div class="alerts-empty">— No alerts —</div>
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+</div>
+
+<script>
+/* =============================================================
+   FDR LTE MONITOR — DASHBOARD LOGIC
+   ============================================================= */
+
+/* Silent error handler — only surfaces a red banner if something throws */
+window.addEventListener('error', function(e) {
+  try {
+    const banner = document.createElement('div');
+    banner.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+      background: #b91c1c; color: #fff; padding: 10px 18px;
+      font: 600 12px/1.5 'JetBrains Mono', monospace;
+      letter-spacing: 0.05em; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    `;
+    const f = e.filename ? e.filename.split('/').pop() : '(inline)';
+    banner.textContent = `JS ERROR · ${f} L${e.lineno || '?'}: ${e.message || 'Script error'}`;
+    document.body.appendChild(banner);
+  } catch (_) {}
+});
+
+/* No-op stub: kept so legacy ckpt calls in this file don't throw */
+window._ckpt = function() {};
+
+const CONFIG = {
+  /* Plug your FastAPI endpoint here when ready.
+     Expected response shape — see SAMPLE_FRAME below. */
+  API_BASE:     'https://fdr-platform-production.up.railway.app',
+  ENDPOINT_LIVE:'/v1/lte/live',           // GET ?flight_id=...&since=...
+  ENDPOINT_HEAT:'/v1/lte/heatmap',        // GET ?bbox=...
+  POLL_MS:      5000,                     // 0.2 Hz
+  DEMO:         true,                     // <-- set false to hit real API
+
+  /* OpenAIP — aeronautical airspaces / airports / navaids overlay */
+  OPENAIP_KEY:  'ac134ca9a623587f3c387dab1b9e3d0e',
+  OPENAIP_URL:  'https://{s}.api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.png',
+
+  /* Basemaps — providers that work from file:// (no Referer requirement)
+     CARTO/Stadia/ESRI all serve tiles without strict Referer policy.
+     OSM tile.openstreetmap.org REQUIRES Referer → blocked when opened locally. */
+  BASEMAPS: {
+    voyager: {
+      url:  'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      attr: '&copy; OpenStreetMap contributors · &copy; CARTO',
+      sub:  'abcd', maxZoom: 19,
+    },
+    positron: {
+      url:  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      attr: '&copy; OpenStreetMap contributors · &copy; CARTO',
+      sub:  'abcd', maxZoom: 19,
+    },
+    topo: {
+      url:  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      attr: 'Tiles &copy; Esri — Topo',
+      sub:  '', maxZoom: 19,
+    },
+    sat: {
+      url:  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      attr: 'Tiles &copy; Esri — World Imagery',
+      sub:  '', maxZoom: 19,
+    },
+  },
+  DEFAULT_BASEMAP: 'voyager',
+
+  /* Demo flight — circuit around Brussels (EBBR) */
+  DEMO_CENTER: [50.85, 4.50],
+  DEMO_DRIFT_LON: 4.50,
+  DEMO_DRIFT_LAT: 50.85,
+
+  /* Buffers */
+  TIMESERIES_WINDOW: 60 * 5,              // 5 min @ 1Hz internal (we sample at 0.2Hz)
+  MAX_SAMPLES:        4 * 60 * 60,        // 4h max in memory
+
+  /* Signal thresholds — 3-band model */
+  RSRP_GOOD_MIN:    -85,                  // ≥ −85 dBm = Good
+  RSRP_MEDIUM_MIN:  -100,                 // ≥ −100 dBm = Medium
+                                          // <  −100 dBm = Low
+                                          // null/CSQ=99 = No coverage (no line)
+
+  /* Home / RTL / geofence
+     HOME is the take-off point and the reference for Return-To-Launch.
+     Operator sets it before flight; in demo it equals DEMO_CENTER.       */
+  HOME:               { lat: 50.85, lon: 4.50, alt_m: 60 },
+  HOME_ALT_M:         60,                 // ground elevation at home (for AGL)
+  GEOFENCE_RADIUS_M:  6000,               // 6 km circular geofence
+  GEOFENCE_WARN_PCT:  0.85,               // warn when crossing 85% of radius
+
+  /* Battery thresholds */
+  BATTERY_WARN_PCT:     0.30,             // amber below 30 %
+  BATTERY_CRITICAL_PCT: 0.15,             // red below 15 %
+
+  /* Heartbeat staleness (seconds since last received frame) */
+  STALENESS_WARN_S: 10,
+  STALENESS_ERR_S:  30,
+
+  /* Cell quality / ping-pong */
+  PING_PONG_WINDOW_MS: 30000,             // A→B→A within 30s = ping-pong
+};
+
+/* Sample frame the dashboard expects.
+   When wiring real backend, return an array of these from /v1/lte/live.
+
+const SAMPLE_FRAME = {
+  ts:        '2026-04-27T10:30:45Z',
+  flight_id: 'FDR-26-0427-A',
+  lat:       50.8500,
+  lon:       4.5000,
+  alt_m:     450,
+  spd_kt:    95,
+  hdg:       270,
+  phase:     'CRUISE',                  // GROUND|CRUISE|MANEUVER|APPROACH|CRITICAL
+  lte: {
+    csq:           18,
+    rsrp_dbm:     -88,
+    rsrq_db:      -10,
+    sinr_db:      12,
+    operator:    'Proximus',
+    tech:        'LTE',                 // LTE | LTE-A | NR | EDGE
+    band:        'B20',
+    earfcn:       6300,
+    cell_id:     '12345678',
+    tac:         'A1B2',
+    ip:          '10.20.30.40',
+    creg_state:  'registered_home',
+    http_lat_ms: 245,
+    frame_loss_pct: 0.5,
+    handover:    false
+  }
+};
+*/
+
+/* =============================================================
+   STATE
+   ============================================================= */
+const state = {
+  samples:        [],
+  trajectorySegs: [],          // Leaflet polyline objects
+  heatmapData:    [],          // [lat, lon, intensity]
+  paused:         false,
+  follow:         true,
+  lastView:       'live',
+  flightStartTs:  null,
+  alerts:         [],
+  lastFrame:      null,
+  lastCellId:     null,
+  lastOperator:   null,
+  lastBand:       null,
+  lastRsrp:       null,
+  lastTech:       null,        // last techMeta() result
+  techChanges:    0,
+  techTimeSec:    {},          // { lte: 120, '3g': 45, '2g': 0, none: 30, ... }
+  handoverCount:  0,
+  noSignalSec:    0,
+  signalSec:      0,
+
+  /* Cell quality tracking — per-cell stats + ping-pong detection.
+     cellByCellId is a Map keyed by cell_id for O(1) update.        */
+  cellByCellId:   new Map(),   // cellId → { cellId, totalMs, lastExitTs, rsrpMin, rsrpSum, count, pingPong }
+  cellCurrent:    null,        // currently active cell entry
+  cellEnterTs:    0,
+
+  /* Vario / altitude history — last few samples for v/s smoothing */
+  altHistory:     [],          // [{ ts, alt }] last 5
+
+  /* Heartbeat — wall-clock time when last frame was applied */
+  lastSampleAt:   0,           // ms (Date.now), 0 = no frame yet
+
+  /* Geofence alert latching */
+  geofenceState:  'inside',    // 'inside' | 'approaching' | 'outside'
+  batteryLevel:   'ok',        // 'ok' | 'warn' | 'critical' — latched
+
+  /* Scrub / replay — -1 means "follow latest" (normal mode).
+     Any value >= 0 freezes the UI on samples[scrubIndex].   */
+  scrubIndex:     -1,
+  scrubPlaying:   false,
+};
+
+/* =============================================================
+   UTILS
+   ============================================================= */
+function rsrpQuality(rsrp) {
+  // 3-band model: Good / Medium / Low. null = no coverage (no line drawn).
+  if (rsrp == null) return { color: null, hex: null, label: 'NO SIGNAL', score: 0 };
+  if (rsrp >= CONFIG.RSRP_GOOD_MIN)   return { color: 'var(--q-good)',   hex: '#16a34a', label: 'GOOD',   score: 3 };
+  if (rsrp >= CONFIG.RSRP_MEDIUM_MIN) return { color: 'var(--q-medium)', hex: '#f59e0b', label: 'MEDIUM', score: 2 };
+  return                                     { color: 'var(--q-low)',    hex: '#dc2626', label: 'LOW',    score: 1 };
+}
+
+function csqQuality(csq) {
+  // CSQ 0..31, 99 = no signal. Mapped to 3-band scale.
+  if (csq == null || csq === 99) return { color: 'var(--q-none)',   hex: '#94a3b8', label: 'NO SIGNAL' };
+  if (csq >= 18)                 return { color: 'var(--q-good)',   hex: '#16a34a', label: 'GOOD' };
+  if (csq >= 8)                  return { color: 'var(--q-medium)', hex: '#f59e0b', label: 'MEDIUM' };
+  return                                { color: 'var(--q-low)',    hex: '#dc2626', label: 'LOW' };
+}
+
+/* Tech classification — maps SIM7600 / SIM8200 system mode strings to a normalized class.
+   Generation rank lets us detect upgrades vs downgrades on the trace.
+
+   AT+CPSI? returns one of:
+     "NO SERVICE" | "GSM" | "EDGE" | "WCDMA" | "HSDPA" | "HSUPA" | "HSPA" |
+     "HSPA+" | "LTE" | "LTE-A" | "NR5G-NSA" | "NR5G-SA"
+*/
+const TECH_TABLE = {
+  'NR5G-SA':  { key: '5g',    label: '5G',   gen: 5, rank: 8, css: 't-5g'    },
+  'NR5G-NSA': { key: '5g',    label: '5G',   gen: 5, rank: 7, css: 't-5g'    },
+  'NR':       { key: '5g',    label: '5G',   gen: 5, rank: 7, css: 't-5g'    },
+  'LTE-A':    { key: 'ltea',  label: 'LTE+', gen: 4, rank: 6, css: 't-ltea'  },
+  'LTE_CA':   { key: 'ltea',  label: 'LTE+', gen: 4, rank: 6, css: 't-ltea'  },
+  'LTE':      { key: 'lte',   label: 'LTE',  gen: 4, rank: 5, css: 't-lte'   },
+  'HSPA+':    { key: 'hspap', label: 'H+',   gen: 3, rank: 4, css: 't-hspap' },
+  'HSPA':     { key: 'hspap', label: 'H',    gen: 3, rank: 3, css: 't-hspap' },
+  'HSDPA':    { key: 'hspap', label: 'H',    gen: 3, rank: 3, css: 't-hspap' },
+  'HSUPA':    { key: 'hspap', label: 'H',    gen: 3, rank: 3, css: 't-hspap' },
+  'WCDMA':    { key: '3g',    label: '3G',   gen: 3, rank: 2, css: 't-3g'    },
+  'UMTS':     { key: '3g',    label: '3G',   gen: 3, rank: 2, css: 't-3g'    },
+  'EDGE':     { key: 'edge',  label: 'E',    gen: 2, rank: 1, css: 't-edge'  },
+  'GPRS':     { key: 'edge',  label: 'G',    gen: 2, rank: 1, css: 't-edge'  },
+  'GSM':      { key: '2g',    label: '2G',   gen: 2, rank: 0, css: 't-2g'    },
+  'NO SERVICE': { key: 'none', label: '—',  gen: 0, rank: -1, css: 't-none' },
+};
+const TECH_NONE = { key: 'none', label: '—', gen: 0, rank: -1, css: 't-none' };
+
+function techMeta(s) {
+  if (!s) return TECH_NONE;
+  const up = String(s).toUpperCase().trim();
+  if (TECH_TABLE[up]) return TECH_TABLE[up];
+  /* Fallback fuzzy match */
+  if (up.includes('5G') || up.includes('NR'))     return TECH_TABLE['NR'];
+  if (up.includes('LTE-A') || up.includes('CA'))  return TECH_TABLE['LTE-A'];
+  if (up.includes('LTE'))                         return TECH_TABLE['LTE'];
+  if (up.includes('HSPA+'))                       return TECH_TABLE['HSPA+'];
+  if (up.includes('HSPA') || up.includes('HSDPA'))return TECH_TABLE['HSPA'];
+  if (up.includes('WCDMA') || up.includes('UMTS'))return TECH_TABLE['WCDMA'];
+  if (up.includes('EDGE'))                        return TECH_TABLE['EDGE'];
+  if (up.includes('GPRS'))                        return TECH_TABLE['GPRS'];
+  if (up.includes('GSM'))                         return TECH_TABLE['GSM'];
+  return TECH_NONE;
+}
+
+function fmtNum(v, digits = 0, padTo = 0) {
+  if (v == null || Number.isNaN(v)) return '--';
+  const s = digits === 0 ? String(Math.round(v)) : v.toFixed(digits);
+  return padTo ? s.padStart(padTo, '0') : s;
+}
+
+function fmtSigned(v) {
+  if (v == null || Number.isNaN(v)) return '--';
+  const r = Math.round(v);
+  return r >= 0 ? `+${r}` : `${r}`;
+}
+
+function fmtDuration(sec) {
+  if (sec == null || sec < 0) return '00:00:00';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function fmtUTC(date) {
+  return date.toISOString().substr(11, 8) + ' Z';
+}
+
+function flash(el) {
+  if (!el) return;
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+}
+
+/* Great-circle distance between two [lat, lon] pairs, in meters.
+   Used for Home distance, geofence checks, and approach detection.    */
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+            Math.sin(dLon/2)**2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* Pretty-print a distance: meters under 1 km, kilometers above */
+function fmtDist(m) {
+  if (m == null || !isFinite(m)) return '--';
+  if (m < 1000) return `${Math.round(m)} m`;
+  return `${(m / 1000).toFixed(2)} km`;
+}
+
+/* Composite Link Quality Score 0..100 — weighted RSRP + SINR.
+   RSRP contributes 60 %, SINR 40 %. Both clamped to operational range.
+   Returns null when no coverage.                                       */
+function linkQualityScore(rsrp, sinr) {
+  if (rsrp == null) return null;
+  // RSRP -120..-65 → 0..100
+  const rsrpN = Math.max(0, Math.min(100, ((rsrp + 120) / 55) * 100));
+  // SINR -5..25 → 0..100 (null SINR = neutral 50)
+  const sinrN = sinr == null
+    ? 50
+    : Math.max(0, Math.min(100, ((sinr + 5) / 30) * 100));
+  return Math.round(rsrpN * 0.6 + sinrN * 0.4);
+}
+
+function lqsQuality(lqs) {
+  if (lqs == null) return { color: 'var(--q-none)',   hex: '#94a3b8', label: 'NO SIGNAL' };
+  if (lqs >= 70)   return { color: 'var(--q-good)',   hex: '#16a34a', label: 'GOOD' };
+  if (lqs >= 40)   return { color: 'var(--q-medium)', hex: '#f59e0b', label: 'MEDIUM' };
+  return                  { color: 'var(--q-low)',    hex: '#dc2626', label: 'LOW' };
+}
+
+/* Vertical speed in m/s, from the last few altitude samples.
+   Pushes (ts_ms, alt_m) into state.altHistory, smooths over 4 points.   */
+function updateAltHistory(tsMs, alt_m) {
+  state.altHistory.push({ t: tsMs, a: alt_m });
+  if (state.altHistory.length > 5) state.altHistory.shift();
+  if (state.altHistory.length < 2) return null;
+  const first = state.altHistory[0];
+  const last  = state.altHistory[state.altHistory.length - 1];
+  const dt = (last.t - first.t) / 1000;
+  if (dt <= 0) return null;
+  return (last.a - first.a) / dt;
+}
+
+/* Trigger a browser download for arbitrary text content. */
+function downloadBlob(filename, mime, text) {
+  const blob = new Blob([text], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+
+/* =============================================================
+   MAP — LIVE VIEW
+   =============================================================
+   Simple two-layer setup:
+     1. basemap  (added first → bottom of stack)
+     2. OpenAIP  (added second → on top)
+
+   When the user changes basemap, we use a small helper to keep
+   OpenAIP on top: remove old basemap, add new basemap, then
+   re-add OpenAIP last so it stays on top in the DOM. That's it. */
+
+function buildBasemap(name) {
+  const cfg = CONFIG.BASEMAPS[name] || CONFIG.BASEMAPS.voyager;
+  return L.tileLayer(cfg.url, {
+    attribution: cfg.attr,
+    subdomains:  cfg.sub || 'abc',
+    maxZoom:     cfg.maxZoom || 19,
+  });
+}
+
+function buildOpenAIP() {
+  const layer = L.tileLayer(CONFIG.OPENAIP_URL + '?apiKey=' + CONFIG.OPENAIP_KEY, {
+    attribution:   '&copy; <a href="https://openaip.net" target="_blank">OpenAIP</a>',
+    subdomains:    'abcd',
+    minZoom:       8,
+    maxZoom:       14,
+    maxNativeZoom: 14,
+    minNativeZoom: 8,
+    opacity:       0.85,
+  });
+
+  /* OpenAIP TMS rate-limits aggressively. When a tile fails (429/500),
+     we retry it up to 3× with exponential backoff. Without this, blank
+     squares remain blank forever, leaving holes in the airspace overlay.   */
+  const retries = {};
+  layer.on('tileerror', evt => {
+    const t = evt.tile;
+    const c = evt.coords;
+    const k = c.z + '/' + c.x + '/' + c.y;
+    retries[k] = (retries[k] || 0) + 1;
+    if (retries[k] > 3) return;       // give up after 3 attempts
+    const sub = 'abcd'[retries[k] % 4];
+    const url = CONFIG.OPENAIP_URL
+      .replace('{s}', sub)
+      .replace('{z}', c.z)
+      .replace('{x}', c.x)
+      .replace('{y}', c.y) + '?apiKey=' + CONFIG.OPENAIP_KEY + '&_r=' + retries[k];
+    setTimeout(() => { t.src = url; }, 600 * retries[k]);  // 600ms, 1.2s, 1.8s
+  });
+
+  return layer;
+}
+
+const map = L.map('map', {
+  zoomControl: true,
+  attributionControl: true,
+  preferCanvas: true,
+}).setView(CONFIG.DEMO_CENTER, 9);
+
+let currentBasemap = buildBasemap(CONFIG.DEFAULT_BASEMAP).addTo(map);
+let openAipLayer   = buildOpenAIP().addTo(map);
+
+const trajectoryLayer = L.layerGroup().addTo(map);
+const handoverLayer   = L.layerGroup().addTo(map);
+const techLayer       = L.layerGroup().addTo(map);
+
+const acIcon = L.divIcon({
+  className: 'ac-icon-wrapper',
+  html: '<div class="ac-icon"></div>',
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+});
+const acMarker = L.marker(CONFIG.DEMO_CENTER, { icon: acIcon, zIndexOffset: 1000 }).addTo(map);
+
+/* ============================================================
+   HOME marker + GEOFENCE circle + RTL line
+   ============================================================
+   Home = take-off point (CONFIG.HOME). Geofence = circle around it.
+   RTL line = dashed segment from aircraft back to home, updated
+   each frame; it makes the return path visually obvious.            */
+const homeIcon = L.divIcon({
+  className: 'home-icon-wrapper',
+  html: '<div class="home-icon"></div>',
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+const homeMarker = L.marker([CONFIG.HOME.lat, CONFIG.HOME.lon], {
+  icon: homeIcon, zIndexOffset: 900,
+}).bindTooltip('HOME · take-off point', {
+  direction: 'top', offset: [0, -10], className: 'ho-tooltip',
+}).addTo(map);
+
+const geofenceCircle = L.circle([CONFIG.HOME.lat, CONFIG.HOME.lon], {
+  radius: CONFIG.GEOFENCE_RADIUS_M,
+  color: 'rgba(34, 211, 238, 0.55)',
+  weight: 1.5,
+  fillColor: 'rgba(34, 211, 238, 0.04)',
+  fillOpacity: 1,
+  dashArray: '6 6',
+  interactive: false,
+}).addTo(map);
+
+let rtlLine = null;             // updated by applyFrame()
+const alertPingLayer = L.layerGroup().addTo(map);
+
+/* Playhead marker — shown when the user is scrubbing the timeline.
+   Distinct from acMarker, which always stays at the latest position.   */
+const playheadIcon = L.divIcon({
+  className: 'playhead-icon-wrapper',
+  html: '<div class="playhead-icon"></div>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+const playheadMarker = L.marker([0, 0], { icon: playheadIcon, zIndexOffset: 1100 });
+
+/* When user changes basemap: remove the old one, add the new one,
+   then re-add OpenAIP last so it stays on top. */
+document.querySelectorAll('input[name="basemap"]').forEach(input => {
+  input.addEventListener('change', e => {
+    if (!e.target.checked) return;
+    map.removeLayer(currentBasemap);
+    currentBasemap = buildBasemap(e.target.value).addTo(map);
+    if (map.hasLayer(openAipLayer)) {
+      map.removeLayer(openAipLayer);
+      openAipLayer = buildOpenAIP().addTo(map);
+    }
+  });
+});
+
+document.getElementById('ov-openaip').addEventListener('change', e => {
+  if (e.target.checked) {
+    openAipLayer = buildOpenAIP().addTo(map);
+  } else {
+    map.removeLayer(openAipLayer);
+  }
+});
+document.getElementById('ov-handovers').addEventListener('change', e => {
+  if (e.target.checked) handoverLayer.addTo(map);
+  else                  map.removeLayer(handoverLayer);
+});
+document.getElementById('ov-techchange').addEventListener('change', e => {
+  if (e.target.checked) techLayer.addTo(map);
+  else                  map.removeLayer(techLayer);
+});
+
+/* =============================================================
+   MAP — HEATMAP VIEW (lazy-init: hidden tab → 0×0 canvas would crash leaflet.heat)
+   ============================================================= */
+let heatmap = null;
+let heatLayer = null;
+let heatTrajectoryLayer = null;     // semi-transparent overlay of the trace
+
+function initHeatmapIfNeeded() {
+  if (heatmap) return;
+  try {
+    heatmap = L.map('heatmap', {
+      zoomControl: true,
+      attributionControl: true,
+      preferCanvas: true,
+    }).setView(CONFIG.DEMO_CENTER, 9);
+
+    buildBasemap(CONFIG.DEFAULT_BASEMAP).addTo(heatmap);
+    buildOpenAIP().addTo(heatmap);
+
+    heatLayer = L.heatLayer([], {
+      radius: 26, blur: 22, maxZoom: 12, minOpacity: 0.35,
+      gradient: {
+        0.0:  'rgba(22, 163, 74, 0)',
+        0.35: 'rgba(245, 158, 11, 0.6)',
+        0.7:  'rgba(220, 38, 38, 0.85)',
+        1.0:  'rgba(127, 29, 29, 0.95)',
+      },
+    }).addTo(heatmap);
+
+    /* Semi-transparent trace overlay — makes the coverage problem zones
+       trivially mappable to the actual flight path.                       */
+    heatTrajectoryLayer = L.layerGroup().addTo(heatmap);
+    rebuildHeatmapTrajectory();
+
+    /* Home marker on the heatmap too — useful for spatial reference */
+    L.marker([CONFIG.HOME.lat, CONFIG.HOME.lon], {
+      icon: homeIcon, zIndexOffset: 900,
+    }).bindTooltip('HOME', { direction: 'top', offset: [0, -10], className: 'ho-tooltip' })
+      .addTo(heatmap);
+
+    /* Replay any accumulated points + fit bounds */
+    if (state.heatmapData && state.heatmapData.length) {
+      heatLayer.setLatLngs(state.heatmapData);
+      const samplesWithGps = state.samples.filter(s => s.lat && s.lon);
+      if (samplesWithGps.length > 1) {
+        const b = L.latLngBounds(samplesWithGps.map(s => [s.lat, s.lon]));
+        heatmap.fitBounds(b, { padding: [40, 40], animate: false });
+      }
+    }
+  } catch (e) {
+  }
+}
+
+/* Walk state.samples and draw a translucent colored trace on the heatmap.
+   Cheap: only invoked on heatmap init / tab switch — not per-frame.        */
+function rebuildHeatmapTrajectory() {
+  if (!heatTrajectoryLayer) return;
+  heatTrajectoryLayer.clearLayers();
+  for (let i = 1; i < state.samples.length; i++) {
+    const prev = state.samples[i - 1];
+    const cur  = state.samples[i];
+    const prevNoCov = (prev.lte.rsrp_dbm == null) || (prev.lte.csq === 99);
+    const curNoCov  = (cur.lte.rsrp_dbm  == null) || (cur.lte.csq  === 99);
+    if (prevNoCov || curNoCov) continue;
+    const q = rsrpQuality(cur.lte.rsrp_dbm);
+    L.polyline([[prev.lat, prev.lon], [cur.lat, cur.lon]], {
+      color: q.hex, weight: 2, opacity: 0.55, lineCap: 'round', interactive: false,
+    }).addTo(heatTrajectoryLayer);
+  }
+}
+
+/* =============================================================
+   CHARTS
+   ============================================================= */
+const chartDefaults = {
+  color: '#cbd5e1',
+  font: { family: 'JetBrains Mono', size: 10 },
+  borderColor: '#2a3a5a',
+};
+try {
+  Chart.defaults.color  = chartDefaults.color;
+  Chart.defaults.borderColor = chartDefaults.borderColor;
+  Chart.defaults.font.family = chartDefaults.font.family;
+  Chart.defaults.font.size   = chartDefaults.font.size;
+} catch (e) {
+  /* Continue anyway — charts will use library defaults */
+}
+
+function makeAxis(opts = {}) {
+  return Object.assign({
+    grid:   { color: 'rgba(42,58,90,0.5)', drawBorder: false },
+    ticks:  { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 9 } },
+    border: { display: false },
+  }, opts);
+}
+
+let chartSignal, chartAltitude, chartNet;
+try {
+chartSignal = new Chart(document.getElementById('chart-signal'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'RSRP (dBm)', data: [], borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.08)',
+        borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: 'y' },
+      { label: 'RSRQ (dB)', data: [], borderColor: '#f5b301', backgroundColor: 'transparent',
+        borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: 'y2' },
+      { label: 'SINR (dB)', data: [], borderColor: '#00ff88', backgroundColor: 'transparent',
+        borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: 'y2' },
+    ],
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { display: true, position: 'top', align: 'end',
+                labels: { boxWidth: 10, boxHeight: 2, padding: 12, color: '#cbd5e1' } },
+      tooltip: { backgroundColor: '#131d31', borderColor: '#2a3a5a', borderWidth: 1, padding: 10, titleColor: '#f1f5f9', bodyColor: '#cbd5e1' }
+    },
+    scales: {
+      x:  makeAxis({ ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }),
+      y:  makeAxis({ position: 'left',  title: { display: true, text: 'RSRP (dBm)', color: '#94a3b8' }, suggestedMin: -120, suggestedMax: -60 }),
+      y2: makeAxis({ position: 'right', title: { display: true, text: 'RSRQ / SINR', color: '#94a3b8' }, suggestedMin: -25, suggestedMax: 30, grid: { display: false } }),
+    },
+  }
+});
+
+chartAltitude = new Chart(document.getElementById('chart-altitude'), {
+  type: 'scatter',
+  data: { datasets: [{ label: 'Sample',
+    data: [],
+    pointRadius: 3, pointHoverRadius: 5,
+    backgroundColor: ctx => {
+      const v = ctx.raw && ctx.raw.rsrp;
+      if (v == null) return '#94a3b8';
+      if (v >= -80) return '#00ff88';
+      if (v >= -90) return '#95e600';
+      if (v >= -100) return '#f5b301';
+      if (v >= -110) return '#ff7a1a';
+      return '#ff3355';
+    },
+    borderWidth: 0,
+  }] },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: '#131d31', borderColor: '#2a3a5a', borderWidth: 1, padding: 10,
+        callbacks: {
+          label: ctx => `ALT ${ctx.raw.x} m · RSRP ${ctx.raw.y} dBm · CSQ ${ctx.raw.csq}`
+        }
+      }
+    },
+    scales: {
+      x: makeAxis({ title: { display: true, text: 'Altitude (m)', color: '#94a3b8' } }),
+      y: makeAxis({ title: { display: true, text: 'RSRP (dBm)',   color: '#94a3b8' }, suggestedMin: -120, suggestedMax: -60 }),
+    }
+  }
+});
+
+chartNet = new Chart(document.getElementById('chart-net'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'HTTP Latency (ms)', data: [], borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.1)',
+        borderWidth: 1.5, pointRadius: 0, tension: 0.2, yAxisID: 'y', fill: true },
+      { label: 'Frame loss (%)', data: [], borderColor: '#ff3355', backgroundColor: 'transparent',
+        borderWidth: 1.5, pointRadius: 0, tension: 0.2, yAxisID: 'y2' },
+      { label: 'Speed (kt)', data: [], borderColor: '#f5b301', backgroundColor: 'transparent',
+        borderWidth: 1, pointRadius: 0, tension: 0.2, yAxisID: 'y2', borderDash: [3,3] },
+    ],
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    plugins: {
+      legend: { display: true, position: 'top', align: 'end',
+                labels: { boxWidth: 10, boxHeight: 2, padding: 12 } },
+      tooltip: { backgroundColor: '#131d31', borderColor: '#2a3a5a', borderWidth: 1, padding: 10 }
+    },
+    scales: {
+      x:  makeAxis({ ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }),
+      y:  makeAxis({ position: 'left',  title: { display: true, text: 'Latency (ms)', color: '#94a3b8' }, suggestedMin: 0, suggestedMax: 800 }),
+      y2: makeAxis({ position: 'right', title: { display: true, text: 'Loss / Speed', color: '#94a3b8' }, suggestedMin: 0, suggestedMax: 150, grid: { display: false } }),
+    }
+  }
+});
+} catch (chartErr) {
+}
+
+/* =============================================================
+   RENDER
+   ============================================================= */
+function applyFrame(f) {
+  if (!f) return;
+
+  if (state.flightStartTs == null) state.flightStartTs = new Date(f.ts).getTime();
+
+  const prev = state.lastFrame;
+  const noCoverage = (f.lte.rsrp_dbm == null) || (f.lte.csq === 99);
+
+  /* ----------- TRACK SEGMENT -----------
+     Rule:  no coverage  → DO NOT draw a segment (true gap in track)
+            otherwise    → draw white halo (6px) + colored line (3.5px) on top */
+  if (prev) {
+    const prevNoCov = (prev.lte.rsrp_dbm == null) || (prev.lte.csq === 99);
+    if (!noCoverage && !prevNoCov) {
+      const q = rsrpQuality(f.lte.rsrp_dbm);
+      /* Halo — white outline so the colored line pops on any basemap */
+      L.polyline(
+        [[prev.lat, prev.lon], [f.lat, f.lon]],
+        { color: '#ffffff', weight: 6, opacity: 0.85, lineCap: 'round' }
+      ).addTo(trajectoryLayer);
+      /* Colored line on top */
+      const seg = L.polyline(
+        [[prev.lat, prev.lon], [f.lat, f.lon]],
+        { color: q.hex, weight: 3.5, opacity: 1, lineCap: 'round' }
+      ).addTo(trajectoryLayer);
+      state.trajectorySegs.push(seg);
+    }
+    /* If previous frame had coverage and this one doesn't (or vice versa),
+       we just skip the segment — that creates the visible gap. */
+  }
+
+  /* ----------- HANDOVER DETECTION + CELL HISTORY ----------- */
+  const nowTs = new Date(f.ts).getTime();
+  if (state.lastCellId && f.lte.cell_id && f.lte.cell_id !== '—'
+      && state.lastCellId !== f.lte.cell_id) {
+    const operatorChanged = state.lastOperator && f.lte.operator
+      && state.lastOperator !== '—' && f.lte.operator !== '—'
+      && state.lastOperator !== f.lte.operator;
+    state.handoverCount++;
+    addHandoverMarker(f, state.lastCellId, state.lastOperator,
+                      state.lastBand, state.lastRsrp, operatorChanged);
+
+    /* Close the previous cell's active session. */
+    if (state.cellCurrent) {
+      state.cellCurrent.totalMs += (nowTs - state.cellEnterTs);
+      state.cellCurrent.lastExitTs = nowTs;
+    }
+
+    /* Ping-pong: did we come back to a recently-exited cell? */
+    const prior = state.cellByCellId.get(f.lte.cell_id);
+    const isPingPong = prior && prior.lastExitTs
+      && (nowTs - prior.lastExitTs) < CONFIG.PING_PONG_WINDOW_MS;
+
+    pushAlert(
+      operatorChanged ? 'warn' : (isPingPong ? 'warn' : 'ok'),
+      operatorChanged
+        ? `Roaming ${state.lastOperator} → ${f.lte.operator}`
+        : isPingPong
+          ? `Ping-pong → Cell ${f.lte.cell_id}`
+          : `Handover → Cell ${f.lte.cell_id}`,
+      { lat: f.lat, lon: f.lon }
+    );
+    if (isPingPong) prior.pingPong++;
+  }
+
+  /* Update / create the current cell's history entry */
+  if (f.lte.cell_id && f.lte.cell_id !== '—') {
+    let entry = state.cellByCellId.get(f.lte.cell_id);
+    const cellChanged = state.lastCellId !== f.lte.cell_id;
+    if (!entry) {
+      entry = { cellId: f.lte.cell_id, totalMs: 0, lastExitTs: 0,
+                rsrpMin: Infinity, rsrpSum: 0, count: 0, pingPong: 0,
+                operator: f.lte.operator };
+      state.cellByCellId.set(f.lte.cell_id, entry);
+    }
+    if (cellChanged) {
+      state.cellCurrent = entry;
+      state.cellEnterTs = nowTs;
+    }
+    if (f.lte.rsrp_dbm != null) {
+      entry.rsrpMin = Math.min(entry.rsrpMin, f.lte.rsrp_dbm);
+      entry.rsrpSum += f.lte.rsrp_dbm;
+      entry.count++;
+    }
+
+    state.lastCellId   = f.lte.cell_id;
+    state.lastOperator = f.lte.operator;
+    state.lastBand     = f.lte.band;
+    state.lastRsrp     = f.lte.rsrp_dbm;
+  }
+
+  /* ----------- TECH CHANGE DETECTION ----------- */
+  const curTech = techMeta(f.lte.tech);
+  if (state.lastTech && state.lastTech.key !== curTech.key) {
+    state.techChanges++;
+    /* Only mark "real" tech-class transitions, not LTE↔LTE-A subtleties */
+    const downgrade = curTech.rank < state.lastTech.rank;
+    addTechChangeMarker(f, state.lastTech, curTech, downgrade);
+    if (downgrade && state.lastTech.gen >= 4 && curTech.gen <= 3) {
+      pushAlert('warn', `Bascule ${state.lastTech.label} → ${curTech.label}`);
+    } else if (!downgrade && state.lastTech.gen <= 3 && curTech.gen >= 4) {
+      pushAlert('ok', `Retour ${state.lastTech.label} → ${curTech.label}`);
+    } else if (curTech.key === 'none') {
+      /* covered by no-coverage alert below */
+    }
+  }
+  /* Accumulate time-on-tech (5s per frame) */
+  state.techTimeSec[curTech.key] = (state.techTimeSec[curTech.key] || 0) + 5;
+  state.lastTech = curTech;
+
+  /* Aircraft marker */
+  acMarker.setLatLng([f.lat, f.lon]);
+  const acEl = acMarker.getElement();
+  if (acEl) {
+    const inner = acEl.querySelector('.ac-icon');
+    if (inner) inner.style.transform = `rotate(${f.hdg || 0}deg)`;
+  }
+  if (state.follow && state.lastView === 'live') {
+    map.panTo([f.lat, f.lon], { animate: true, duration: 0.6 });
+  }
+
+  /* Heatmap point — only emit for samples WITH coverage but degraded */
+  if (!noCoverage) {
+    /* intensity: best (-65 dBm) → 0 ; worst (-115 dBm) → 1 */
+    const intensity = Math.max(0, Math.min(1, (-f.lte.rsrp_dbm - 65) / 50));
+    state.heatmapData.push([f.lat, f.lon, intensity]);
+  } else {
+    /* No coverage = strongest possible problem signal */
+    state.heatmapData.push([f.lat, f.lon, 1.0]);
+  }
+  if (state.heatmapData.length > CONFIG.MAX_SAMPLES) state.heatmapData.shift();
+  if (heatLayer) heatLayer.setLatLngs(state.heatmapData);
+  document.getElementById('heatmap-points-count').textContent = state.heatmapData.length;
+
+  /* Stats accumulators */
+  if (noCoverage) state.noSignalSec += 5;
+  else            state.signalSec   += 5;
+
+  /* Threshold alerts */
+  const alertCoords = { lat: f.lat, lon: f.lon };
+  if (!noCoverage && f.lte.rsrp_dbm <= -110) {
+    pushAlert('err', `Signal critique · RSRP ${Math.round(f.lte.rsrp_dbm)} dBm`, alertCoords);
+  }
+  if (noCoverage && (!prev || (prev.lte.csq !== 99 && prev.lte.rsrp_dbm != null))) {
+    pushAlert('err', `Perte de couverture LTE`, alertCoords);
+  }
+  if (f.lte.http_lat_ms != null && f.lte.http_lat_ms > 1500) {
+    pushAlert('warn', `Latence élevée · ${Math.round(f.lte.http_lat_ms)} ms`, alertCoords);
+  }
+  if (f.lte.frame_loss_pct != null && f.lte.frame_loss_pct > 5) {
+    pushAlert('warn', `Perte trames · ${f.lte.frame_loss_pct.toFixed(1)} %`, alertCoords);
+  }
+
+  /* ----------- AIRCRAFT HEALTH — battery + geofence ----------- */
+  const ac = f.aircraft || {};
+  if (ac.battery_soc != null) {
+    const lvl = ac.battery_soc <= CONFIG.BATTERY_CRITICAL_PCT ? 'critical'
+              : ac.battery_soc <= CONFIG.BATTERY_WARN_PCT     ? 'warn'
+              : 'ok';
+    if (lvl !== state.batteryLevel) {
+      if (lvl === 'critical') pushAlert('err',  `Batterie critique · ${Math.round(ac.battery_soc*100)} %`, alertCoords);
+      else if (lvl === 'warn') pushAlert('warn', `Batterie basse · ${Math.round(ac.battery_soc*100)} %`, alertCoords);
+      state.batteryLevel = lvl;
+    }
+  }
+
+  /* Geofence — alert when approaching boundary (85%) or breaching it. */
+  const distHome = haversineM(f.lat, f.lon, CONFIG.HOME.lat, CONFIG.HOME.lon);
+  const rPct = distHome / CONFIG.GEOFENCE_RADIUS_M;
+  const newGeoState = rPct >= 1 ? 'outside'
+                    : rPct >= CONFIG.GEOFENCE_WARN_PCT ? 'approaching'
+                    : 'inside';
+  if (newGeoState !== state.geofenceState) {
+    if (newGeoState === 'outside')          pushAlert('err',  `Géofence franchie · ${fmtDist(distHome)} de home`, alertCoords);
+    else if (newGeoState === 'approaching') pushAlert('warn', `Approche géofence · ${fmtDist(distHome)} / ${fmtDist(CONFIG.GEOFENCE_RADIUS_M)}`, alertCoords);
+    state.geofenceState = newGeoState;
+  }
+
+  /* ----------- RTL LINE — aircraft → home ----------- */
+  if (!state._bulkLoad) {
+    if (rtlLine) map.removeLayer(rtlLine);
+    rtlLine = L.polyline([[f.lat, f.lon], [CONFIG.HOME.lat, CONFIG.HOME.lon]], {
+      color: 'rgba(34, 211, 238, 0.6)',
+      weight: 1.5,
+      dashArray: '3 6',
+      interactive: false,
+    }).addTo(map);
+  }
+
+  /* ----------- HEARTBEAT + ALTITUDE HISTORY (for vario) ----------- */
+  state.lastSampleAt = Date.now();
+  updateAltHistory(nowTs, f.alt_m || 0);
+
+  state.samples.push(f);
+  if (state.samples.length > CONFIG.MAX_SAMPLES) state.samples.shift();
+  state.lastFrame = f;
+
+  if (!state._bulkLoad) {
+    /* When the user is scrubbing (reviewing a past frame), don't yank the
+       UI back to "now". Just keep accumulating data; the slider's max grows. */
+    if (state.scrubIndex < 0) {
+      renderUI(f);
+      renderCharts();
+    }
+    updateScrubBounds();
+  }
+}
+
+/* Diamond marker at handover location with rich tooltip */
+function addHandoverMarker(f, prevCell, prevOp, prevBand, prevRsrp, isInter) {
+  const icon = L.divIcon({
+    className: 'ho-icon-wrapper',
+    html: `<div class="ho-icon ${isInter ? 'inter' : ''}"></div>`,
+    iconSize: isInter ? [16, 16] : [14, 14],
+    iconAnchor: isInter ? [8, 8] : [7, 7],
+  });
+  const time = new Date(f.ts).toISOString().substr(11, 8);
+  const tip = `
+    <div class="ho-time">${time} Z · ${isInter ? 'OPERATOR CHANGE' : 'HANDOVER'}</div>
+    <div style="margin-top:5px"><b>${prevOp || '—'}</b> · cell ${prevCell || '—'}
+      <span class="ho-arrow">→</span>
+      <b>${f.lte.operator || '—'}</b> · cell ${f.lte.cell_id || '—'}</div>
+    <div class="ho-meta">
+      Band ${prevBand || '—'} → ${f.lte.band || '—'}
+      &nbsp;·&nbsp; RSRP ${prevRsrp != null ? Math.round(prevRsrp)+' dBm' : '—'}
+      → ${f.lte.rsrp_dbm != null ? Math.round(f.lte.rsrp_dbm)+' dBm' : '—'}
+    </div>
+  `;
+  L.marker([f.lat, f.lon], { icon, zIndexOffset: 800 })
+    .bindTooltip(tip, { direction: 'top', offset: [0, -10], className: 'ho-tooltip', opacity: 1 })
+    .addTo(handoverLayer);
+}
+
+/* Triangle marker at radio-tech transition (▼ downgrade / ▲ upgrade) */
+function addTechChangeMarker(f, prevTech, curTech, downgrade) {
+  const icon = L.divIcon({
+    className: 'tech-tri-wrapper',
+    html: `<div class="tech-tri ${downgrade ? 'down' : 'up'}"></div>`,
+    iconSize: [16, 13],
+    iconAnchor: [8, downgrade ? 0 : 13],
+  });
+  const time = new Date(f.ts).toISOString().substr(11, 8);
+  const tip = `
+    <div class="ho-time">${time} Z · ${downgrade ? 'TECH DOWNGRADE' : 'TECH UPGRADE'}</div>
+    <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+      <span class="tech-badge ${prevTech.css}">${prevTech.label}</span>
+      <span class="ho-arrow">→</span>
+      <span class="tech-badge ${curTech.css}">${curTech.label}</span>
+    </div>
+    <div class="ho-meta">
+      RSRP ${f.lte.rsrp_dbm != null ? Math.round(f.lte.rsrp_dbm)+' dBm' : '—'}
+      &nbsp;·&nbsp; Band ${f.lte.band || '—'}
+    </div>
+  `;
+  L.marker([f.lat, f.lon], { icon, zIndexOffset: 900 })
+    .bindTooltip(tip, { direction: downgrade ? 'bottom' : 'top',
+                        offset: [0, downgrade ? 10 : -10],
+                        className: 'ho-tooltip', opacity: 1 })
+    .addTo(techLayer);
+}
+
+function renderUI(f) {
+  /* Header meta */
+  document.getElementById('m-flight').textContent = f.flight_id || '—';
+  document.getElementById('m-utc').textContent = fmtUTC(new Date(f.ts));
+  document.getElementById('m-samples').textContent = state.samples.length.toLocaleString();
+  const dur = (new Date(f.ts).getTime() - state.flightStartTs) / 1000;
+  document.getElementById('m-duration').textContent = fmtDuration(dur);
+
+  const ph = document.getElementById('m-phase');
+  ph.textContent = f.phase || 'GROUND';
+  ph.dataset.phase = f.phase || 'GROUND';
+
+  /* Header tech badge */
+  const tm = techMeta(f.lte.tech);
+  const tBadge = document.getElementById('m-tech');
+  tBadge.textContent = tm.label;
+  tBadge.className = 'tech-badge large ' + tm.css;
+
+  /* KPI strip — throughput replaces CSQ (CSQ is redundant with RSRP) */
+  const thrDn = f.lte.throughput_dn_kbps;
+  setKPI('thr',  thrDn,               15000, 0,   0,   v => v == null ? 'var(--q-none)' : v >= 8000 ? 'var(--q-excellent)' : v >= 3000 ? 'var(--q-good)' : v >= 800 ? 'var(--q-fair)' : v >= 200 ? 'var(--q-poor)' : 'var(--q-bad)');
+  setKPI('rsrp', f.lte.rsrp_dbm,      -60, -120, 0,   v => rsrpQuality(v).color);
+  setKPI('rsrq', f.lte.rsrq_db,         0, -25,  0,   v => v == null ? 'var(--q-none)' : v >= -10 ? 'var(--q-excellent)' : v >= -15 ? 'var(--q-good)' : v >= -20 ? 'var(--q-fair)' : 'var(--q-bad)');
+  setKPI('sinr', f.lte.sinr_db,        25, -5,   0,   v => v == null ? 'var(--q-none)' : v >= 20 ? 'var(--q-excellent)' : v >= 13 ? 'var(--q-good)' : v >= 5 ? 'var(--q-fair)' : v >= 0 ? 'var(--q-poor)' : 'var(--q-bad)');
+  setKPI('lat',  f.lte.http_lat_ms,    50, 2000, 0,   v => v == null ? 'var(--q-none)' : v <= 200 ? 'var(--q-excellent)' : v <= 500 ? 'var(--q-good)' : v <= 1000 ? 'var(--q-fair)' : v <= 1500 ? 'var(--q-poor)' : 'var(--q-bad)', /*invert*/ true);
+  setKPI('loss', f.lte.frame_loss_pct, 0,  20,   1,   v => v == null ? 'var(--q-none)' : v <= 0.5 ? 'var(--q-excellent)' : v <= 2 ? 'var(--q-good)' : v <= 5 ? 'var(--q-fair)' : v <= 10 ? 'var(--q-poor)' : 'var(--q-bad)', /*invert*/ true);
+
+  /* Map info — adds AGL, V/S, Home distance */
+  const distHomeM = haversineM(f.lat, f.lon, CONFIG.HOME.lat, CONFIG.HOME.lon);
+  const ac = f.aircraft || {};
+  const agl_m = ac.agl_m != null ? ac.agl_m : Math.max(0, (f.alt_m || 0) - CONFIG.HOME_ALT_M);
+  let vs_ms  = ac.vs_ms != null ? ac.vs_ms : updateAltHistory(new Date(f.ts).getTime(), f.alt_m || 0);
+  if (vs_ms == null) vs_ms = 0;
+
+  document.getElementById('info-lat').textContent = f.lat.toFixed(5) + '°';
+  document.getElementById('info-lon').textContent = f.lon.toFixed(5) + '°';
+  document.getElementById('info-alt').textContent = `${Math.round(f.alt_m)} m`;
+  document.getElementById('info-agl').textContent = `${Math.round(agl_m)} m`;
+  document.getElementById('info-vs').textContent  = `${vs_ms >= 0 ? '+' : ''}${vs_ms.toFixed(1)} m/s`;
+  document.getElementById('info-spd').textContent = `${Math.round(f.spd_kt)} kt`;
+  document.getElementById('info-hdg').textContent = `${String(Math.round(f.hdg)).padStart(3,'0')}°`;
+  document.getElementById('info-home').textContent = fmtDist(distHomeM);
+
+  /* LQS gauge — composite of RSRP+SINR, 0..100 */
+  const lqs = linkQualityScore(f.lte.rsrp_dbm, f.lte.sinr_db);
+  const lqsVal = lqs != null ? lqs : 0;
+  const pct = lqsVal / 100;
+  const arc = 197.92;
+  document.getElementById('csq-fill').setAttribute('stroke-dasharray', `${arc * pct} 263.89`);
+  const cq = lqsQuality(lqs);
+  document.getElementById('csq-fill').style.stroke = cq.color;
+  document.getElementById('csq-num').textContent = lqs != null ? lqs : '--';
+  const cqEl = document.getElementById('csq-quality');
+  cqEl.textContent = cq.label;
+  cqEl.style.color = cq.color;
+
+  /* Aircraft Health panel + Cell Quality table */
+  renderAircraftHealth(f, distHomeM);
+  renderCellTable();
+
+  /* Cell info */
+  setVal('d-operator', f.lte.operator);
+  /* Tech: render as colored badge instead of plain text */
+  const dTech = document.getElementById('d-tech');
+  dTech.innerHTML = '';
+  const techSpan = document.createElement('span');
+  techSpan.className = 'tech-badge ' + tm.css;
+  techSpan.textContent = tm.label;
+  dTech.appendChild(techSpan);
+  setVal('d-band',     f.lte.band);
+  setVal('d-cellid',   f.lte.cell_id);
+  setVal('d-tac',      f.lte.tac);
+  setVal('d-earfcn',   f.lte.earfcn);
+  setVal('d-reg',      f.lte.creg_state);
+  setVal('d-ip',       f.lte.ip);
+
+  /* Stats panel */
+  document.getElementById('s-on').textContent = fmtDuration(state.signalSec);
+  document.getElementById('s-off').textContent = fmtDuration(state.noSignalSec);
+  document.getElementById('s-handovers').textContent = state.handoverCount;
+
+  renderTechDistribution();
+
+  const rsrps = state.samples.map(s => s.lte.rsrp_dbm).filter(v => v != null);
+  const lats  = state.samples.map(s => s.lte.http_lat_ms).filter(v => v != null);
+  if (rsrps.length) {
+    const avg = rsrps.reduce((a,b)=>a+b,0)/rsrps.length;
+    const min = Math.min(...rsrps);
+    document.getElementById('s-rsrp-avg').textContent = `${Math.round(avg)} dBm`;
+    document.getElementById('s-rsrp-min').textContent = `${Math.round(min)} dBm`;
+  }
+  if (lats.length) {
+    const avg = lats.reduce((a,b)=>a+b,0)/lats.length;
+    document.getElementById('s-lat-avg').textContent = `${Math.round(avg)} ms`;
+  }
+}
+
+function setVal(id, v) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = (v == null || v === '') ? '—' : v;
+}
+
+function setKPI(key, val, vBest, vWorst, decimals, colorFn, invert = false) {
+  const elNum = document.getElementById('kpi-' + key);
+  const elBar = document.getElementById('kpi-' + key + '-bar');
+
+  if (val == null || (key === 'csq' && val === 99)) {
+    elNum.textContent = '--';
+    elBar.style.width = '0%';
+    elBar.style.background = 'var(--q-none)';
+    return;
+  }
+  elNum.textContent = decimals ? Number(val).toFixed(decimals) : Math.round(val);
+
+  /* bar fill: 0 = worst → 100% = best */
+  let pct = (val - vWorst) / (vBest - vWorst);
+  if (invert) pct = 1 - (val - vBest) / (vWorst - vBest);
+  pct = Math.max(0, Math.min(1, pct));
+  elBar.style.width = `${pct * 100}%`;
+  elBar.style.background = colorFn(val);
+
+  flash(elNum.parentElement);
+}
+
+function renderTechDistribution() {
+  const total = Object.values(state.techTimeSec).reduce((a, b) => a + b, 0);
+  const bar    = document.getElementById('tech-dist');
+  const legend = document.getElementById('tech-dist-legend');
+  if (!total) {
+    bar.innerHTML = '';
+    legend.innerHTML = '<span style="color:var(--text-3)">— no data —</span>';
+    return;
+  }
+
+  const order = ['5g', 'ltea', 'lte', 'hspap', '3g', 'edge', '2g', 'none'];
+  const labelByKey = {
+    '5g':    { label: '5G',   css: 'var(--tech-5g)'    },
+    'ltea':  { label: 'LTE+', css: 'var(--tech-ltea)'  },
+    'lte':   { label: 'LTE',  css: 'var(--tech-lte)'   },
+    'hspap': { label: 'H+',   css: 'var(--tech-hspap)' },
+    '3g':    { label: '3G',   css: 'var(--tech-3g)'    },
+    'edge':  { label: 'E',    css: 'var(--tech-edge)'  },
+    '2g':    { label: '2G',   css: 'var(--tech-2g)'    },
+    'none':  { label: 'None', css: 'var(--tech-none)'  },
+  };
+
+  let segs = '';
+  let leg  = '';
+  order.forEach(k => {
+    const sec = state.techTimeSec[k] || 0;
+    if (!sec) return;
+    const pct = (sec / total) * 100;
+    segs += `<div class="tech-dist-seg" style="width:${pct}%;background:${labelByKey[k].css}" title="${labelByKey[k].label} · ${fmtDuration(sec)} · ${pct.toFixed(0)}%"></div>`;
+    leg  += `<span class="tech-dist-legend-item"><span class="swatch" style="background:${labelByKey[k].css}"></span>${labelByKey[k].label} · ${fmtDuration(sec)} · ${pct.toFixed(0)}%</span>`;
+  });
+  bar.innerHTML = segs;
+  legend.innerHTML = leg;
+}
+
+/* Render the new "Aircraft Health" sidebar panel.
+   Reads from frame.aircraft when present; otherwise blanks fields out
+   so SD imports (which lack aircraft data) still render cleanly.       */
+function renderAircraftHealth(f, distHomeM) {
+  const ac = f.aircraft || {};
+
+  /* Battery */
+  if (ac.battery_soc != null) {
+    const pct = Math.round(ac.battery_soc * 100);
+    document.getElementById('h-batt-soc').textContent = pct;
+    document.getElementById('h-batt-v').textContent   = ac.battery_v != null ? ac.battery_v.toFixed(1) : '--';
+    document.getElementById('h-batt-a').textContent   = ac.battery_a != null ? ac.battery_a.toFixed(1) : '--';
+    document.getElementById('h-batt-time').textContent = ac.battery_time_s != null ? fmtDuration(ac.battery_time_s) : '--:--';
+    const bar = document.getElementById('h-batt-bar');
+    bar.style.width = `${pct}%`;
+    bar.style.background = ac.battery_soc <= CONFIG.BATTERY_CRITICAL_PCT ? 'var(--err)'
+                        : ac.battery_soc <= CONFIG.BATTERY_WARN_PCT     ? 'var(--amber)'
+                        : 'var(--ok)';
+    const battEl = document.getElementById('h-batt');
+    battEl.className = 'health-value' + (
+      ac.battery_soc <= CONFIG.BATTERY_CRITICAL_PCT ? ' err' :
+      ac.battery_soc <= CONFIG.BATTERY_WARN_PCT     ? ' warn' : '');
+  } else {
+    document.getElementById('h-batt-soc').textContent  = '--';
+    document.getElementById('h-batt-v').textContent    = '--';
+    document.getElementById('h-batt-a').textContent    = '--';
+    document.getElementById('h-batt-time').textContent = '--:--';
+    document.getElementById('h-batt-bar').style.width  = '0%';
+  }
+
+  /* Flight mode */
+  const mode = ac.flight_mode || '—';
+  const modeEl = document.getElementById('h-mode');
+  modeEl.textContent = mode;
+  modeEl.dataset.mode = mode;
+
+  /* GPS */
+  const fix  = ac.gps_fix  || 'NO_FIX';
+  const sats = ac.gps_sats != null ? ac.gps_sats : '--';
+  const hdop = ac.gps_hdop != null ? ac.gps_hdop.toFixed(1) : '--';
+  const gpsEl  = document.getElementById('h-gps');
+  gpsEl.dataset.fix = fix;
+  document.getElementById('h-gps-text').textContent = fix.replace('_', ' ');
+  document.getElementById('h-sats').textContent     = sats;
+  document.getElementById('h-hdop').textContent     = hdop;
+
+  /* Home distance */
+  const dEl = document.getElementById('h-home-dist');
+  dEl.innerHTML = `${fmtDist(distHomeM).replace(/\s(m|km)$/, '<span class="unit">$1</span>')}`;
+  dEl.className = 'health-value' + (
+    distHomeM > CONFIG.GEOFENCE_RADIUS_M                                ? ' err'  :
+    distHomeM > CONFIG.GEOFENCE_RADIUS_M * CONFIG.GEOFENCE_WARN_PCT     ? ' warn' : '');
+}
+
+/* Top-5 cells by total time-on. Reads state.cellByCellId + adds the
+   current cell's in-flight duration so the live numbers don't lag.     */
+function renderCellTable() {
+  const body = document.getElementById('cell-table-body');
+  const cells = Array.from(state.cellByCellId.values());
+  if (cells.length === 0) {
+    body.innerHTML = '<tr><td colspan="4" class="cell-table-empty">— No cells yet —</td></tr>';
+    return;
+  }
+  /* Snapshot the current cell's live ms so the top entry doesn't appear stuck. */
+  const liveMs = state.cellCurrent && state.lastSampleAt
+    ? (state.lastSampleAt - state.cellEnterTs) : 0;
+  cells.sort((a, b) => {
+    const aMs = a === state.cellCurrent ? a.totalMs + liveMs : a.totalMs;
+    const bMs = b === state.cellCurrent ? b.totalMs + liveMs : b.totalMs;
+    return bMs - aMs;
+  });
+  const rows = cells.slice(0, 5).map(c => {
+    const ms = c === state.cellCurrent ? c.totalMs + liveMs : c.totalMs;
+    const rsrpMin = c.rsrpMin === Infinity ? '—' : `${Math.round(c.rsrpMin)}`;
+    const pp = c.pingPong > 0 ? `<span class="ping-pong">${c.pingPong}</span>` : '';
+    return `<tr>
+      <td class="cell-id">${c.cellId}</td>
+      <td class="right">${fmtDuration(ms/1000)}</td>
+      <td class="right">${rsrpMin}</td>
+      <td class="right">${pp}</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = rows;
+}
+
+function renderCharts() {
+  if (state.lastView !== 'analytics') return;
+  if (!chartSignal || !chartAltitude || !chartNet) return;  // charts failed to init
+
+  const tail = state.samples.slice(-CONFIG.TIMESERIES_WINDOW);
+  const labels = tail.map(s => new Date(s.ts).toISOString().substr(11, 8));
+
+  chartSignal.data.labels = labels;
+  chartSignal.data.datasets[0].data = tail.map(s => s.lte.rsrp_dbm);
+  chartSignal.data.datasets[1].data = tail.map(s => s.lte.rsrq_db);
+  chartSignal.data.datasets[2].data = tail.map(s => s.lte.sinr_db);
+  chartSignal.update('none');
+
+  chartAltitude.data.datasets[0].data = state.samples
+    .filter(s => s.lte.rsrp_dbm != null)
+    .map(s => ({ x: Math.round(s.alt_m), y: Math.round(s.lte.rsrp_dbm), rsrp: s.lte.rsrp_dbm, csq: s.lte.csq }));
+  chartAltitude.update('none');
+  document.getElementById('chart-2-meta').textContent = `samples: ${chartAltitude.data.datasets[0].data.length}`;
+
+  chartNet.data.labels = labels;
+  chartNet.data.datasets[0].data = tail.map(s => s.lte.http_lat_ms);
+  chartNet.data.datasets[1].data = tail.map(s => s.lte.frame_loss_pct);
+  chartNet.data.datasets[2].data = tail.map(s => s.spd_kt);
+  chartNet.update('none');
+}
+
+/* =============================================================
+   ALERTS
+   ============================================================= */
+function pushAlert(severity, msg, coords) {
+  /* Throttle: don't repeat identical alert within 30s */
+  const now = Date.now();
+  const last = state.alerts[0];
+  if (last && last.msg === msg && (now - last.t) < 30000) return;
+
+  state.alerts.unshift({ severity, msg, t: now, coords: coords || null });
+  if (state.alerts.length > 30) state.alerts.length = 30;
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const list = document.getElementById('alerts-list');
+  if (!state.alerts.length) {
+    list.innerHTML = '<div class="alerts-empty">— No alerts —</div>';
+    return;
+  }
+  list.innerHTML = state.alerts.map((a, idx) => {
+    const time = new Date(a.t).toISOString().substr(11, 8);
+    const clickable = a.coords ? 'clickable' : '';
+    const pin = a.coords ? `<div class="alert-pin">⌖ ${a.coords.lat.toFixed(4)}, ${a.coords.lon.toFixed(4)}</div>` : '';
+    return `<div class="alert ${clickable}" data-severity="${a.severity}" data-alert-idx="${idx}">
+      <div class="alert-time">${time} Z</div>
+      <div class="alert-msg">${a.msg}</div>
+      ${pin}
+    </div>`;
+  }).join('');
+}
+
+/* Click on an alert → pan the map to its location and draw a brief ping. */
+document.getElementById('alerts-list').addEventListener('click', e => {
+  const el = e.target.closest('.alert.clickable');
+  if (!el) return;
+  const idx = parseInt(el.dataset.alertIdx, 10);
+  const a = state.alerts[idx];
+  if (!a || !a.coords) return;
+  /* Switch to live view if we're elsewhere */
+  if (state.lastView !== 'live') {
+    const liveTab = document.querySelector('.stage-tab[data-view="live"]');
+    if (liveTab) liveTab.click();
+  }
+  map.flyTo([a.coords.lat, a.coords.lon], Math.max(map.getZoom(), 14), {
+    duration: 0.6,
+  });
+  /* Draw an expanding ring at the event location */
+  const ping = L.marker([a.coords.lat, a.coords.lon], {
+    icon: L.divIcon({
+      className: 'alert-ping-wrapper',
+      html: '<div class="alert-ping"></div>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    }),
+    interactive: false,
+    zIndexOffset: 2000,
+  }).addTo(alertPingLayer);
+  setTimeout(() => alertPingLayer.removeLayer(ping), 1300);
+});
+
+/* =============================================================
+   SCRUB TIMELINE
+   =============================================================
+   The slider tracks state.samples. When scrubIndex < 0 the dashboard
+   behaves normally (renders latest frame). When scrubIndex >= 0, the
+   UI freezes on samples[scrubIndex] and a yellow playhead marker is
+   added to the trajectory so the user can locate the inspected sample. */
+
+function updateScrubBounds() {
+  const slider = document.getElementById('scrub-slider');
+  const pos    = document.getElementById('scrub-pos');
+  if (!slider) return;
+  const n = state.samples.length;
+  slider.max = Math.max(0, n - 1);
+  if (state.scrubIndex < 0) {
+    /* live mode: keep slider thumb at the right edge */
+    slider.value = slider.max;
+  }
+  pos.textContent = `${state.scrubIndex < 0 ? n : (state.scrubIndex + 1)} / ${n}`;
+  const t = document.getElementById('scrub-time');
+  const idx = state.scrubIndex < 0 ? n - 1 : state.scrubIndex;
+  if (idx >= 0 && state.samples[idx]) {
+    t.textContent = new Date(state.samples[idx].ts).toISOString().substr(11, 8);
+  } else {
+    t.textContent = '--:--:--';
+  }
+}
+
+function scrubToIndex(idx) {
+  const n = state.samples.length;
+  if (n === 0) return;
+  idx = Math.max(0, Math.min(n - 1, idx));
+  state.scrubIndex = idx;
+  const f = state.samples[idx];
+  if (!f) return;
+
+  /* Freeze rendering on this past frame */
+  renderUI(f);
+  /* Replay charts up to this point — gives proper "time travel" feel */
+  const savedSamples = state.samples;
+  state.samples = savedSamples.slice(0, idx + 1);
+  renderCharts();
+  state.samples = savedSamples;
+
+  /* Move the playhead onto the trajectory */
+  if (!map.hasLayer(playheadMarker)) playheadMarker.addTo(map);
+  playheadMarker.setLatLng([f.lat, f.lon]);
+
+  /* RTL line follows the scrub head — what was the home distance at that time? */
+  if (rtlLine) map.removeLayer(rtlLine);
+  rtlLine = L.polyline([[f.lat, f.lon], [CONFIG.HOME.lat, CONFIG.HOME.lon]], {
+    color: 'rgba(34, 211, 238, 0.6)', weight: 1.5, dashArray: '3 6', interactive: false,
+  }).addTo(map);
+
+  /* UI affordances */
+  document.getElementById('scrub-bar').classList.add('scrubbing');
+  document.getElementById('scrub-live').classList.remove('disabled');
+  updateScrubBounds();
+}
+
+function scrubResume() {
+  state.scrubIndex   = -1;
+  state.scrubPlaying = false;
+  document.getElementById('scrub-play').classList.remove('playing');
+  document.getElementById('scrub-play').textContent = '▶';
+  document.getElementById('scrub-bar').classList.remove('scrubbing');
+  document.getElementById('scrub-live').classList.add('disabled');
+  if (map.hasLayer(playheadMarker)) map.removeLayer(playheadMarker);
+  if (state.lastFrame) {
+    renderUI(state.lastFrame);
+    renderCharts();
+  }
+  updateScrubBounds();
+}
+
+(function wireScrubControls() {
+  const slider = document.getElementById('scrub-slider');
+  const playBtn = document.getElementById('scrub-play');
+  const prevBtn = document.getElementById('scrub-prev');
+  const nextBtn = document.getElementById('scrub-next');
+  const liveBtn = document.getElementById('scrub-live');
+  if (!slider) return;
+
+  slider.addEventListener('input', e => {
+    const idx = parseInt(e.target.value, 10);
+    /* Dragging the slider to the very last frame == live again */
+    if (idx >= state.samples.length - 1) scrubResume();
+    else scrubToIndex(idx);
+  });
+
+  prevBtn.addEventListener('click', () => {
+    const cur = state.scrubIndex < 0 ? state.samples.length - 1 : state.scrubIndex;
+    scrubToIndex(cur - 1);
+  });
+  nextBtn.addEventListener('click', () => {
+    const cur = state.scrubIndex < 0 ? state.samples.length - 1 : state.scrubIndex;
+    if (cur + 1 >= state.samples.length - 1) scrubResume();
+    else scrubToIndex(cur + 1);
+  });
+  liveBtn.addEventListener('click', () => scrubResume());
+
+  /* Play button auto-advances every 150 ms (≈ 33× real-time at 5 s sampling) */
+  playBtn.addEventListener('click', () => {
+    if (state.samples.length === 0) return;
+    state.scrubPlaying = !state.scrubPlaying;
+    playBtn.classList.toggle('playing', state.scrubPlaying);
+    playBtn.textContent = state.scrubPlaying ? '❚❚' : '▶';
+    if (state.scrubPlaying && state.scrubIndex < 0) {
+      /* Start from the beginning when entering replay */
+      scrubToIndex(0);
+    }
+  });
+  setInterval(() => {
+    if (!state.scrubPlaying) return;
+    const cur = state.scrubIndex < 0 ? state.samples.length - 1 : state.scrubIndex;
+    if (cur + 1 >= state.samples.length - 1) {
+      /* Reached the end — stop playback, keep position at last */
+      state.scrubPlaying = false;
+      playBtn.classList.remove('playing');
+      playBtn.textContent = '▶';
+    } else {
+      scrubToIndex(cur + 1);
+    }
+  }, 150);
+})();
+
+/* =============================================================
+   TAB SWITCHING
+   ============================================================= */
+document.querySelectorAll('.stage-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const v = tab.dataset.view;
+    document.querySelectorAll('.stage-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.dataset.view === v));
+    state.lastView = v;
+    /* Heatmap is lazy-init: create it the first time the tab is shown */
+    if (v === 'heatmap') {
+      initHeatmapIfNeeded();
+      /* Rebuild the trace overlay every time we open the tab — keeps it
+         in sync with any new samples received while we were on another tab. */
+      rebuildHeatmapTrajectory();
+    }
+    /* Leaflet needs invalidateSize after becoming visible */
+    setTimeout(() => {
+      if (v === 'live')             map.invalidateSize();
+      if (v === 'heatmap' && heatmap) heatmap.invalidateSize();
+    }, 50);
+    if (v === 'analytics') renderCharts();
+  });
+});
+
+document.getElementById('btn-follow').addEventListener('click', e => {
+  state.follow = !state.follow;
+  e.currentTarget.classList.toggle('active', state.follow);
+});
+document.getElementById('btn-pause').addEventListener('click', e => {
+  if (CONFIG.DEMO) {
+    /* In replay mode — regenerate a fresh complete flight */
+    loadFullDemoFlight(50);
+    return;
+  }
+  state.paused = !state.paused;
+  e.currentTarget.textContent = state.paused ? 'RESUME' : 'PAUSE';
+  e.currentTarget.classList.toggle('active', !state.paused);
+  document.getElementById('status-conn').dataset.state = state.paused ? 'warn' : 'ok';
+  document.getElementById('status-conn').querySelector('span:last-child').textContent = state.paused ? 'Paused' : 'Live';
+});
+
+/* Init follow button state */
+document.getElementById('btn-follow').classList.toggle('active', state.follow);
+
+/* =============================================================
+   DATA SOURCE — DEMO GENERATOR
+   ============================================================= */
+/* =============================================================
+   DATA SOURCE — DEMO GENERATOR (factory)
+   Each call to makeDemoStream() returns a fresh stream that can
+   be advanced one frame at a time via stream(). This lets us
+   either drip-feed live (5s tick) or generate a full flight at once.
+   ============================================================= */
+function makeDemoStream() {
+  let t = 0;
+  let lat = CONFIG.DEMO_DRIFT_LAT;
+  let lon = CONFIG.DEMO_DRIFT_LON;
+  let alt = 0;
+  let spd = 0;
+  let hdg = 90;
+  let cellId = 12345678;
+  let cellSwitchAt = 60;
+  let earfcn = 6300;
+  let band = 'B20';
+  let lastTechStr = null;
+  const operators = ['Proximus', 'Orange BE', 'BASE'];
+  let operator = operators[0];
+
+  /* Aircraft demo model — Li-Po 4S, 5000 mAh, drains with thrust */
+  let batterySoc  = 0.97;
+  const battCapMah = 5000;
+  let altPrev     = 0;
+
+  return function nextFrame() {
+    t += 5;
+
+    /* phase progression — compressed timeline so trace appears immediately:
+         0–10s    GROUND  (taxi)
+         10–60s   CRUISE  (climb-out, accelerating)
+         60–600s  CRUISE  (steady)
+         600–900s MANEUVER
+         900–1100s APPROACH descent
+         1100–1200s APPROACH final
+         then loop */
+    let phase;
+    if      (t <  10)  { phase = 'GROUND';   spd = 8;    alt = 60;  }
+    else if (t <  60)  { phase = 'CRUISE';   spd += 6;   alt += 25; if (spd>110) spd=110; if (alt>1200) alt=1200; }
+    else if (t <  600) { phase = 'CRUISE';   alt += (Math.random()-0.5)*4; }
+    else if (t <  900) { phase = 'MANEUVER'; alt += (Math.random()-0.5)*15; }
+    else if (t < 1100) { phase = 'APPROACH'; alt -= 3; spd -= 0.5; }
+    else if (t < 1200) { phase = 'APPROACH'; alt = Math.max(60, alt - 8); spd = Math.max(0, spd - 2); }
+    else               { phase = 'GROUND';   spd = 0;    alt = 60;  t = 0; /* loop */ }
+
+    /* trajectory: heading drift + circular pattern */
+    hdg = (hdg + (phase === 'MANEUVER' ? 3 : 0.6)) % 360;
+    const dx = Math.sin(hdg * Math.PI / 180) * spd * 0.000007;
+    const dy = Math.cos(hdg * Math.PI / 180) * spd * 0.000007;
+    lat += dy * 5; lon += dx * 5;
+
+    /* CELL handover — more frequent for demo visibility */
+    if (t > cellSwitchAt && Math.random() < 0.10) {
+      cellId += Math.floor(Math.random() * 100) - 50;
+      earfcn = [6300, 1850, 3050, 1444][Math.floor(Math.random()*4)];
+      band   = ['B20', 'B3',   'B7',   'B1'  ][Math.floor(Math.random()*4)];
+      cellSwitchAt = t + 30 + Math.random() * 90;
+    }
+    /* Operator change — rarer (visible amber-outlined diamond) */
+    if (Math.random() < 0.008) operator = operators[Math.floor(Math.random()*operators.length)];
+
+    /* signal model: degrades with altitude, more variance in maneuver */
+    const altPenalty = Math.max(0, alt - 800) * 0.012;
+    const phaseNoise = phase === 'MANEUVER' ? 8 : phase === 'APPROACH' ? 4 : 2.5;
+    let rsrp = -82 - altPenalty + (Math.random() - 0.5) * phaseNoise;
+
+    /* Coverage gap — periodic deep dropouts to demo the gap-rendering logic */
+    const gapStrong = (Math.sin(t / 31) > 0.94) || (Math.sin(t / 47) > 0.95);
+    const gapHard   = gapStrong && Math.random() < 0.5;     // some are total dropouts
+    if (gapStrong) rsrp -= 22 + Math.random() * 12;
+    rsrp = Math.max(-128, Math.min(-65, rsrp));
+
+    const rsrq = -8 + (Math.random() - 0.5) * 6 + (rsrp < -100 ? -4 : 0);
+    const sinr = 18 + (Math.random() - 0.5) * 8 + (rsrp + 90) * 0.4;
+    /* CSQ from RSRP — coarse mapping */
+    let csq = Math.round((rsrp + 113) / 2);
+    csq = Math.max(0, Math.min(31, csq));
+    /* Hard dropout = no signal at all → CSQ=99, RSRP=null → renders as gap */
+    if (gapHard || rsrp < -120) csq = 99;
+
+    /* Realistic radio-tech selection based on RSRP.
+       Simulates SIM7600 fallback across LTE-A → LTE → HSPA+ → WCDMA → EDGE → GSM.
+       Hysteresis (stickiness) avoids tech jitter. */
+    let techStr;
+    if (csq === 99) {
+      techStr = 'NO SERVICE';
+    } else if (rsrp < -112) {
+      techStr = Math.random() < 0.7 ? 'EDGE' : 'GSM';
+    } else if (rsrp < -104) {
+      techStr = Math.random() < 0.85 ? 'WCDMA' : 'EDGE';
+    } else if (rsrp < -94) {
+      techStr = Math.random() < 0.7 ? 'LTE' : 'HSPA+';
+    } else if (rsrp < -78) {
+      techStr = 'LTE';
+    } else {
+      techStr = Math.random() < 0.4 ? 'LTE-A' : 'LTE';
+    }
+    /* Stickiness — 70 % chance to keep the previous tech if it's still acceptable */
+    if (lastTechStr && lastTechStr !== 'NO SERVICE' && techStr !== 'NO SERVICE'
+        && Math.random() < 0.7) {
+      const ok =
+        (lastTechStr === 'LTE-A' && rsrp >= -82)  ||
+        (lastTechStr === 'LTE'    && rsrp >= -98) ||
+        (lastTechStr === 'HSPA+'  && rsrp >= -106) ||
+        (lastTechStr === 'WCDMA'  && rsrp >= -114) ||
+        (lastTechStr === 'EDGE'   && rsrp >= -118) ||
+        (lastTechStr === 'GSM'    && rsrp >= -120);
+      if (ok) techStr = lastTechStr;
+    }
+    lastTechStr = techStr;
+
+    const httpLat = csq === 99 ? null : Math.round(120 + Math.max(0, (-rsrp - 80)) * 14 + Math.random() * 60);
+    const loss    = csq === 99 ? null : Math.max(0, ((-rsrp - 90) / 30) * 4 + (Math.random() - 0.7) * 2);
+
+    /* Throughput (kbps) — degrades with RSRP. Best ≈ 12 Mbps DN / 3 Mbps UP. */
+    const linkOk = csq !== 99;
+    const linkFactor = linkOk ? Math.max(0.05, Math.min(1, (rsrp + 110) / 45)) : 0;
+    const thrDn = linkOk ? Math.round(12000 * linkFactor + (Math.random() - 0.5) * 1500) : 0;
+    const thrUp = linkOk ? Math.round(3000  * linkFactor + (Math.random() - 0.5) * 400)  : 0;
+
+    /* Aircraft demo model — battery drains with throttle (≈ proportional to spd+alt) */
+    const drawA = 14 + (spd * 0.18) + (alt > 600 ? 5 : 0) + (Math.random() - 0.5) * 1.5;
+    const battV = 16.8 - (1 - batterySoc) * 3.4 + (Math.random() - 0.5) * 0.05;
+    /* 5s per frame, drain rate per second = drawA / 3600 in Ah, /Cap → ΔSoC */
+    batterySoc = Math.max(0, batterySoc - (drawA / 3600 * 5) / (battCapMah / 1000));
+    const battTimeS = drawA > 0 ? Math.round((batterySoc * battCapMah / 1000) / drawA * 3600) : 0;
+
+    /* GPS — strong fix in cruise, transient degradation in maneuver */
+    const gpsSats = Math.max(4, Math.round(11 + (Math.random() - 0.5) * 3 - (phase === 'MANEUVER' ? 1 : 0)));
+    const gpsHdop = +(0.6 + Math.random() * 0.5 + (gpsSats < 7 ? 0.8 : 0)).toFixed(2);
+    const gpsFix  = gpsSats < 5 ? 'NO_FIX' : gpsSats < 7 ? 'FIX_2D' : 'FIX_3D';
+
+    /* Flight mode — coupled to phase */
+    const mode = phase === 'GROUND' ? 'MANUAL'
+               : phase === 'APPROACH' ? 'AUTO'
+               : phase === 'CRITICAL' ? 'RTL'
+               : 'AUTO';
+
+    /* Vertical speed from this frame's delta */
+    const vs_ms = (alt - altPrev) / 5;
+    altPrev = alt;
+
+    return {
+      ts: new Date().toISOString(),
+      flight_id: 'FDR-26-0427-A',
+      lat, lon,
+      alt_m: Math.max(0, alt),
+      spd_kt: Math.max(0, spd),
+      hdg,
+      phase,
+      aircraft: {
+        battery_soc:    +batterySoc.toFixed(3),
+        battery_v:      +battV.toFixed(2),
+        battery_a:      +drawA.toFixed(2),
+        battery_time_s: battTimeS,
+        gps_fix:        gpsFix,
+        gps_sats:       gpsSats,
+        gps_hdop:       gpsHdop,
+        flight_mode:    mode,
+        agl_m:          Math.max(0, alt - CONFIG.HOME_ALT_M),
+        vs_ms:          +vs_ms.toFixed(1),
+      },
+      lte: {
+        csq,
+        rsrp_dbm:  csq === 99 ? null : Math.round(rsrp),
+        rsrq_db:   csq === 99 ? null : Math.round(rsrq),
+        sinr_db:   csq === 99 ? null : Math.round(sinr),
+        operator:  csq === 99 ? '—' : operator,
+        tech:      techStr,                                                    /* ← system mode */
+        band:      csq === 99 ? '—' : band,
+        earfcn:    csq === 99 ? '—' : earfcn,
+        cell_id:   csq === 99 ? '—' : String(cellId),
+        tac:       csq === 99 ? '—' : '0A1B',
+        ip:        csq === 99 ? '—' : '10.74.32.' + (cellId % 256),
+        creg_state: csq === 99 ? 'searching' : 'registered_home',
+        http_lat_ms: httpLat,
+        frame_loss_pct: loss == null ? null : Math.max(0, loss),
+        throughput_dn_kbps: thrDn,
+        throughput_up_kbps: thrUp,
+        handover: false,
+      }
+    };
+  };
+}
+
+/* Stream singleton for live-mode (one frame per 5s tick) */
+let demoStream = null;
+
+/* Wipe the dashboard before regenerating a flight */
+function resetDashboard() {
+  state.samples       = [];
+  state.heatmapData   = [];
+  state.lastFrame     = null;
+  state.lastCellId    = null;
+  state.lastOperator  = null;
+  state.lastBand      = null;
+  state.lastRsrp      = null;
+  state.lastTech      = null;
+  state.handoverCount = 0;
+  state.techChanges   = 0;
+  state.techTimeSec   = {};
+  state.noSignalSec   = 0;
+  state.signalSec     = 0;
+  state.flightStartTs = null;
+  state.alerts        = [];
+  state.trajectorySegs= [];
+
+  /* New: clear cell history, alt history, latched alert states */
+  state.cellByCellId.clear();
+  state.cellCurrent   = null;
+  state.cellEnterTs   = 0;
+  state.altHistory    = [];
+  state.lastSampleAt  = 0;
+  state.geofenceState = 'inside';
+  state.batteryLevel  = 'ok';
+
+  trajectoryLayer.clearLayers();
+  handoverLayer.clearLayers();
+  techLayer.clearLayers();
+  alertPingLayer.clearLayers();
+  if (heatTrajectoryLayer) heatTrajectoryLayer.clearLayers();
+  if (rtlLine) { map.removeLayer(rtlLine); rtlLine = null; }
+  if (map.hasLayer(playheadMarker)) map.removeLayer(playheadMarker);
+  state.scrubIndex   = -1;
+  state.scrubPlaying = false;
+  if (heatLayer) heatLayer.setLatLngs([]);
+  document.getElementById('heatmap-points-count').textContent = '0';
+
+  renderAlerts();
+  renderCellTable();
+  updateScrubBounds();
+}
+
+/* Generate an entire demo flight in one shot, apply every frame, then fit
+   the map to the resulting trace. Used as the default landing experience
+   in DEMO mode. */
+function loadFullDemoFlight(durationMin = 50) {
+  resetDashboard();
+  demoStream = makeDemoStream();
+
+  const samplingMs = CONFIG.POLL_MS;          // 5000
+  const totalSec   = durationMin * 60;
+  const numFrames  = Math.floor(totalSec * 1000 / samplingMs);
+  const startMs    = Date.now() - totalSec * 1000;
+
+  /* ---------- PHASE 1: generate all frames in memory (no DOM, no tiles) ---------- */
+  const frames = [];
+  for (let i = 0; i < numFrames; i++) {
+    try {
+      const f = demoStream();
+      f.ts = new Date(startMs + i * samplingMs).toISOString();
+      frames.push(f);
+    } catch (err) {
+      console.error('[FDR] frame gen error:', err);
+    }
+  }
+
+  /* ---------- PHASE 2: fit map to flight bounds FIRST, before any tile re-requests ---------- */
+  if (frames.length > 1) {
+    const bounds = L.latLngBounds(frames.map(f => [f.lat, f.lon]));
+    map.fitBounds(bounds, { padding: [40, 40], animate: false });
+    if (heatmap) heatmap.fitBounds(bounds, { padding: [40, 40], animate: false });
+  }
+
+  /* ---------- PHASE 3: apply all frames at once (no rendering during bulk) ---------- */
+  const wasFollow  = state.follow;
+  state.follow     = false;
+  state._bulkLoad  = true;
+
+  let errCount = 0;
+  for (const f of frames) {
+    try { applyFrame(f); }
+    catch (err) {
+      errCount++;
+      if (errCount === 1) console.error('[FDR] frame apply error:', err);
+    }
+  }
+  if (errCount) console.warn(`[FDR] ${errCount} frame(s) failed to apply`);
+
+  state._bulkLoad = false;
+  state.follow    = wasFollow;
+
+  /* ---------- PHASE 4: single final render with last frame ---------- */
+  if (state.lastFrame) {
+    renderUI(state.lastFrame);
+    renderCharts();
+  }
+}
+
+/* =============================================================
+   SD CARD IMPORT — ATCORE_LTE_<fid>.csv produced by AT-CORE firmware
+   =============================================================
+   File layout (see at_core_step3_sim7600.ino → openFlightFiles):
+     line 1 : #lte_log, log_version="1.00", aircraft_ident="...", ...
+     line 2 : header CSV
+     line 3+: data rows, 19 columns @ 1 Hz
+
+   Column order :
+     ts_utc,lat,lon,alt_m,spd_kt,hdg_deg,
+     tech,operator,band,earfcn,cell_id,pcid,tac,
+     rsrp_dbm,rsrq_db,rssi_dbm,sinr_db,csq_rssi,fix_ok
+*/
+function parseAtCoreLteCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.length > 0);
+  const dataLines = lines.filter(l => !l.startsWith('#') && !l.startsWith('ts_utc'));
+
+  // Le firmware loggue plusieurs réponses modem par fix GPS (même ts_utc).
+  // Certaines reviennent NO_SVC alors que la couverture est OK — artefact de
+  // polling AT. On groupe par ts puis on garde la meilleure mesure : RSRP non
+  // null en priorité, sinon RSRP max. Si toutes les lignes du ts sont NO_SVC,
+  // on conserve une seule frame NO_SVC (vraie perte de couverture).
+  const buckets = new Map();
+  for (const line of dataLines) {
+    const c = line.split(',');
+    if (c.length < 19) continue;
+    const ts  = c[0];
+    const lat = parseFloat(c[1]);
+    const lon = parseFloat(c[2]);
+    if (!isFinite(lat) || !isFinite(lon)) continue;
+    if (!buckets.has(ts)) buckets.set(ts, []);
+    buckets.get(ts).push(c);
+  }
+
+  const pickBest = (rows) => {
+    let best = null;
+    let bestRsrp = -Infinity;
+    for (const c of rows) {
+      const rsrp = c[13] === '' ? null : parseFloat(c[13]);
+      if (rsrp != null && isFinite(rsrp) && rsrp > bestRsrp) {
+        bestRsrp = rsrp;
+        best = c;
+      }
+    }
+    return best || rows[0];
+  };
+
+  const frames = [];
+  for (const [ts, rows] of buckets) {
+    const c = pickBest(rows);
+    const lat     = parseFloat(c[1]);
+    const lon     = parseFloat(c[2]);
+    const alt_m   = parseFloat(c[3]);
+    const spd_kt  = parseFloat(c[4]);
+    const hdg     = parseFloat(c[5]);
+    const tech    = (c[6] || '').trim() || 'NO SERVICE';
+    const op      = (c[7] || '').trim();
+    const band    = (c[8] || '').trim();
+    const earfcn  = c[9] ? parseInt(c[9], 10) : null;
+    const cell_id = (c[10] || '').trim();
+    const tac     = (c[12] || '').trim();
+    const rsrp    = c[13] === '' ? null : parseFloat(c[13]);
+    const rsrq    = c[14] === '' ? null : parseFloat(c[14]);
+    const sinr    = c[16] === '' ? null : parseFloat(c[16]);
+    const csq     = c[17] === '' ? null : parseInt(c[17], 10);
+
+    frames.push({
+      ts,
+      flight_id: 'SD-IMPORT',
+      lat, lon,
+      alt_m:  isFinite(alt_m)  ? alt_m  : 0,
+      spd_kt: isFinite(spd_kt) ? spd_kt : 0,
+      hdg:    isFinite(hdg)    ? hdg    : 0,
+      phase:  'CRUISE',
+      lte: {
+        csq:        (csq == null || csq < 0) ? 99 : csq,
+        rsrp_dbm:   rsrp,
+        rsrq_db:    rsrq,
+        sinr_db:    sinr,
+        operator:   op || '—',
+        tech:       tech,
+        band:       band || '—',
+        earfcn:     earfcn != null && isFinite(earfcn) ? earfcn : '—',
+        cell_id:    cell_id || '—',
+        tac:        tac || '—',
+        ip:         '—',
+        creg_state: (rsrp != null) ? 'registered_home' : 'searching',
+        http_lat_ms: null,
+        frame_loss_pct: null,
+        handover:   false,
+      }
+    });
+  }
+  return frames;
+}
+
+async function loadFromSDFile(file) {
+  const text   = await file.text();
+  const frames = parseAtCoreLteCSV(text);
+  if (frames.length === 0) {
+    alert(`Aucune frame valide dans ${file.name}`);
+    return;
+  }
+
+  // Bascule en mode REPLAY — stop le poll API/démo
+  state.paused = true;
+  demoStream   = null;
+  CONFIG.DEMO  = false;
+
+  resetDashboard();
+
+  // Fit map first to avoid tile re-requests during bulk apply
+  const bounds = L.latLngBounds(frames.map(f => [f.lat, f.lon]));
+  map.fitBounds(bounds, { padding: [40, 40], animate: false });
+  if (heatmap) heatmap.fitBounds(bounds, { padding: [40, 40], animate: false });
+
+  const wasFollow = state.follow;
+  state.follow    = false;
+  state._bulkLoad = true;
+
+  let errCount = 0;
+  for (const f of frames) {
+    try { applyFrame(f); }
+    catch (err) {
+      errCount++;
+      if (errCount === 1) console.error('[SD] frame apply error:', err);
+    }
+  }
+  state._bulkLoad = false;
+  state.follow    = wasFollow;
+
+  if (state.lastFrame) {
+    renderUI(state.lastFrame);
+    renderCharts();
+  }
+
+  // UI : badge + bandeau connexion
+  const badge = document.getElementById('demo-badge');
+  if (badge) {
+    badge.style.display   = '';
+    badge.textContent     = `REPLAY · ${file.name}`;
+  }
+  const conn = document.getElementById('status-conn');
+  if (conn) {
+    conn.dataset.state                        = 'ok';
+    conn.querySelector('span:last-child').textContent = 'Replay';
+  }
+  console.log(`[SD] Chargé ${frames.length} frames depuis ${file.name} (${errCount} erreurs)`);
+}
+
+/* Wire le bouton LOAD SD + drag-and-drop carte */
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-load-sd');
+  const inp = document.getElementById('sd-file-input');
+  if (btn && inp) {
+    btn.addEventListener('click', () => inp.click());
+    inp.addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) loadFromSDFile(f).catch(err => {
+        console.error('[SD] load error:', err);
+        alert(`Erreur chargement : ${err.message}`);
+      });
+      inp.value = '';
+    });
+  }
+  // Drag-and-drop sur la fenêtre — accepte un .csv
+  window.addEventListener('dragover', e => { e.preventDefault(); });
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && /\.csv$/i.test(f.name)) {
+      loadFromSDFile(f).catch(err => console.error('[SD] drop load error:', err));
+    }
+  });
+
+  /* ===== HOME / GEOFENCE EDITOR =====
+     Operator can edit Home coordinates and geofence radius directly.
+     PICK puts the map in "next-click sets home" mode. APPLY writes the
+     three inputs into CONFIG, repositions the marker + fence, and persists
+     to localStorage so the values survive a reload.                       */
+  const HOME_KEY = 'fdr.home';
+  const restoredHome = (() => {
+    try { return JSON.parse(localStorage.getItem(HOME_KEY) || 'null'); }
+    catch (_) { return null; }
+  })();
+  if (restoredHome && isFinite(restoredHome.lat) && isFinite(restoredHome.lon)) {
+    CONFIG.HOME.lat = restoredHome.lat;
+    CONFIG.HOME.lon = restoredHome.lon;
+    if (isFinite(restoredHome.radius)) CONFIG.GEOFENCE_RADIUS_M = restoredHome.radius;
+    homeMarker.setLatLng([CONFIG.HOME.lat, CONFIG.HOME.lon]);
+    geofenceCircle.setLatLng([CONFIG.HOME.lat, CONFIG.HOME.lon]);
+    geofenceCircle.setRadius(CONFIG.GEOFENCE_RADIUS_M);
+  }
+  /* Fill the inputs with current values */
+  const homeLatInp = document.getElementById('home-lat');
+  const homeLonInp = document.getElementById('home-lon');
+  const homeRadInp = document.getElementById('home-radius');
+  function syncHomeInputs() {
+    homeLatInp.value = CONFIG.HOME.lat.toFixed(5);
+    homeLonInp.value = CONFIG.HOME.lon.toFixed(5);
+    homeRadInp.value = CONFIG.GEOFENCE_RADIUS_M;
+  }
+  syncHomeInputs();
+
+  function applyHome(lat, lon, radius) {
+    CONFIG.HOME.lat = lat;
+    CONFIG.HOME.lon = lon;
+    CONFIG.GEOFENCE_RADIUS_M = radius;
+    homeMarker.setLatLng([lat, lon]);
+    geofenceCircle.setLatLng([lat, lon]);
+    geofenceCircle.setRadius(radius);
+    /* Reset geofence latched state so the next frame re-evaluates from scratch */
+    state.geofenceState = 'inside';
+    localStorage.setItem(HOME_KEY, JSON.stringify({ lat, lon, radius }));
+    /* Re-render Home distance immediately */
+    if (state.lastFrame) {
+      const d = haversineM(state.lastFrame.lat, state.lastFrame.lon, lat, lon);
+      document.getElementById('info-home').textContent = fmtDist(d);
+      renderAircraftHealth(state.lastFrame, d);
+    }
+  }
+
+  document.getElementById('home-apply').addEventListener('click', () => {
+    const lat = parseFloat(homeLatInp.value);
+    const lon = parseFloat(homeLonInp.value);
+    const rad = parseFloat(homeRadInp.value);
+    if (!isFinite(lat) || !isFinite(lon) || !isFinite(rad) || rad < 50) {
+      alert('Lat/lon/radius invalides (radius ≥ 50 m).');
+      return;
+    }
+    applyHome(lat, lon, rad);
+  });
+
+  /* PICK mode: next map click sets Home. Self-cancelling — re-click PICK to abort. */
+  const pickBtn = document.getElementById('home-pick');
+  let pickHandler = null;
+  pickBtn.addEventListener('click', () => {
+    if (pickHandler) {
+      map.off('click', pickHandler);
+      pickHandler = null;
+      pickBtn.classList.remove('active');
+      document.body.classList.remove('map-pick-mode');
+      return;
+    }
+    pickBtn.classList.add('active');
+    document.body.classList.add('map-pick-mode');
+    pickHandler = (e) => {
+      applyHome(e.latlng.lat, e.latlng.lng, CONFIG.GEOFENCE_RADIUS_M);
+      syncHomeInputs();
+      map.off('click', pickHandler);
+      pickHandler = null;
+      pickBtn.classList.remove('active');
+      document.body.classList.remove('map-pick-mode');
+    };
+    map.on('click', pickHandler);
+  });
+
+  /* ===== SIDEBAR RESIZE =====
+     Drag the left edge of the sidebar to widen / narrow it. Width is
+     clamped to a useful range and persisted in localStorage so the user
+     gets the same layout on the next reload.                            */
+  const SIDEBAR_KEY = 'fdr.sidebar.w';
+  const MIN_W = 280, MAX_W = 700;
+  const mainEl    = document.querySelector('.main');
+  const resizer   = document.getElementById('sidebar-resizer');
+  const restored  = parseInt(localStorage.getItem(SIDEBAR_KEY), 10);
+  if (restored && restored >= MIN_W && restored <= MAX_W) {
+    mainEl.style.gridTemplateColumns = `1fr ${restored}px`;
+  }
+  let resizing = false;
+  if (resizer) {
+    resizer.addEventListener('mousedown', e => {
+      resizing = true;
+      document.body.classList.add('resizing');
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!resizing) return;
+      /* New sidebar width = distance from cursor to viewport's right edge */
+      const w = Math.max(MIN_W, Math.min(MAX_W, window.innerWidth - e.clientX));
+      mainEl.style.gridTemplateColumns = `1fr ${w}px`;
+    });
+    window.addEventListener('mouseup', () => {
+      if (!resizing) return;
+      resizing = false;
+      document.body.classList.remove('resizing');
+      /* Persist + refresh Leaflet to use the new map width */
+      const match = mainEl.style.gridTemplateColumns.match(/(\d+)px$/);
+      if (match) localStorage.setItem(SIDEBAR_KEY, match[1]);
+      setTimeout(() => {
+        try { map.invalidateSize(); } catch (_) {}
+        if (heatmap) try { heatmap.invalidateSize(); } catch (_) {}
+      }, 50);
+    });
+  }
+
+  /* ===== EXPORT button =====
+     One click → JSON dump of all captured frames. Shift-click → CSV.    */
+  const btnExp = document.getElementById('btn-export');
+  if (btnExp) {
+    btnExp.addEventListener('click', e => {
+      if (!state.samples.length) {
+        alert('No frames to export yet.');
+        return;
+      }
+      const fid = (state.lastFrame && state.lastFrame.flight_id) || 'flight';
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      if (e.shiftKey) {
+        downloadBlob(`${fid}_${stamp}.csv`, 'text/csv', framesToCSV(state.samples));
+      } else {
+        downloadBlob(`${fid}_${stamp}.json`, 'application/json',
+                     JSON.stringify(state.samples, null, 2));
+      }
+    });
+  }
+});
+
+/* Flatten frames into a CSV string (header row + one row per frame).
+   Kept simple: all primitive fields, no nested objects. */
+function framesToCSV(frames) {
+  const cols = [
+    'ts', 'flight_id', 'lat', 'lon', 'alt_m', 'spd_kt', 'hdg', 'phase',
+    'battery_soc', 'battery_v', 'battery_a', 'battery_time_s',
+    'gps_fix', 'gps_sats', 'gps_hdop', 'flight_mode', 'agl_m', 'vs_ms',
+    'csq', 'rsrp_dbm', 'rsrq_db', 'sinr_db', 'operator', 'tech', 'band',
+    'earfcn', 'cell_id', 'tac', 'ip', 'creg_state', 'http_lat_ms',
+    'frame_loss_pct', 'throughput_dn_kbps', 'throughput_up_kbps',
+  ];
+  const rows = frames.map(f => {
+    const a = f.aircraft || {};
+    const l = f.lte || {};
+    const v = [
+      f.ts, f.flight_id, f.lat, f.lon, f.alt_m, f.spd_kt, f.hdg, f.phase,
+      a.battery_soc, a.battery_v, a.battery_a, a.battery_time_s,
+      a.gps_fix, a.gps_sats, a.gps_hdop, a.flight_mode, a.agl_m, a.vs_ms,
+      l.csq, l.rsrp_dbm, l.rsrq_db, l.sinr_db, l.operator, l.tech, l.band,
+      l.earfcn, l.cell_id, l.tac, l.ip, l.creg_state, l.http_lat_ms,
+      l.frame_loss_pct, l.throughput_dn_kbps, l.throughput_up_kbps,
+    ];
+    return v.map(x => x == null ? '' : String(x).includes(',') ? `"${x}"` : x).join(',');
+  });
+  return cols.join(',') + '\n' + rows.join('\n');
+}
+
+/* ===== HEARTBEAT TICKER =====
+   Every 500ms, refresh the "last frame Xs ago" indicator. Color tiers:
+     ok    → ≤ STALENESS_WARN_S
+     warn  → > STALENESS_WARN_S
+     err   → > STALENESS_ERR_S                                        */
+setInterval(() => {
+  const hb = document.getElementById('heartbeat');
+  const txt = document.getElementById('heartbeat-text');
+  if (!hb || !txt) return;
+  if (!state.lastSampleAt) {
+    hb.dataset.state = 'warn';
+    txt.textContent  = 'waiting';
+    return;
+  }
+  const ageS = (Date.now() - state.lastSampleAt) / 1000;
+  hb.dataset.state = ageS > CONFIG.STALENESS_ERR_S ? 'err'
+                   : ageS > CONFIG.STALENESS_WARN_S ? 'warn' : 'ok';
+  txt.textContent = ageS < 60 ? `${ageS.toFixed(0)}s ago`
+                  : ageS < 3600 ? `${(ageS/60).toFixed(0)}m ago`
+                  : `${(ageS/3600).toFixed(1)}h ago`;
+}, 500);
+
+/* =============================================================
+   DATA SOURCE — REAL FastAPI (placeholder)
+   =============================================================
+   Replace `fetchLatest` body with your endpoint integration.
+   Backend should return frames newer than `since`.
+*/
+async function fetchLatest(sinceTs) {
+  const url = new URL(CONFIG.API_BASE + CONFIG.ENDPOINT_LIVE);
+  if (sinceTs) url.searchParams.set('since', sinceTs);
+  const res = await fetch(url.toString(), { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();   // expected: array of frames in chronological order
+}
+
+/* =============================================================
+   POLL LOOP
+   ============================================================= */
+async function tick() {
+  if (state.paused) return;
+  try {
+    if (CONFIG.DEMO) {
+      try {
+        if (!demoStream) demoStream = makeDemoStream();
+        applyFrame(demoStream());
+      } catch (err) {
+        console.error('[FDR] demo apply failed:', err);
+        pushAlert('err', `Demo: ${err.message}`);
+      }
+      document.getElementById('demo-badge').style.display = '';
+    } else {
+      document.getElementById('demo-badge').style.display = 'none';
+      const since = state.lastFrame ? state.lastFrame.ts : null;
+      const frames = await fetchLatest(since);
+      if (Array.isArray(frames)) frames.forEach(applyFrame);
+      document.getElementById('status-conn').dataset.state = 'ok';
+      document.getElementById('status-conn').querySelector('span:last-child').textContent = 'Live';
+    }
+  } catch (err) {
+    console.error('[FDR] poll failed:', err);
+    document.getElementById('status-conn').dataset.state = 'err';
+    document.getElementById('status-conn').querySelector('span:last-child').textContent = 'Offline';
+    pushAlert('err', `API: ${err.message}`);
+  }
+}
+
+/* =============================================================
+   BOOT — wrapped in try/catch with visible error reporting
+   ============================================================= */
+const BUILD_VERSION = 'v1.6 · 2026-04-27 · diagnostic';
+
+function showBootError(err) {
+  console.error('[FDR] BOOT FAILED:', err);
+  const banner = document.createElement('div');
+  banner.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: #ff3355; color: #fff;
+    padding: 12px 20px; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; border-bottom: 2px solid #fff;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  `;
+  banner.innerHTML = `
+    <strong>BOOT ERROR (${BUILD_VERSION}):</strong> ${err.message}
+    <div style="margin-top:6px;font-size:10px;opacity:0.9;
+                white-space:pre-wrap;max-height:120px;overflow:auto">${(err.stack || '').replace(/</g,'&lt;')}</div>
+  `;
+  document.body.prepend(banner);
+}
+
+try {
+  if (CONFIG.DEMO) {
+    document.getElementById('btn-pause').textContent = 'NEW FLIGHT';
+    document.getElementById('btn-pause').classList.remove('active');
+    document.getElementById('status-conn').querySelector('span:last-child').textContent = 'Replay';
+    loadFullDemoFlight(50);
+  } else {
+    tick();
+    setInterval(tick, CONFIG.POLL_MS);
+  }
+} catch (err) {
+  showBootError(err);
+}
+
+/* UTC clock — independent ticker */
+setInterval(() => {
+  try {
+    const utc = fmtUTC(new Date());
+    if (!state.lastFrame) document.getElementById('m-utc').textContent = utc;
+  } catch (e) { /* ignore */ }
+}, 1000);
+</script>
+</body>
+</html>

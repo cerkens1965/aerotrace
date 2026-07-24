@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AeroTrace — Simulateur d'alertes trafic</title>
+<style>
+  :root{ --bg:#0e1116; --panel:#161b22; --line:#2a3340; --fg:#e6edf3; --muted:#8b98a5;
+         --green:#3fb950; --amber:#e3b341; --red:#f85149; --brand:#2f81f7; }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  header{padding:8px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  header .sub{color:var(--muted);font-size:12px}
+  .wrap{display:flex;gap:14px;padding:14px;flex-wrap:wrap;align-items:flex-start}
+  .col{display:flex;flex-direction:column;gap:6px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+  .card h2{font-size:12px;margin:0 0 6px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  canvas{display:block;background:#000;border-radius:8px;max-width:100%}
+  #live{background:#fff}
+  #profile{background:#fff}
+  /* écran affiché plus petit (rendu interne reste 600×450) → diagnostic visible sans scroll */
+  #screen{width:480px;height:360px;background:#fff}
+  .controls{display:flex;flex-direction:column;gap:9px;min-width:280px;max-width:340px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  select,button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;cursor:pointer}
+  button.primary{background:var(--brand);border-color:var(--brand)}
+  button:active{transform:translateY(1px)}
+  label.sl{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+  label.sl b{color:var(--fg);font-weight:600}
+  input[type=range]{width:100%}
+  input[type=file]{font-size:12px;color:var(--muted);max-width:100%}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+  .tag{color:var(--muted);font-size:11px}
+  table{border-collapse:collapse;width:100%;font-size:11px}
+  td,th{border-bottom:1px solid var(--line);padding:3px 5px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px}
+  .kbd{font:11px ui-monospace,Menlo,monospace;background:#21262d;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .leg{display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--muted)}
+  .leg i{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:3px}
+  .fieldset{border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:7px}
+  .fieldset .lg{font-size:11px;color:var(--brand);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  /* panneau diagnostic */
+  #diag{width:100%;font-size:12px}
+  #diag td,#diag th{padding:2px 8px}
+  #diag .k{color:var(--muted);text-align:left}
+  #diag .v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+  #diag .big{font-size:15px}
+  #ruleBanner{font-weight:800;text-align:center;font-size:17px;padding:6px 4px;min-height:30px}
+</style>
+</head>
+<body>
+<header>
+  <h1>AeroTrace — Simulateur d'alertes trafic</h1>
+  <span class="sub">moteur = miroir de <span class="kbd">alert_core.h</span> · AIP OpenAIP · région EBBY</span>
+  <span class="sub" id="clock" style="margin-left:auto"></span>
+</header>
+
+<div class="wrap">
+  <!-- Colonne 1 : plan (live) agrandi + coupe altitude -->
+  <div class="col">
+    <div class="card col">
+      <h2>Live map (plan) — AIP + trafic</h2>
+      <canvas id="live" width="660" height="500"></canvas>
+      <div class="leg">
+        <span><i style="background:#dc3232"></i>CTR</span>
+        <span><i style="background:#1e64dc"></i>TMA</span>
+        <span><i style="background:#ff8c00"></i>R/D/P</span>
+        <span><i style="background:#3fb950"></i>ATZ</span>
+        <span><i style="background:#2f81f7"></i>trafic info 90 s</span>
+        <span id="liveScale"></span>
+      </div>
+    </div>
+    <div class="card col">
+      <h2>Coupe altitude (vue de côté)</h2>
+      <canvas id="profile" width="660" height="210"></canvas>
+      <div class="tag">x = distance horizontale à own · y = altitude (ft) · bande = fenêtre verticale d'alerte</div>
+    </div>
+  </div>
+
+  <!-- Colonne 2 : écran avion + diagnostic -->
+  <div class="col">
+    <div class="card col">
+      <h2>Écran avion (600 × 450 — WS-241)</h2>
+      <canvas id="screen" width="600" height="450"></canvas>
+      <div id="ruleBanner">— pas d'alerte —</div>
+    </div>
+    <div class="card col">
+      <h2>Diagnostic conflit (intrus prioritaire)</h2>
+      <table id="diag"><tbody></tbody></table>
+    </div>
+  </div>
+
+  <!-- Colonne 3 : contrôles -->
+  <div class="col card controls">
+    <h2>Scénario</h2>
+    <select id="scenario"></select>
+    <div class="row">
+      <button id="play" class="primary">▶ Play</button>
+      <button id="reset">⟲ Reset</button>
+      <span class="tag" id="tlabel">t = 0.0 s</span>
+    </div>
+    <input type="range" id="scrub" min="0" max="100" value="0" step="0.1">
+    <div class="row">
+      <button id="scrConnect">🔌 Connect screen</button>
+      <span class="tag" id="scrStatus">écran : —</span>
+    </div>
+
+    <div class="fieldset">
+      <span class="lg">✈︎ OWN (moi)</span>
+      <label class="sl"><span>Vitesse <b id="ospdv">100</b> kt</span><input type="range" id="ospd" min="0" max="300" step="5" value="100"></label>
+      <label class="sl"><span>Altitude <b id="oaltv">2000</b> ft</span><input type="range" id="oalt" min="0" max="8000" step="100" value="2000"></label>
+    </div>
+    <div class="fieldset">
+      <span class="lg">⚠︎ INTRUS</span>
+      <label class="sl"><span>Vitesse <b id="ispdv">100</b> kt</span><input type="range" id="ispd" min="0" max="300" step="5" value="100"></label>
+      <label class="sl"><span>Altitude <b id="ialtv">2000</b> ft</span><input type="range" id="ialt" min="0" max="8000" step="100" value="2000"></label>
+    </div>
+
+    <div class="row">
+      <label class="sl" style="flex:1"><span>Vitesse sim ×<b id="spdv">1</b></span><input type="range" id="speed" min="0.25" max="8" step="0.25" value="1"></label>
+      <label class="sl" style="flex:1"><span>Radar <b id="rngv">8</b> nm</span><input type="range" id="range" min="0.5" max="16" step="0.5" value="8"></label>
+    </div>
+    <label class="sl"><span>Plan (live) <b id="lrngv">15</b> nm</span><input type="range" id="lrange" min="1" max="60" step="1" value="15"></label>
+    <div class="row">
+      <span class="toggle"><input type="checkbox" id="audio"> 🔊 Son</span>
+      <span class="toggle"><input type="checkbox" id="egg" checked> 🥚 Bulle</span>
+      <span class="toggle"><input type="checkbox" id="vec" checked> ➜ Vec.</span>
+      <span class="toggle"><input type="checkbox" id="aip" checked> 🗺️ AIP</span>
+      <span class="toggle"><input type="checkbox" id="map" checked> 🛣️ Carte</span>
+      <span class="toggle"><input type="checkbox" id="grid"> 📐 Grille</span>
+      <span class="toggle"><input type="checkbox" id="autoz"> 🔍 Auto-zoom</span>
+      <span class="toggle"><input type="checkbox" id="trace" checked> 〜 Trace</span>
+    </div>
+
+    <div class="fieldset">
+      <span class="lg">🧪 Expérimental (hors firmware — à évaluer)</span>
+      <span class="toggle"><input type="checkbox" id="e3d"> CPA 3D — vertical projeté (détecte montée/descente tôt)</span>
+      <span class="toggle"><input type="checkbox" id="ehy" checked> Hystérésis — anti-clignotement (maintien 3-4 s)</span>
+      <span class="toggle"><input type="checkbox" id="enoise"> Bruit données réaliste (GPS/SafeSky)</span>
+      <span class="toggle"><input type="checkbox" id="edg"> Downgrade caution→info si ça s'écarte (dCPA &gt; rouge)</span>
+      <span class="toggle"><input type="checkbox" id="etau" checked> 🎯 Tau — temps = dist/rapprochement radial (se relâche au passage)</span>
+    </div>
+
+    <h2 style="margin-top:6px">Seuils (live)</h2>
+    <label class="sl"><span>Lobe avant = vitesse × <b id="fs">30</b> s</span><input type="range" id="pfwd" min="10" max="60" step="1" value="30"></label>
+    <label class="sl"><span>Plancher <b id="fl">150</b> m</span><input type="range" id="pfloor" min="50" max="500" step="10" value="150"></label>
+    <label class="sl"><span>Vertical ROUGE <b id="vr">400</b> ft</span><input type="range" id="pvred" min="200" max="1000" step="50" value="400"></label>
+    <label class="sl"><span>tCPA ROUGE <b id="tr">25</b> s</span><input type="range" id="ptred" min="10" max="60" step="5" value="25"></label>
+    <label class="sl"><span>dCPA ROUGE <b id="dr">0.5</b> nm</span><input type="range" id="pdred" min="0.1" max="2" step="0.1" value="0.5"></label>
+    <label class="sl"><span>Vertical ORANGE <b id="vro">500</b> ft</span><input type="range" id="pvorg" min="200" max="1200" step="50" value="500"></label>
+    <label class="sl"><span>tCPA ORANGE <b id="tro">45</b> s</span><input type="range" id="ptorg" min="20" max="90" step="5" value="45"></label>
+    <label class="sl"><span>dCPA ORANGE <b id="dro">0.6</b> nm</span><input type="range" id="pdorg" min="0.3" max="2" step="0.1" value="0.6"></label>
+    <div class="row"><button id="resetP">Seuils par défaut</button></div>
+
+    <h2 style="margin-top:6px">Charger 2 CSV réels</h2>
+    <div class="row"><span class="tag" style="width:52px">own</span><input type="file" id="csvOwn" accept=".csv"></div>
+    <div class="row"><span class="tag" style="width:52px">intrus</span><input type="file" id="csvInt" accept=".csv"></div>
+    <div class="tag" id="csvInfo">Format ATCORE_*.csv. Projetés en repère EBBY (alignés AIP).</div>
+
+    <h2 style="margin-top:6px">⭐ Rejeu trafic RÉEL (boîtier)</h2>
+    <div class="row"><span class="tag" style="width:52px">TRF</span><input type="file" id="trfLog" accept=".csv"></div>
+    <div class="tag" id="trfInfo">ATCORE_TRF_*.csv (own + trafic IN loggés en vol) → vrais conflits.</div>
+  </div>
+</div>
+
+<script src="alert_core.js"></script>
+<script src="aip_ebby.js"></script>
+<script src="map_ebby.js"></script>
+<script src="flights_default.js"></script>
+<script src="flights_ebby16.js"></script>
+<script src="flights_ebby21.js"></script>
+<script>
+/* Moteur : AC / NM / acDefaultParams / acEvalThreats via alert_core.js (miroir de alert_core.h). */
+
+/* ── Géo : EAST/NORTH mètres depuis EBBY (origine AIP) ─────────────────────── */
+const ORIGIN = (window.AIP && window.AIP.origin) || {lat:50.5666, lon:4.4325};
+const RE=6371000, LAT0=ORIGIN.lat*Math.PI/180;
+function llToEN(lon,lat){ return { x:(lon-ORIGIN.lon)*Math.PI/180*RE*Math.cos(LAT0), y:(lat-ORIGIN.lat)*Math.PI/180*RE }; }
+const AIPCOL={CTR:"#dc3232",TMA:"#1e64dc",R:"#ff8c00",D:"#ff8c00",P:"#ff8c00",ATZ:"#3fb950"};
+let AIRSPACES=[], AIRPORTS=[];
+if(window.AIP){
+  AIRSPACES = window.AIP.airspaces.map(a=>{ let xs=1e18,xM=-1e18,ys=1e18,yM=-1e18;
+    const en=a.c.map(([lo,la])=>{const p=llToEN(lo,la); if(p.x<xs)xs=p.x;if(p.x>xM)xM=p.x;if(p.y<ys)ys=p.y;if(p.y>yM)yM=p.y; return p;});
+    return {n:a.n,k:a.k,u:a.u,l:a.l,en,bb:[xs,ys,xM,yM]}; });
+  AIRPORTS = window.AIP.airports.map(a=>({n:a.n,i:a.i,t:a.t,...llToEN(a.x,a.y)}));
+}
+// Carte légère (OSM) précalculée en repère EN + bbox (culling), comme l'AIP.
+let MAP={roads:[],rivers:[],towns:[]};
+if(window.BASEMAP){
+  const conv=(seg)=>{let xs=1e18,xM=-1e18,ys=1e18,yM=-1e18;const en=seg.map(([lo,la])=>{const p=llToEN(lo,la);if(p.x<xs)xs=p.x;if(p.x>xM)xM=p.x;if(p.y<ys)ys=p.y;if(p.y>yM)yM=p.y;return p;});return {en,bb:[xs,ys,xM,yM]};};
+  MAP.roads =window.BASEMAP.roads.map(conv);
+  MAP.rivers=window.BASEMAP.rivers.map(conv);
+  MAP.towns =window.BASEMAP.towns.map(([lo,la,nm,cat])=>({...llToEN(lo,la),nm,cat}));
+}
+
+/* ── Scénarios : aéronefs = params éditables {x0,y0,alt,hdg,spd,vfpm} ──────── */
+function A(cs,x0,y0,alt,hdg,spd,vfpm){ return {cs,x0,y0,alt,hdg,spd,vfpm:vfpm||0}; }
+const SCEN = {
+  headon:   {name:"Face-à-face (co-alt) — doit ROUGE", dur:80, own:A("OWN",0,-6000,2000,0,100), intr:[A("FJABC",0,6000,2000,180,100)]},
+  cross:    {name:"Croisement 90° — doit alerter", dur:80, own:A("OWN",0,-5000,2000,0,100), intr:[A("FJXCR",-6500,300,2000,90,110)]},
+  overtake: {name:"Rattrapage par l'arrière", dur:90, own:A("OWN",0,0,2000,0,90), intr:[A("FJOVK",0,-2800,2000,0,135)]},
+  follower: {name:"Avion qui SUIT (co-vitesse) — doit RESTER vert", dur:90, own:A("OWN",0,0,2000,0,100), intr:[A("FJSUI",0,-1200,2000,0,100)]},
+  stacked:  {name:"Face-à-face étagé +1500 ft — PAS d'alerte", dur:80, own:A("OWN",0,-6000,2000,0,100), intr:[A("FJHI",0,6000,3500,180,100)]},
+  climbing: {name:"Convergent en montée (traverse le niveau)", dur:90, own:A("OWN",0,-6000,3000,0,100), intr:[A("FJCLB",0,6000,1200,180,100,1600)]},
+  multi:    {name:"Multi-trafic (mélange)", dur:100, own:A("OWN",0,-4000,2500,0,105),
+    intr:[A("FJHON",0,7000,2500,180,100),A("FJCRS",-7000,1500,2600,90,120),A("FJFOL",0,-1300,2500,0,105),A("FJHI",3000,3000,4200,225,130)]},
+};
+function clone(s){ return {name:s.name,dur:s.dur,own:{...s.own},intr:s.intr.map(a=>({...a})),csv:false}; }
+function posOf(a,t){ const ms=a.spd*0.514444, r=a.hdg*Math.PI/180;
+  return {x:a.x0+ms*Math.sin(r)*t, y:a.y0+ms*Math.cos(r)*t, alt:a.alt+a.vfpm/60*t, hdg:a.hdg, spd:a.spd, vspd:a.vfpm}; }
+
+let active=clone(SCEN.headon);       // scénario COURANT éditable (sliders own/intrus)
+let csvOwnData=null, csvIntData=null, logData=null;
+
+/* état */
+let playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8, liveNm=15;
+let params=acDefaultParams();
+let audioOn=false, showEgg=true, showVec=true, showAip=true, showGrid=false, showMap=true;
+
+function stateAt(t){
+  if(active.log && logData){ const L=logData; let i=0; while(i<L.snaps.length-1 && L.snaps[i+1].t<=t)i++;
+    const a=L.snaps[i], b=L.snaps[Math.min(L.snaps.length-1,i+1)], span=(b.t-a.t)||1, f=Math.max(0,Math.min(1,(t-a.t)/span));
+    const own={x:a.own.x+(b.own.x-a.own.x)*f, y:a.own.y+(b.own.y-a.own.y)*f, alt:a.own.alt+(b.own.alt-a.own.alt)*f, hdg:a.own.hdg, spd:a.own.spd, vspd:a.own.vspd};
+    return {own, intr:a.intr.map(z=>({cs:z.cs,x:z.x,y:z.y,alt:z.alt,hdg:z.hdg,spd:z.spd,vspd:z.vspd})), dur:L.dur, name:active.name}; }
+  if(active.csv){ const own=sampleCsv(csvOwnData,t);
+    // Alignement UTC absolu : l'intrus est échantillonné à la MÊME heure murale que own
+    // (delta des t0) → si les 2 vols ont volé en même temps, la vraie géométrie de rencontre apparaît.
+    let tInt=t, intr=[];
+    if(csvIntData){
+      if(csvOwnData && csvOwnData.t0!=null && csvIntData.t0!=null){
+        let d=csvOwnData.t0-csvIntData.t0; if(d>43200)d-=86400; if(d<-43200)d+=86400; tInt=t+d; }
+      // Hors de sa fenêtre d'enregistrement (avant décollage / après atterrissage) → l'intrus
+      // n'existe pas (le boîtier ne logue qu'en vol) → on ne l'affiche PAS (fini le point figé au sol).
+      if(tInt>=-1 && tInt<=csvIntData.dur+1) intr=[{cs:active.intCs||"INTRUS",...sampleCsv(csvIntData,tInt)}];
+    }
+    return {own,intr,dur:active.dur,name:active.name}; }
+  return {own:posOf(active.own,t), intr:active.intr.map(a=>({cs:a.cs,...posOf(a,t)})), dur:active.dur, name:active.name};
+}
+function buildEngineInput(st){ const D=Math.PI/180;
+  const own={ spd_kmh: st.own.spd*1.852, hdg_deg: st.own.hdg, flt_st:1, gps_fix:true, valid:true, vspd_fpm: st.own.vspd||0 };
+  const t=st.intr.map(a=>{ const dx=a.x-st.own.x, dy=a.y-st.own.y, dist=Math.hypot(dx,dy);
+    let bear=Math.atan2(dx,dy)/D; if(bear<0)bear+=360;
+    return {cs:a.cs, visible:true, alt_rel_100ft:(a.alt-st.own.alt)/100, bear_deg:bear, dist_m:dist,
+            hdg_deg:a.hdg, spd_kt:a.spd, vspd_fpm:a.vspd||0, _abs:a}; });
+  return {own,t};
+}
+
+/* ── DIAGNOSTIC (affichage seul, ne décide rien — le core décide) ─────────── */
+function diagnose(own, e){ const D=Math.PI/180;
+  const ogs=own.spd_kmh/3.6;
+  let rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,ogs*params.fwd_sec));
+  let rAft=Math.max(rFwd*0.2,params.aft_min);
+  const ovx=ogs*Math.sin(own.hdg_deg*D), ovy=ogs*Math.cos(own.hdg_deg*D);
+  const br=e.bear_deg*D, Rx=e.dist_m*Math.sin(br), Ry=e.dist_m*Math.cos(br);
+  const tt=e.hdg_deg*D, tgs=e.spd_kt*0.514444;
+  const vrx=tgs*Math.sin(tt)-ovx, vry=tgs*Math.cos(tt)-ovy, vr2=vrx*vrx+vry*vry;
+  const tcpa=vr2>0.05?-(Rx*vrx+Ry*vry)/vr2:-1;
+  let dcpa=e.dist_m; if(tcpa>0){const cx=Rx+vrx*tcpa,cy=Ry+vry*tcpa; dcpa=Math.hypot(cx,cy);}
+  const closing=Math.sqrt(vr2)/0.514444;              // kt (vitesse de rapprochement relative)
+  const closeRate=-(Rx*vrx+Ry*vry)/e.dist_m;          // m/s radial signé (>0 = on se rapproche)
+  const closeRadKt=closeRate/0.514444;                // kt radial signé
+  const tau=closeRate>0.1?e.dist_m/closeRate:1e9;     // s — dist/rapprochement radial
+  const rel=e.bear_deg-own.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
+  const dalt=Math.abs(e.alt_rel_100ft*100), conv=tcpa>0;
+  // règle qui déclencherait (mêmes conditions que le core, pour l'explication)
+  let rule="—";
+  if(e.spd_kt<params.gnd_kt) rule="intrus AU SOL ("+Math.round(e.spd_kt)+" kt) → rien";
+  else if(dalt<=params.vRed && e.dist_m<=params.floor_m) rule="PLANCHER (rouge)";
+  else if(dalt<=params.vRed && conv && tcpa<=params.tRed && dcpa<=params.dRed) rule="CPA rouge (tCPA+dCPA)";
+  else if(dalt<=params.vOrg && conv && tcpa<=params.tOrg && dcpa<=params.dOrg) rule="CPA orange (tCPA+dCPA)";
+  else if(dalt<=params.vOrg && conv && e.dist_m<=rEgg) rule="Bulle-œuf (proximité)";
+  else if(!conv) rule="on s'éloigne → rien";
+  else rule="hors seuils → rien";
+  return {closing,closeRadKt,tau,tcpa,dcpa,rEgg,dalt,conv,rel:((rel%360)+360)%360,rule};
+}
+
+/* ── Niveau « INFO » (proximité 90 s) — VISU SIMU SEULEMENT, hors core/firmware.
+   Reprend l'étage PA (Proximity advisory) de la roadmap 2022 : convergence,
+   45 s < tCPA ≤ 90 s, ±1200 ft. Bleu, non-alarmant (le core ne le connaît pas). ─ */
+const INFO_COL="#2f81f7";
+let curInfo=[];   // par intrus : true = étage info (bleu)
+function infoTier(own,e){ const D=Math.PI/180, ogs=own.spd_kmh/3.6;
+  const ovx=ogs*Math.sin(own.hdg_deg*D),ovy=ogs*Math.cos(own.hdg_deg*D);
+  const br=e.bear_deg*D,Rx=e.dist_m*Math.sin(br),Ry=e.dist_m*Math.cos(br);
+  const tt=e.hdg_deg*D,tgs=e.spd_kt*0.514444,vrx=tgs*Math.sin(tt)-ovx,vry=tgs*Math.cos(tt)-ovy,vr2=vrx*vrx+vry*vry;
+  const tcpa=vr2>0.05?-(Rx*vrx+Ry*vry)/vr2:-1, dalt=Math.abs(e.alt_rel_100ft*100);
+  return tcpa>45 && tcpa<=90 && dalt<=1200; }
+function colOf(pi,i){ return pi?COL[pi]:(curInfo[i]?INFO_COL:COL[0]); }
+let autoZoom=false, showTrace=true;
+
+/* ══ EXPÉRIMENTAL (simu, HORS core/firmware) : CPA 3D + hystérésis + bruit ════
+   Variantes comparées au core verrouillé via toggles → on ÉVALUE avant toute
+   promotion. acEvalThreats (alert_core.js) reste 0/1/2, conformance intacte. */
+// (2026-07-13) Tau + hystérésis sont désormais DANS le moteur de base (alert_core.h/js) = ce que tourne le BOÎTIER.
+// Défaut : useTau=false → le sim utilise acEvalThreats de base (qui INCLUT Tau) + hystérésis → identique à l'écran.
+// Les toggles ci-dessous (3D vertical, downgrade, tau-extra via acEvalThreats3D) restent pour l'exploration seule.
+let use3D=false, useHyst=true, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[], useTau=false;
+
+// (A) CPA 3D : la fenêtre verticale est testée sur le Δalt PROJETÉ au tCPA
+// (fermeture verticale) → détecte tôt un intrus qui monte/descend vers ton niveau.
+function acEvalThreats3D(o,t,P){
+  const per=t.map(()=>AC.NONE); dgInfo=t.map(()=>false);
+  const out={level:AC.NONE,clock:0,dist_m:0,dalt_ft:0,closing_kt:0,idx:-1,valid:false};
+  if(!o.valid||!o.gps_fix||o.flt_st===0) return {per,out};
+  const D=Math.PI/180, ogs=o.spd_kmh/3.6;
+  let rFwd=Math.max(P.fwd_min,Math.min(P.fwd_max,ogs*P.fwd_sec)), rAft=Math.max(rFwd*0.2,P.aft_min);
+  const ovx=ogs*Math.sin(o.hdg_deg*D), ovy=ogs*Math.cos(o.hdg_deg*D), ovz=(o.vspd_fpm||0)/60;
+  for(let i=0;i<t.length;i++){ const e=t[i]; if(!e.visible)continue;
+    if(e.spd_kt<P.gnd_kt)continue;                    // intrus au sol/roulage → jamais d'alerte
+    const daltNow=Math.abs(e.alt_rel_100ft*100);
+    const br=e.bear_deg*D,Rx=e.dist_m*Math.sin(br),Ry=e.dist_m*Math.cos(br);
+    const tt=e.hdg_deg*D,tgs=e.spd_kt*0.514444,vrx=tgs*Math.sin(tt)-ovx,vry=tgs*Math.cos(tt)-ovy,vr2=vrx*vrx+vry*vry;
+    const tcpa=vr2>0.05?-(Rx*vrx+Ry*vry)/vr2:-1;
+    let dcpa=e.dist_m; if(tcpa>0){const cx=Rx+vrx*tcpa,cy=Ry+vry*tcpa; dcpa=Math.hypot(cx,cy);}
+    const closing=Math.trunc(Math.sqrt(vr2)/0.514444), conv=tcpa>0, evz=(e.vspd_fpm||0)/60;
+    const daltCpa=conv?Math.abs(e.alt_rel_100ft*100+(evz-ovz)*tcpa):daltNow;   // Δalt au CPA
+    // (TAU) rapprochement RADIAL signé → tau = dist/rapprochement. Diverge → jamais d'alerte ;
+    // converge → temps = tau. Se relâche au PASSAGE (rapprochement radial→0 → tau→∞) : idéal circuit.
+    const closeRate=-(Rx*vrx+Ry*vry)/e.dist_m;                 // m/s (>0 = on se rapproche)
+    const tau=closeRate>0.1?e.dist_m/closeRate:1e9;
+    const converging=useTau?(closeRate>0.1):conv, T=useTau?tau:tcpa;
+    const rel=e.bear_deg-o.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
+    const cpaOrange=(daltCpa<=P.vOrg && converging && T<=P.tOrg && dcpa<=P.dOrg);
+    // Avec TAU : la bulle respecte aussi le TEMPS (tau ≤ tOrg) → un trafic qui passe ABEAM
+    // (rapprochement radial faible, tau énorme) ne déclenche plus la bulle = circuit apaisé.
+    const eggOrange=(daltNow<=P.vOrg && converging && e.dist_m<=rEgg && (!useTau || T<=P.tOrg));
+    let lvl=AC.NONE;
+    if(cpaOrange) lvl=AC.ORANGE;
+    if(daltCpa<=P.vRed && converging && T<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
+    if(eggOrange && lvl<AC.ORANGE) lvl=AC.ORANGE;                                   // bulle = maintenant
+    if(daltNow<=P.vRed && e.dist_m<=P.floor_m) lvl=AC.RED;                          // plancher = maintenant
+    // (option 3) DOWNGRADE : une CAUTION due au SEUL CPA qui va s'écarter (dRed < dcpa ≤ dOrg)
+    // = passage qui clear → INFO bleu, pas de caution. La bulle (proximité réelle) et le rouge restent.
+    if(useDowngrade && lvl===AC.ORANGE && cpaOrange && !eggOrange && dcpa>P.dRed){ lvl=AC.NONE; dgInfo[i]=true; }
+    per[i]=lvl; e._tcpa=tcpa; e._dcpa=dcpa; e._tau=tau; e._closeRate=closeRate;
+    if(lvl>out.level){ let clk=(((Math.trunc(e.bear_deg-o.hdg_deg))%360)+360)%360, hr=Math.trunc((clk+15)/30)%12; if(hr===0)hr=12;
+      out.level=lvl;out.clock=hr;out.dist_m=Math.trunc(e.dist_m);out.dalt_ft=Math.trunc(e.alt_rel_100ft*100);out.closing_kt=closing;out.idx=i;out.valid=true; } }
+  return {per,out};
+}
+// (B) hystérésis : monte direct, redescend après maintien (ROUGE 4 s / ORANGE 3 s).
+let hyLevel=0, hyUntil=0;
+function hysteresis(raw,nowMs){
+  if(raw>hyLevel){ hyLevel=raw; hyUntil=nowMs+(raw===AC.RED?4000:3000); }
+  else if(raw<hyLevel && nowMs>=hyUntil){ hyLevel=raw; }
+  return hyLevel;
+}
+// (D) bruit réaliste : perturbe ce que VOIT le moteur (pas le mouvement réel),
+// offset lissé régénéré ~0,5 s → montre le jitter des données SafeSky/GPS.
+let noiseState=new Map(), noiseT=0;
+function applyNoise(tArr,nowMs){
+  if(nowMs-noiseT>500){ noiseT=nowMs; noiseState.clear(); }
+  return tArr.map((e,i)=>{ let n=noiseState.get(i);
+    if(!n){ const g=()=>(Math.random()+Math.random()+Math.random()-1.5);
+      n={dd:g()*40,da:g()*0.8,db:g()*1.2,dh:g()*6}; noiseState.set(i,n); }
+    return {...e, dist_m:Math.max(0,e.dist_m+n.dd), alt_rel_100ft:e.alt_rel_100ft+n.da,
+            bear_deg:(e.bear_deg+n.db+360)%360, hdg_deg:(e.hdg_deg+n.dh+360)%360}; });
+}
+
+/* ── icône avion = silhouette VL3 du Dashboard (public/VL3.svg), vue de dessus,
+ *    nez déjà vers le HAUT (-y). Rendu via Path2D, corps=couleur menace + verrière
+ *    claire. viewBox 1050×783, centre ≈ (525,400). ──────────────────────────── */
+const VL3_BODY = new Path2D("M433.57,375.28L5.52,344.85c.14-22.26,3.06-43.63,7.94-64.92l7.64-33.34c2.34-7.07,7.94-11.23,15.31-11.82l69.49-5.58,353.21-25.81c3.99-46.03,10.85-91.18,21.74-135.82,1.23-5.05,3.15-9.32,6.32-12.94,6.08-3.7,12.85-4.65,20.33-5.01.91-3.11,1.1-6.29,1.03-9.84-14.58,2.04-28,2.13-42.23,1.34-16.5-.92-32.37-1.44-48.77-4.81.74-2.68,3.08-2.85,5.25-3.09,29.18-3.23,57.96-3.48,87.72-1.18,2.42-9.45,9.57-25.9,14.32-25.92s12.65,16.08,14.5,25.94c26.06-2.53,51.32-1.74,77.17.42,4.66.39,9.23-.57,13.78,2.96-11.93,3.88-23.77,4.01-35.98,4.96-17.85,1.39-35.01,1.68-52.97-.61l1.12,10.17,13.02,1.66c6.15.78,9.57,5.67,11.57,11.64,7.55,23.8,12.97,47.65,16.12,72.67l8.5,67.46,304.4,22.22,46.32,3.45c25.43,1.9,50.26,2.82,75.56,6.26,11.36,1.54,15.57,22.17,17.97,34.97,4.56,24.23,7.19,48.26,8.57,73l-50.19,4.27-102.09,7.35-207.71,15.5-68.49,4.86c-7.03,4.96-13.08,11.07-17.43,18.83l-17.93,31.97-28.66,115.28c-7.62,30.65-12.93,60.78-15.61,92.46l65.84,8.32,68.9,9.78c4.86,1.6,8.2,5.22,10.19,9.96,5.51,13.09,7.81,26.87,9.72,41.04.63,4.65,1.91,8.86,1.08,14.19l-147.67,13.89-11.93-31.71-4.49,56.35-1.72,16.37c-.12,1.18-1.86,1.19-1.84-.15-3.47-24.63-4.63-48.31-6.28-73.48l-12.29,33.04-63.66-6.47-84.46-7.96c.45-19.76,4.57-38.95,11.4-57.17,1.62-4.33,5.09-6.97,9.4-7.97l72.65-10.33,62.42-8.02c-2.27-25.11-6.13-49.42-11.8-74.16l-16.41-71.6-16.01-60.06-13.75-26.23c-5.37-10.25-11.97-18.61-22.09-26.17ZM460.33,337.23l2.9,15.63c3.13,16.86,25.88,16.93,41.11,18.71s29.7,1.66,45.05.05c10.68-1.12,22.07-.69,31.48-6.53,6.62-4.1,10.36-13.61,11.04-21.61,2.93-34.54,2.64-68.52-.18-103.03-.72-8.84-3.06-17.77-8.59-24.55-4.36-5.36-11.73-8.09-18.63-9.45-26.29-5.16-53.17-5.38-79.18.11-10.43,2.2-17.78,8.91-20.4,18.81-2.59,9.8-4.1,19.11-4.52,29.45-1.12,27.51-1.44,54.29-.09,82.42ZM557.01,423.79c-.54,3.43,2,6.67,5.5,6.58,8.77-.22,15.42-6.52,17.59-14.89,3.68-14.18,7.05-27.88,8.31-42.99-6.77,5.2-13.18,8.92-20.84,11.59-3.28,1.15-4.63,5.18-5.6,8.3l-4.96,31.41ZM465.46,373.09c.71,16.04,4.16,30.45,8.75,44.67,2.41,7.44,7.99,12.92,16.16,12.91,2.23,0,6.68-2.58,6.34-5.14l-4.54-33.5c-.78-3.42-2.33-6.25-5.42-7.73-7.79-2.03-13.38-6.65-21.29-11.21Z");
+const VL3_CANOPY = new Path2D("M460.33,337.23c-1.35-28.13-1.03-54.91.09-82.42.42-10.34,1.92-19.65,4.52-29.45,2.62-9.9,9.97-16.61,20.4-18.81,26.01-5.49,52.89-5.27,79.18-.11,6.9,1.36,14.27,4.09,18.63,9.45,5.53,6.79,7.87,15.71,8.59,24.55,2.82,34.51,3.11,68.49.18,103.03-.68,8-4.42,17.51-11.04,21.61-9.41,5.83-20.8,5.41-31.48,6.53-15.34,1.61-29.83,1.73-45.05-.05s-37.97-1.85-41.11-18.71l-2.9-15.63Z M465.46,373.09c7.91,4.56,13.5,9.17,21.29,11.21,3.09,1.48,4.64,4.31,5.42,7.73l4.54,33.5c.35,2.57-4.11,5.14-6.34,5.14-8.18.02-13.75-5.46-16.16-12.91-4.6-14.22-8.05-28.64-8.75-44.67Z M557.01,423.79l4.96-31.41c.97-3.12,2.31-7.15,5.6-8.3,7.67-2.67,14.07-6.39,20.84-11.59-1.26,15.12-4.64,28.81-8.31,42.99-2.17,8.37-8.82,14.67-17.59,14.89-3.51.09-6.04-3.16-5.5-6.58Z");
+function planeIcon(c,x,y,hdg,col,s,own){
+  const k=s/660;
+  c.save();
+  c.translate(x,y);c.rotate(hdg*Math.PI/180);c.scale(k,k);c.translate(-525,-400);
+  c.fillStyle=col;c.fill(VL3_BODY);
+  c.lineJoin="round";c.strokeStyle=own?"#12303f":"rgba(20,35,50,.5)";c.lineWidth=(own?2.2:1.0)/k;c.stroke(VL3_BODY);
+  c.fillStyle="#eef3f7";c.fill(VL3_CANOPY);
+  c.restore();
+}
+const COL={0:"#3fb950",1:"#e3b341",2:"#f85149"};
+const liveC=document.getElementById('live'), lx=liveC.getContext('2d');
+const profC=document.getElementById('profile'), px2=profC.getContext('2d');
+const scrC=document.getElementById('screen'), sx=scrC.getContext('2d');
+
+function drawLive(st, eng, per){
+  const W=liveC.width,H=liveC.height; lx.clearRect(0,0,W,H); lx.fillStyle="#ffffff";lx.fillRect(0,0,W,H);
+  const cx=W/2, cy=H/2, halfM=liveNm*NM, sc=(Math.min(W,H)/2-8)/halfM;
+  const X=(x)=>cx+(x-st.own.x)*sc, Y=(y)=>cy-(y-st.own.y)*sc;
+  const mx=halfM*W/Math.min(W,H)+2000, my=halfM*H/Math.min(W,H)+2000;
+  const vb=[st.own.x-mx,st.own.y-my,st.own.x+mx,st.own.y+my];
+  // CARTE LÉGÈRE OSM (couche du fond) : rivières + routes majeures + villes. Cull par bbox.
+  if(showMap){
+    const vis=(bb)=>!(bb[2]<vb[0]||bb[0]>vb[2]||bb[3]<vb[1]||bb[1]>vb[3]);
+    lx.setLineDash([]); lx.lineJoin="round"; lx.lineCap="round";
+    lx.strokeStyle="rgba(120,175,225,.55)"; lx.lineWidth=1.6;   // rivières (bleu)
+    for(const r of MAP.rivers){ if(!vis(r.bb))continue; lx.beginPath(); r.en.forEach((p,i)=>{const sp=X(p.x),sq=Y(p.y);i?lx.lineTo(sp,sq):lx.moveTo(sp,sq);}); lx.stroke(); }
+    lx.strokeStyle="rgba(190,150,90,.6)"; lx.lineWidth=1.4;      // autoroutes/voies rapides (ocre)
+    for(const r of MAP.roads){ if(!vis(r.bb))continue; lx.beginPath(); r.en.forEach((p,i)=>{const sp=X(p.x),sq=Y(p.y);i?lx.lineTo(sp,sq):lx.moveTo(sp,sq);}); lx.stroke(); }
+    // villes : point + nom (villes toujours, bourgs si zoom serré)
+    lx.textAlign="left"; lx.textBaseline="middle";
+    for(const t of MAP.towns){ if(t.x<vb[0]||t.x>vb[2]||t.y<vb[1]||t.y>vb[3])continue; if(t.cat===0 && liveNm>18)continue;
+      const sp=X(t.x),sq=Y(t.y); const big=t.cat===1;
+      lx.fillStyle="rgba(90,90,95,.75)"; lx.beginPath(); lx.arc(sp,sq,big?3:2,0,7); lx.fill();
+      if(liveNm<=(big?45:14)){ lx.fillStyle="rgba(60,60,65,.85)"; lx.font=(big?"bold 11px":"10px")+" sans-serif"; lx.fillText(t.nm,sp+5,sq); } }
+  }
+  // Carte légère = GRATICULE lat/lon (offline). Pas adaptatif au zoom (1'..10'), sous l'AIP.
+  if(showGrid){
+    const toLat=(y)=>ORIGIN.lat + y/RE*180/Math.PI, toLon=(x)=>ORIGIN.lon + x/(RE*Math.cos(LAT0))*180/Math.PI;
+    const step=(liveNm<=3?1:liveNm<=8?2:liveNm<=20?5:10)/60;   // pas en minutes d'arc
+    const fmt=(d)=>{const g=Math.floor(Math.abs(d)),m=Math.round((Math.abs(d)-g)*60);return g+"°"+String(m).padStart(2,'0')+"'";};
+    lx.setLineDash([]); lx.lineWidth=1; lx.strokeStyle="rgba(70,100,140,.16)"; lx.fillStyle="rgba(70,100,140,.55)"; lx.font="9px sans-serif"; lx.textBaseline="alphabetic";
+    for(let lo=Math.ceil(toLon(vb[0])/step)*step; lo<=toLon(vb[2]); lo+=step){ const px=X(llToEN(lo,ORIGIN.lat).x);
+      lx.beginPath();lx.moveTo(px,0);lx.lineTo(px,H);lx.stroke(); lx.textAlign="left"; lx.fillText(fmt(lo),px+2,11); }
+    for(let la=Math.ceil(toLat(vb[1])/step)*step; la<=toLat(vb[3]); la+=step){ const py=Y(llToEN(ORIGIN.lon,la).y);
+      lx.beginPath();lx.moveTo(0,py);lx.lineTo(W,py);lx.stroke(); lx.textAlign="left"; lx.fillText(fmt(la),2,py-2); }
+  }
+  if(showAip){ lx.lineWidth=1.2;
+    for(const a of AIRSPACES){ if(a.bb[2]<vb[0]||a.bb[0]>vb[2]||a.bb[3]<vb[1]||a.bb[1]>vb[3])continue;
+      lx.strokeStyle=AIPCOL[a.k]||"#888"; lx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]);
+      lx.beginPath(); a.en.forEach((p,i)=>{const sp=X(p.x),sq=Y(p.y); i?lx.lineTo(sp,sq):lx.moveTo(sp,sq);});
+      lx.closePath(); lx.globalAlpha=0.85; lx.stroke(); lx.globalAlpha=1; }
+    lx.setLineDash([]);
+    for(const a of AIRPORTS){ if(a.x<vb[0]||a.x>vb[2]||a.y<vb[1]||a.y>vb[3])continue;
+      const sp=X(a.x),sq=Y(a.y); lx.fillStyle="#2f6fd0";lx.strokeStyle="#ffffff";lx.lineWidth=1.5;
+      lx.beginPath();lx.arc(sp,sq,3,0,7);lx.fill();lx.stroke();
+      if(liveNm<=25){lx.fillStyle="#5a6a8a";lx.font="9px sans-serif";lx.textAlign="left";lx.fillText(a.i||a.n.slice(0,6),sp+5,sq+3);} }
+  }
+  // Trace (sillage) — 2022 « trace induite » : ~90 s de passé, échantillonné (forme fermée/CSV).
+  if(showTrace){ const t0=Math.max(0,simT-90);
+    for(let k=0;k<=st.intr.length;k++){ lx.beginPath(); let on=false;
+      for(let j=0;j<=30;j++){ const tt=t0+(simT-t0)*j/30, ss=stateAt(tt), p=(k===0?ss.own:ss.intr[k-1]); if(!p)continue;
+        const sp=X(p.x),sq=Y(p.y); on?lx.lineTo(sp,sq):(lx.moveTo(sp,sq),on=true); }
+      lx.strokeStyle=k===0?"rgba(10,110,170,.4)":"rgba(90,100,110,.28)"; lx.lineWidth=1.4; lx.stroke(); } }
+  const redAlert=curRedAlert;
+  eng.t.forEach((e,i)=>{ const a=e._abs;
+    if(showVec){const ms=a.spd*0.514444,len=ms*30*sc,r=a.hdg*Math.PI/180;
+      lx.strokeStyle="rgba(80,100,120,.5)";lx.lineWidth=1;lx.beginPath();lx.moveTo(X(a.x),Y(a.y));lx.lineTo(X(a.x)+Math.sin(r)*len,Y(a.y)-Math.cos(r)*len);lx.stroke();}
+    let col=colOf(per[i],i), sz=17;
+    if(redAlert){ if(per[i]===AC.NONE)col="rgba(130,140,150,.5)"; else sz=26; }
+    const dim=redAlert&&per[i]===AC.NONE, lxx=X(a.x)+sz/2+3;
+    planeIcon(lx,X(a.x),Y(a.y),a.hdg,col,sz);
+    lx.textAlign="left";
+    lx.fillStyle=dim?"rgba(110,120,130,.6)":"#1a2632";lx.font="bold 11px sans-serif";lx.fillText(a.cs,lxx,Y(a.y)-5);
+    lx.fillStyle=dim?"rgba(110,120,130,.5)":"#1769aa";lx.font="10px sans-serif";
+    lx.fillText(Math.round(a.spd)+"kt  "+Math.round(a.alt)+"ft",lxx,Y(a.y)+7); });
+  if(showVec){const ms=st.own.spd*0.514444,len=ms*30*sc,r=st.own.hdg*Math.PI/180;
+    lx.strokeStyle="rgba(10,110,170,.7)";lx.lineWidth=1.2;lx.beginPath();lx.moveTo(cx,cy);lx.lineTo(cx+Math.sin(r)*len,cy-Math.cos(r)*len);lx.stroke();}
+  planeIcon(lx,cx,cy,st.own.hdg,"#0a84d8",20,true);
+  lx.textAlign="left";
+  lx.fillStyle="#0a6bbf";lx.font="bold 11px sans-serif";lx.fillText("MOI",cx+13,cy-5);
+  lx.fillStyle="#1769aa";lx.font="10px sans-serif";lx.fillText(Math.round(st.own.spd)+"kt  "+Math.round(st.own.alt)+"ft",cx+13,cy+7);
+  document.getElementById('liveScale').textContent="½-fenêtre "+liveNm+" nm";
+}
+
+function drawProfile(st, eng, per){
+  const W=profC.width,H=profC.height; px2.clearRect(0,0,W,H); px2.fillStyle="#ffffff";px2.fillRect(0,0,W,H);
+  const padL=46,padR=10,padT=10,padB=16;
+  let maxD=2*NM, aMin=st.own.alt, aMax=st.own.alt;
+  eng.t.forEach(e=>{maxD=Math.max(maxD,e.dist_m*1.1); aMin=Math.min(aMin,e._abs.alt); aMax=Math.max(aMax,e._abs.alt);});
+  aMin=Math.min(aMin,st.own.alt-800); aMax=Math.max(aMax,st.own.alt+800);
+  const padA=(aMax-aMin)*0.15+100; aMin-=padA; aMax+=padA;
+  const X=(d)=>padL+(d/maxD)*(W-padL-padR), Y=(a)=>padT+(1-(a-aMin)/(aMax-aMin))*(H-padT-padB);
+  px2.fillStyle="rgba(214,158,20,.20)"; px2.fillRect(padL,Y(st.own.alt+params.vOrg),W-padL-padR,Y(st.own.alt-params.vOrg)-Y(st.own.alt+params.vOrg));
+  px2.fillStyle="rgba(248,81,73,.18)";  px2.fillRect(padL,Y(st.own.alt+params.vRed),W-padL-padR,Y(st.own.alt-params.vRed)-Y(st.own.alt+params.vRed));
+  px2.strokeStyle="#dde2e8";px2.fillStyle="#67727d";px2.font="9px sans-serif";px2.textAlign="right";px2.lineWidth=1;
+  const step=aMax-aMin>4000?1000:500;
+  for(let a=Math.ceil(aMin/step)*step;a<aMax;a+=step){px2.beginPath();px2.moveTo(padL,Y(a));px2.lineTo(W-padR,Y(a));px2.stroke();px2.fillText(Math.round(a),padL-4,Y(a)+3);}
+  px2.strokeStyle="rgba(10,110,170,.75)";px2.setLineDash([4,3]);px2.beginPath();px2.moveTo(padL,Y(st.own.alt));px2.lineTo(W-padR,Y(st.own.alt));px2.stroke();px2.setLineDash([]);
+  px2.textAlign="center";px2.fillStyle="#67727d";
+  for(let d=0;d<=maxD;d+=(maxD>6*NM?4:2)*NM){px2.fillText((d/NM).toFixed(0)+"nm",X(d),H-4);}
+  px2.fillStyle="#0a84d8";px2.beginPath();px2.arc(X(0),Y(st.own.alt),5,0,7);px2.fill();px2.strokeStyle="#12303f";px2.lineWidth=1;px2.stroke();
+  eng.t.forEach((e,i)=>{const xx=X(e.dist_m),yy=Y(e._abs.alt);
+    px2.fillStyle=colOf(per[i],i);px2.beginPath();px2.arc(xx,yy,5,0,7);px2.fill();px2.strokeStyle="#12303f";px2.lineWidth=.8;px2.stroke();
+    px2.fillStyle="#44515d";px2.font="9px sans-serif";px2.textAlign="left";px2.fillText(e.cs,xx+7,yy+3);});
+}
+
+const RCX=300,RCY=225,RR=193;
+function drawScreen(st, eng, per, out){
+  sx.clearRect(0,0,600,450); sx.fillStyle="#ffffff"; sx.fillRect(0,0,600,450);
+  sx.strokeStyle="#c2cbd4";sx.lineWidth=1;
+  sx.beginPath();sx.arc(RCX,RCY,RR,0,7);sx.stroke(); sx.beginPath();sx.arc(RCX,RCY,RR/2,0,7);sx.stroke();
+  sx.beginPath();sx.moveTo(RCX-RR,RCY);sx.lineTo(RCX+RR,RCY);sx.moveTo(RCX,RCY-RR);sx.lineTo(RCX,RCY+RR);sx.stroke();
+  const pxPerM = RR/(rangeNm*NM);
+  if(showAip){ const oh=0, vr=rangeNm*NM*1.3;   // NORTH-UP : AIP en relèvement absolu (pas de rotation cap)
+    for(const a of AIRSPACES){ if(a.bb[2]<st.own.x-vr||a.bb[0]>st.own.x+vr||a.bb[3]<st.own.y-vr||a.bb[1]>st.own.y+vr)continue;
+      sx.strokeStyle=AIPCOL[a.k]||"#888"; sx.globalAlpha=0.5; sx.lineWidth=1.2;
+      sx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]); sx.beginPath();
+      a.en.forEach((p,i)=>{const dx=p.x-st.own.x,dy=p.y-st.own.y, rx=(dx*Math.cos(oh)-dy*Math.sin(oh)), ry=(dx*Math.sin(oh)+dy*Math.cos(oh));
+        const sp=RCX+rx*pxPerM, sq=RCY-ry*pxPerM; i?sx.lineTo(sp,sq):sx.moveTo(sp,sq);});
+      sx.closePath();sx.stroke(); }
+    sx.setLineDash([]);sx.globalAlpha=1;
+  }
+  if(showEgg){ const ogs=st.own.spd*0.514444;
+    let rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,ogs*params.fwd_sec)), rAft=Math.max(rFwd*0.2,params.aft_min);
+    sx.strokeStyle="rgba(47,129,247,.55)";sx.setLineDash([4,4]);sx.lineWidth=1.5;sx.beginPath();
+    const ohr=st.own.hdg*Math.PI/180;   // NORTH-UP : le lobe avant de la bulle pointe vers le CAP d'own
+    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180,ceg=Math.cos(th),R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM,a2=th+ohr,qx=RCX+Math.sin(a2)*R,qy=RCY-Math.cos(a2)*R;d?sx.lineTo(qx,qy):sx.moveTo(qx,qy);}
+    sx.closePath();sx.stroke();sx.setLineDash([]);
+    sx.strokeStyle="rgba(248,81,73,.4)";sx.beginPath();sx.arc(RCX,RCY,params.floor_m*pxPerM,0,7);sx.stroke();
+  }
+  sx.fillStyle="#67727d";sx.font="bold 13px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
+  [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=a*Math.PI/180;sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});   // NORTH-UP : N fixe en haut
+  const redAlert=curRedAlert;   // (éventuellement hystérésis) → focus : intrus ×1,5, autres gris léger
+  eng.t.forEach((e,i)=>{ let rp=e.dist_m*pxPerM; if(rp>RR+40)return;
+    const rel=e.bear_deg*Math.PI/180, qx=RCX+Math.sin(rel)*rp, qy=RCY-Math.cos(rel)*rp;   // NORTH-UP : relèvement absolu
+    let col=colOf(per[i],i), sz=17, dim=false;
+    if(redAlert){ if(per[i]===AC.NONE){col="rgba(130,140,150,.5)";dim=true;} else {sz=26;} }
+    planeIcon(sx,qx,qy,e.hdg_deg,col,sz);   // cap absolu
+    sx.fillStyle=dim?"rgba(110,120,130,.6)":colOf(per[i],i);sx.font="bold 11px sans-serif";sx.textAlign="left";sx.textBaseline="alphabetic";sx.fillText(e.cs,qx+sz/2+2,qy-5);
+    sx.fillStyle=dim?"rgba(110,120,130,.5)":"#44515d";sx.font="10px sans-serif";const sign=e.alt_rel_100ft>=0?"+":"";sx.fillText(sign+Math.round(e.alt_rel_100ft)+"  "+(e.dist_m/NM).toFixed(1)+"nm",qx+sz/2+2,qy+8);});
+  planeIcon(sx,RCX,RCY,st.own.hdg,"#3fb950",20,true);   // NORTH-UP : own tourné selon son cap
+  sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";sx.lineWidth=1;roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
+  sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
+  sx.fillStyle="#5b6773";sx.font="12px sans-serif";sx.textAlign="left";sx.fillText(rangeNm+" nm",12,440);
+  drawAlertOverlay(out, eng);
+}
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+function drawAlertOverlay(out, eng){ if(out.level===AC.NONE) return;
+  const red = out.level===AC.RED;
+  // (v181) IMMINENT → pulse 2× plus rapide (110 ms), miroir du firmware.
+  const per = (red && out.imminent) ? 110 : 220;
+  const on  = (Math.floor(performance.now()/per)%2)===0;
+  const AR="#f85149", AO="#e3b341";
+  const T = (out.idx>=0 && eng && out.idx<eng.t.length) ? eng.t[out.idx] : null;
+  // 1) SECTEUR D'ALERTE : illumine le quart de cadran où est la menace (±45° autour du relèvement),
+  //    dégradé qui brille vers le bord, ROUGE pulsé / AMBRE. Dit « où regarder dehors ».
+  if(T){
+    const bear=T.bear_deg*Math.PI/180, half=45*Math.PI/180, base=red?"248,81,73":"227,179,65";
+    const a=red?(on?0.55:0.26):0.30;
+    const g=sx.createRadialGradient(RCX,RCY,RR*0.12, RCX,RCY,RR);
+    g.addColorStop(0,`rgba(${base},0)`); g.addColorStop(0.55,`rgba(${base},${(a*0.45).toFixed(3)})`); g.addColorStop(1,`rgba(${base},${a})`);
+    sx.beginPath(); sx.moveTo(RCX,RCY);
+    for(let d=-half; d<=half+1e-3; d+=Math.PI/72){ const a2=bear+d; sx.lineTo(RCX+Math.sin(a2)*RR, RCY-Math.cos(a2)*RR); }
+    sx.closePath(); sx.fillStyle=g; sx.fill();
+    sx.beginPath();                                   // liseré sur l'arc extérieur du secteur
+    for(let d=-half; d<=half+1e-3; d+=Math.PI/72){ const a2=bear+d; const p=RCX+Math.sin(a2)*RR, q=RCY-Math.cos(a2)*RR; (d===-half)?sx.moveTo(p,q):sx.lineTo(p,q); }
+    sx.strokeStyle=red?(on?AR:"rgba(248,81,73,.4)"):AO; sx.lineWidth=red?4:3; sx.lineCap="round"; sx.stroke(); sx.lineCap="butt";
+  }
+  // 2) ANNEAU pulsé autour de la CIBLE (conservé : la menace précise).
+  if(T){ const pxPerM=RR/(rangeNm*NM), rp=Math.min(T.dist_m*pxPerM, RR-6), rel=T.bear_deg*Math.PI/180;
+    const tx=RCX+Math.sin(rel)*rp, ty=RCY-Math.cos(rel)*rp;
+    if(red){ const rr=20+(on?7:0); sx.strokeStyle=AR; sx.lineWidth=4; sx.beginPath(); sx.arc(tx,ty,rr,0,7); sx.stroke(); } }
+  // 3) BADGE (haut-centre) — « où regarder dehors » : O'CLOCK + ANNONCE VERTICALE (façon AT-1).
+  const clk = out.clock + " O'CLOCK";
+  const da=out.dalt_ft;
+  const vert = da>=900?"HIGH":da>=200?"ABOVE":da<=-900?"LOW":da<=-200?"BELOW":"LEVEL";
+  sx.textAlign="center"; sx.textBaseline="middle";
+  sx.font="bold 27px sans-serif"; const cw=Math.max(sx.measureText(clk).width, sx.measureText(vert).width)+44;
+  sx.fillStyle = red ? (on?AR:"#7f1d1d") : AO; roundRect(sx,300-cw/2,40,cw,72,22); sx.fill();
+  sx.fillStyle="#fff"; sx.fillText(clk,300,63);
+  sx.font="bold 21px sans-serif"; sx.fillText(vert,300,92);
+  // 4) BANNIÈRE info (bas) — distance · Δalt · closing.
+  const txt=(out.dist_m/NM).toFixed(1)+" nm    "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+" ft    "+out.closing_kt+" kt";
+  const w=470,h=54,x=(600-w)/2,y=450-82;
+  sx.fillStyle="#0d1117"; roundRect(sx,x,y,w,h,13); sx.fill();
+  sx.fillStyle=red?AR:AO; sx.font="bold 23px sans-serif"; sx.fillText(txt,300,y+h/2); }
+
+/* audio */
+let actx=null,lastBeep=0;
+function beep(f,d,v){ if(!actx)return; const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;o.type="square";g.gain.value=v;o.connect(g);g.connect(actx.destination);
+  const t=actx.currentTime;o.start(t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(1e-4,t+d);o.stop(t+d);}
+function audioTick(l){ if(!audioOn||!actx)return; const now=performance.now();
+  if(l===AC.RED){if(now-lastBeep>500){beep(1200,.09,.25);setTimeout(()=>beep(1200,.09,.25),120);setTimeout(()=>beep(1200,.09,.25),240);lastBeep=now;}}
+  else if(l===AC.ORANGE){if(now-lastBeep>1600){beep(760,.14,.18);lastBeep=now;}} }
+
+/* boucle */
+/* ── Pont WebSerial → écran AT-VIEW physique (USB) ──────────────────────────────
+   Pousse les MÊMES trames que le boîtier (STATUS/TRAFFIC) : "S{json}"/"T{json}", précédées
+   de "SIMON" (armé) / suivies de "SIMOFF" (déconnexion). Le firmware (simSerialTick, v108)
+   les route vers parseStatus/parseTraffic → radar + moteur d'alerte + AUDIO joués au bench. */
+let scrPort=null, scrWriter=null, scrLastEmit=0; const scrEnc=new TextEncoder();
+async function scrSend(str){ if(!scrWriter)return; try{ await scrWriter.write(scrEnc.encode(str)); }catch(e){ scrDisconnect(); } }
+async function scrConnect(){
+  if(scrPort){ scrDisconnect(); return; }
+  if(!('serial' in navigator)){ alert("WebSerial non supporté — utilise Chrome ou Edge sur desktop."); return; }
+  try{
+    scrPort=await navigator.serial.requestPort();
+    await scrPort.open({baudRate:115200});
+    scrWriter=scrPort.writable.getWriter();
+    await scrSend("SIMON\n");
+    document.getElementById('scrStatus').textContent="écran : connecté";
+    document.getElementById('scrConnect').textContent="⛔ Disconnect";
+  }catch(e){ scrPort=null; scrWriter=null; document.getElementById('scrStatus').textContent="écran : erreur"; }
+}
+async function scrDisconnect(){
+  try{ await scrSend("SIMOFF\n"); }catch(e){}
+  try{ if(scrWriter) scrWriter.releaseLock(); }catch(e){}
+  try{ if(scrPort) await scrPort.close(); }catch(e){}
+  scrPort=null; scrWriter=null;
+  document.getElementById('scrStatus').textContent="écran : —";
+  document.getElementById('scrConnect').textContent="🔌 Connect screen";
+}
+function scrEmit(st, eng){
+  if(!scrWriter) return;
+  const now=performance.now(); if(now-scrLastEmit<100) return; scrLastEmit=now;   // ~10 Hz
+  const S={ spd:Math.round(eng.own.spd_kmh), hdg:Math.round(eng.own.hdg_deg), flt_st:1,
+            gps_fix:true, gps_sat:10, csq:20, ss:true, ssm:0, sd_ok:true,
+            alt:Math.round(st.own.alt), lat:0, lon:0, bat:80 };
+  const T={ count:eng.t.length, t:eng.t.map(e=>({ cs:String(e.cs||"SIM").slice(0,8),
+            d:Math.round(e.dist_m), a:+(e.alt_rel_100ft.toFixed(2)), b:Math.round(e.bear_deg),
+            c:Math.round(e.hdg_deg), s:Math.round(e.spd_kt), v:1, tp:0 })) };
+  scrSend("S"+JSON.stringify(S)+"\n"); scrSend("T"+JSON.stringify(T)+"\n");   // 2 écritures séparées (évite un burst > FIFO CDC)
+}
+document.getElementById('scrConnect').addEventListener('click', scrConnect);
+window.addEventListener('beforeunload', ()=>{ if(scrPort) scrDisconnect(); });
+
+function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
+  if(playing){ simT+=dt*speed; if(simT>=active.dur){simT=active.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
+  const st=stateAt(simT), eng=buildEngineInput(st);
+  scrEmit(st, eng);   // (v108) miroir vers l'écran physique si connecté (WebSerial)
+  const inT = useNoise? applyNoise(eng.t, now) : eng.t;                       // (D) bruit vu par le moteur
+  const use3Deng = use3D || useDowngrade || useTau;                           // 3D/downgrade/tau → variante exp.
+  const {per,out}=(use3Deng?acEvalThreats3D:acEvalThreats)(eng.own,inT,params);
+  if(useHyst) out.level=hysteresis(out.level, now);                          // (B) hystérésis
+  curRedAlert=(out.level===AC.RED);
+  // info (bleu) = étage 90 s OU caution CPA rétrogradée (option 3, dgInfo)
+  curInfo = eng.t.map((e,i)=> per[i]===AC.NONE && (infoTier(eng.own,e) || (use3Deng && dgInfo[i])));
+  if(autoZoom && eng.t.length){ let nd=1e18; eng.t.forEach(e=>{if(e.dist_m<nd)nd=e.dist_m;});   // 2022 "Dynamic View"
+    const tiers=[2,4,6,8,10,16]; rangeNm=tiers.find(r=>r*NM>=nd*1.6)||16;
+    document.getElementById('rngv').textContent=rangeNm; document.getElementById('range').value=Math.min(16,rangeNm); }
+  drawLive(st,eng,per);drawProfile(st,eng,per);drawScreen(st,eng,per,out);audioTick(out.level);updatePanels(st,eng,per,out);
+  requestAnimationFrame(tick);
+}
+function fmt(v,u,d){ return (v>=0?"":"")+ (d?v.toFixed(d):Math.round(v)) + (u||""); }
+// marge = seuil − valeur (>0 = condition SATISFAITE, côté déclenchement, vert ✓ ;
+// <0 = pas atteinte, |marge| = ce qu'il manque). Pour la bulle : rEgg − dist.
+function marg(v,u,d){ const met=v>0; const s=(v>=0?"+":"")+(d?v.toFixed(d):Math.round(v))+(u||"");
+  return '<span style="color:'+(met?"#3fb950":"#8b98a5")+'">'+s+(met?" ✓":"")+'</span>'; }
+function updatePanels(st,eng,per,out){
+  document.getElementById('tlabel').textContent="t = "+simT.toFixed(1)+" s / "+active.dur+" s";
+  document.getElementById('scrub').value=(simT/active.dur*100); document.getElementById('clock').textContent=st.name;
+  // Diagnostic sur l'intrus prioritaire (celui qui pilote l'alerte), sinon le plus proche
+  let idx=out.valid?out.idx:-1;
+  if(idx<0 && eng.t.length){ idx=0; for(let i=1;i<eng.t.length;i++) if(eng.t[i].dist_m<eng.t[idx].dist_m) idx=i; }
+  const tb=document.querySelector('#diag tbody'); tb.innerHTML="";
+  const lv=["AUCUNE","CAUTION","URGENT"],lc=["#8b98a5","#e3b341","#f85149"];
+  const add=(k,v,cls)=>{const tr=document.createElement('tr');tr.innerHTML='<td class="k">'+k+'</td><td class="v '+(cls||"")+'">'+v+'</td>';tb.appendChild(tr);};
+  add("Niveau alerte",'<span class="pill" style="background:'+lc[out.level]+';color:'+(out.level?"#111":"#8b98a5")+'">'+lv[out.level]+'</span>',"big");
+  if(idx>=0){ const e=eng.t[idx], d=diagnose(eng.own,e);
+    add("Intrus", e.cs);
+    add("Distance", fmt(e.dist_m/NM,' nm',1));
+    add("Vitesse de rapprochement", d.closing>0?fmt(d.closing,' kt'):'<span style="color:#3fb950">s\'éloigne</span>');
+    add("Rapprochement RADIAL", d.closeRadKt>0.2?fmt(d.closeRadKt,' kt'):(d.closeRadKt<-0.2?'<span style="color:#3fb950">'+fmt(d.closeRadKt,' kt')+' (éloigne)</span>':'≈0 (abeam)'),useTau?"big":"");
+    add("tau = dist / rappr. radial", d.closeRadKt>0.2?fmt(d.tau,' s',0):'∞ (pas de rappr.)',useTau?"big":"");
+    add("Temps à l'impact (tCPA)", d.conv?fmt(d.tcpa,' s',0):'—');
+    add("Distance de passage (dCPA)", d.conv?fmt(d.dcpa/NM,' nm',2):'—');
+    add("Δ altitude", fmt(e.alt_rel_100ft*100,' ft'));
+    add("Position horaire", d.rel>0?(out.valid?out.clock:Math.round(((d.rel+15)%360)/30)||12)+" h":"—");
+    add("Rayon bulle @ relèvement", fmt(d.rEgg/NM,' nm',2)+"  (dist "+ (e.dist_m<=d.rEgg?'<':'>') +" bulle)");
+    add("Règle déclenchée", d.rule);
+    add("— marges → seuil ROUGE —","");
+    add("Δalt vs vRed", marg(params.vRed-d.dalt," ft"));
+    add("tCPA vs tRed", d.conv?marg(params.tRed-d.tcpa," s"):"—");
+    add("dCPA vs dRed", d.conv?marg((params.dRed-d.dcpa)/NM," nm",2):"—");
+    add("dist vs bulle-œuf", marg(d.rEgg-e.dist_m," m"));
+    add("dist vs plancher", marg(params.floor_m-e.dist_m," m"));
+  } else add("Intrus","aucun");
+  add("OWN", fmt(st.own.spd,' kt')+" / "+fmt(st.own.alt,' ft'));
+  // Bandeau GRAS sous l'écran : la règle qui déclenche l'alerte en cours
+  const rb=document.getElementById('ruleBanner');
+  if(out.level>0 && idx>=0){ rb.textContent=(out.level===2?"🔴 ":"🟠 ")+diagnose(eng.own,eng.t[idx]).rule;
+    rb.style.color=out.level===2?"#f85149":"#e3b341"; }
+  else { rb.textContent="— pas d'alerte —"; rb.style.color="#5b6773"; }
+}
+
+/* CSV → repère EBBY, avec CADENCE RÉELLE (UTC Time) → replay temps réel (×speed) */
+function hms(s){ const m=/(\d{1,2}):(\d{2}):(\d{2})/.exec(s||""); return m?(+m[1]*3600+ +m[2]*60+ +m[3]):null; }
+function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
+  // G3X a DEUX lignes d'en-tête avec Latitude/Longitude (noms longs puis courts) → prendre la DERNIÈRE
+  // (noms courts : AltGPS/GndSpd/TRK) sinon alt/spd/trk restent introuvables (=0).
+  let hi=1; for(let k=0;k<Math.min(lines.length,6);k++){ if(/Latitude/i.test(lines[k])&&/Longitude/i.test(lines[k])) hi=k; }
+  const cols=lines[hi].split(',').map(s=>s.trim());
+  const idx=(names)=>cols.findIndex(c=>names.some(n=>c.toLowerCase()===n));
+  const iLat=idx(["latitude","lat"]),iLon=idx(["longitude","lon"]),iAlt=idx(["altgps","gps altitude","alt"]),
+        iSpd=idx(["gndspd","ground speed","gs"]),iTrk=idx(["trk","gps track","track","hdg"]),iT=idx(["utc time","time"]);
+  if(iLat<0||iLon<0) throw new Error("colonnes Lat/Lon introuvables");
+  const rows=[]; for(let k=hi+1;k<lines.length;k++){const c=lines[k].split(',');const la=parseFloat(c[iLat]),lo=parseFloat(c[iLon]);if(!isFinite(la)||!isFinite(lo))continue;
+    rows.push({lat:la,lon:lo,alt:parseFloat(c[iAlt])||0,spd:parseFloat(c[iSpd])||0,trk:parseFloat(c[iTrk])||0,ts:iT>=0?c[iT]:null});}
+  if(rows.length<2)throw new Error("CSV <2 points valides");
+  const t0=hms(rows[0].ts);
+  // Chaque échantillon porte son TEMPS RÉEL relatif (s depuis t0). Les timestamps sont
+  // IRRÉGULIERS (secondes dupliquées + trous : le boîtier n'enregistre qu'en vol) → on
+  // indexe par le temps réel (sampleCsv), jamais par une cadence uniforme (sinon smear).
+  const samples=rows.map((r,k)=>{const p=llToEN(r.lon,r.lat); let tt=hms(r.ts);
+    if(tt==null) tt=k*0.25; else { tt-=t0; if(tt<0)tt+=86400; }
+    return {t:tt,x:p.x,y:p.y,alt:r.alt,hdg:r.trk,spd:r.spd};});
+  // temps strictement croissant (au cas où) pour la recherche
+  for(let k=1;k<samples.length;k++) if(samples[k].t<=samples[k-1].t) samples[k].t=samples[k-1].t+1e-3;
+  return {samples, dur:samples[samples.length-1].t, t0};       // t0 = seconde UTC absolue du 1er point (align. réel)
+}
+function sampleCsv(d,t){const s=d.samples;
+  if(t<=s[0].t)return {x:s[0].x,y:s[0].y,alt:s[0].alt,hdg:s[0].hdg,spd:s[0].spd,vspd:0};
+  const last=s[s.length-1]; if(t>=last.t)return {x:last.x,y:last.y,alt:last.alt,hdg:last.hdg,spd:last.spd,vspd:0};
+  let lo=0,hi=s.length-1; while(hi-lo>1){const m=(lo+hi)>>1; if(s[m].t<=t)lo=m;else hi=m;}   // recherche binaire par temps réel
+  const a=s[lo],b=s[hi],span=(b.t-a.t)||1,f=(t-a.t)/span;
+  const vspd=(b.alt-a.alt)/span*60;   // fpm depuis la pente réelle
+  return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd,vspd};}
+
+/* Rejeu du LOG TRAFIC RÉEL du boîtier (ATCORE_TRF_*.csv v2) : own + intrus par ts. */
+function parseTrafficLog(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.length && !l.startsWith('#'));
+  if(!lines.length) throw new Error("fichier vide");
+  const hdr=lines[0].split(',').map(s=>s.trim().toLowerCase());
+  const ix=n=>hdr.indexOf(n);
+  const iTs=ix('ts_utc'),iOla=ix('own_lat'),iOlo=ix('own_lon'),iOa=ix('own_alt_ft'),iOh=ix('own_hdg'),iOs=ix('own_spd_kt'),
+        iIc=ix('icao24'),iCs=ix('callsign'),iLa=ix('lat'),iLo=ix('lon'),iA=ix('alt_ft'),iS=ix('spd_kt'),iH=ix('hdg'),iV=ix('vspd_fpm');
+  if(iTs<0||iOla<0||iLa<0) throw new Error("colonnes ATCORE_TRF attendues");
+  const hms=s=>{const m=/(\d{1,2}):(\d{2}):(\d{2})/.exec(s||"");return m?(+m[1]*3600+ +m[2]*60+ +m[3]):null;};
+  const bySec=new Map();
+  for(let k=1;k<lines.length;k++){ const c=lines[k].split(','); const sec=hms(c[iTs]); if(sec==null)continue;
+    if(!bySec.has(sec)) bySec.set(sec,{own:{lat:+c[iOla],lon:+c[iOlo],alt:+c[iOa],hdg:+c[iOh],spd:+c[iOs]},intr:[]});
+    bySec.get(sec).intr.push({cs:(c[iCs]||c[iIc]||"?").trim(),lat:+c[iLa],lon:+c[iLo],alt:+c[iA],hdg:+c[iH]||0,spd:+c[iS]||0,vspd:iV>=0?+c[iV]||0:0}); }
+  const secs=[...bySec.keys()].sort((a,b)=>a-b);
+  if(secs.length<2) throw new Error("<2 instants");
+  const t0=secs[0];
+  const snaps=secs.map(s=>{const S=bySec.get(s),op=llToEN(S.own.lon,S.own.lat);
+    return {t:s-t0, own:{x:op.x,y:op.y,alt:S.own.alt,hdg:S.own.hdg,spd:S.own.spd,vspd:0},
+      intr:S.intr.map(a=>{const p=llToEN(a.lon,a.lat);return {cs:a.cs,x:p.x,y:p.y,alt:a.alt,hdg:a.hdg,spd:a.spd,vspd:a.vspd};})};});
+  for(let i=0;i<snaps.length-1;i++){ const dtt=(snaps[i+1].t-snaps[i].t)||1; snaps[i].own.vspd=(snaps[i+1].own.alt-snaps[i].own.alt)/dtt*60; }
+  return {snaps, dur:snaps[snaps.length-1].t};
+}
+
+/* ── UI ─────────────────────────────────────────────────────────────────── */
+const $=(id)=>document.getElementById(id);
+const selScen=$('scenario');
+// Paire réelle EBBY embarquée (flights_default.js) — dispo sans file-picker
+const DEF=window.DEFAULT_FLIGHTS||null;
+if(DEF){const o=document.createElement('option');o.value="ebby";o.textContent="★ 2 vols réels EBBY 08/07 (FJFVB ↔ FJMLV)";selScen.appendChild(o);}
+if(DEF&&DEF.fjfvb16&&DEF.ooi44_16){const o=document.createElement('option');o.value="ebby16";o.textContent="★ CONFLIT réel EBBY 16/07 — FJFVB ↔ OOI44 (75 m)";selScen.appendChild(o);}
+if(DEF&&DEF.fjfvb21&&DEF.fjvud21){const o=document.createElement('option');o.value="ebby21";o.textContent="★ FORMATION réelle EBBY 21/07 — FJFVB ↔ FJVUD (16 m · test P1)";selScen.appendChild(o);}
+Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
+{const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
+function loadDefaultPair(){ if(!DEF)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb.csv); csvIntData=parseCsv(DEF.fjmlv.csv); }catch(e){ console.error("défaut CSV:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="2 vols réels EBBY (FJFVB own ↔ FJMLV)"; active.intCs="FJMLV";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
+function loadDefaultPair16(){ if(!DEF||!DEF.fjfvb16||!DEF.ooi44_16)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb16.csv); csvIntData=parseCsv(DEF.ooi44_16.csv); }catch(e){ console.error("conflit 16/07:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="CONFLIT réel EBBY 16/07 (FJFVB own ↔ OOI44)"; active.intCs="OOI44";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
+function loadDefaultPair21(){ if(!DEF||!DEF.fjfvb21||!DEF.fjvud21)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb21.csv); csvIntData=parseCsv(DEF.fjvud21.csv); }catch(e){ console.error("formation 21/07:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="FORMATION réelle EBBY 21/07 (FJFVB own ↔ FJVUD)"; active.intCs="FJVUD";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
+function syncAcSliders(){ if(active.csv||active.log)return;
+  $('ospd').value=active.own.spd;$('ospdv').textContent=active.own.spd;$('oalt').value=active.own.alt;$('oaltv').textContent=active.own.alt;
+  const i0=active.intr[0]; if(i0){$('ispd').value=i0.spd;$('ispdv').textContent=i0.spd;$('ialt').value=i0.alt;$('ialtv').textContent=i0.alt;} }
+selScen.onchange=()=>{ if(selScen.value==="ebby"){ loadDefaultPair(); }
+  else if(selScen.value==="ebby16"){ loadDefaultPair16(); }
+  else if(selScen.value==="ebby21"){ loadDefaultPair21(); }
+  else if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
+    active.dur=csvOwnData?Math.min(csvOwnData.dur,csvIntData?csvIntData.dur:csvOwnData.dur):60; }
+  else { active=clone(SCEN[selScen.value]); } simT=0;playing=false;$('play').textContent="▶ Play"; syncAcSliders(); };
+// Démarrage : la paire réelle EBBY si dispo, sinon face-à-face
+if(DEF && loadDefaultPair()){ selScen.value="ebby"; } else { selScen.value="headon"; active=clone(SCEN.headon); }
+$('play').onclick=(e)=>{ if(!actx&&window.AudioContext)actx=new AudioContext(); if(actx&&actx.state==="suspended")actx.resume();
+  playing=!playing;e.target.textContent=playing?"⏸ Pause":"▶ Play"; };
+$('reset').onclick=()=>{simT=0;playing=false;$('play').textContent="▶ Play";};
+$('scrub').oninput=(e)=>{simT=e.target.value/100*active.dur;};
+$('speed').oninput=(e)=>{speed=+e.target.value;$('spdv').textContent=speed;};
+$('range').oninput=(e)=>{rangeNm=+e.target.value;$('rngv').textContent=rangeNm;};
+$('lrange').oninput=(e)=>{liveNm=+e.target.value;$('lrngv').textContent=liveNm;};
+$('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.AudioContext)actx=new AudioContext();};
+$('egg').onchange=(e)=>showEgg=e.target.checked; $('vec').onchange=(e)=>showVec=e.target.checked; $('aip').onchange=(e)=>showAip=e.target.checked;
+$('grid').onchange=(e)=>showGrid=e.target.checked;
+$('map').onchange=(e)=>showMap=e.target.checked;
+$('autoz').onchange=(e)=>autoZoom=e.target.checked; $('trace').onchange=(e)=>showTrace=e.target.checked;
+$('e3d').onchange=(e)=>use3D=e.target.checked; $('ehy').onchange=(e)=>useHyst=e.target.checked; $('enoise').onchange=(e)=>useNoise=e.target.checked;
+$('edg').onchange=(e)=>useDowngrade=e.target.checked; $('etau').onchange=(e)=>useTau=e.target.checked;
+// sliders own / intrus (éditent le scénario courant, effet immédiat via forme fermée)
+$('ospd').oninput=(e)=>{active.own.spd=+e.target.value;$('ospdv').textContent=e.target.value;};
+$('oalt').oninput=(e)=>{active.own.alt=+e.target.value;$('oaltv').textContent=e.target.value;};
+$('ispd').oninput=(e)=>{active.intr.forEach(a=>a.spd=+e.target.value);$('ispdv').textContent=e.target.value;};
+$('ialt').oninput=(e)=>{active.intr.forEach(a=>a.alt=+e.target.value);$('ialtv').textContent=e.target.value;};
+function bindP(id,key,lab){const el=$(id);el.oninput=()=>{params[key]=+el.value;$(lab).textContent=el.value;};}
+bindP('pfwd','fwd_sec','fs');bindP('pfloor','floor_m','fl');bindP('pvred','vRed','vr');bindP('ptred','tRed','tr');
+bindP('pvorg','vOrg','vro');bindP('ptorg','tOrg','tro');
+$('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;$('dr').textContent=e.target.value;};
+$('pdorg').oninput=(e)=>{params.dOrg=+e.target.value*NM;$('dro').textContent=e.target.value;};
+$('resetP').onclick=()=>{params=acDefaultParams();pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;pvorg.value=500;vro.textContent=500;ptorg.value=45;tro.textContent=45;pdorg.value=0.6;dro.textContent="0.6";};
+$('csvOwn').onchange=(e)=>loadCsv(e.target.files[0],'own'); $('csvInt').onchange=(e)=>loadCsv(e.target.files[0],'int');
+$('trfLog').onchange=(e)=>loadTrf(e.target.files[0]);
+function loadTrf(file){ if(!file)return; const rd=new FileReader();
+  rd.onload=()=>{try{ logData=parseTrafficLog(rd.result);
+    active={csv:false,log:true,name:"Rejeu trafic réel ("+file.name+")",dur:logData.dur,own:null,intr:[]};
+    simT=0;playing=false;$('play').textContent="▶ Play";
+    $('trfInfo').textContent="Rejeu : "+logData.snaps.length+" instants sur "+logData.dur.toFixed(0)+" s. ▶ pour jouer.";
+  }catch(err){$('trfInfo').textContent="Erreur TRF: "+err.message;}}; rd.readAsText(file); }
+function loadCsv(file,which){ if(!file)return; const rd=new FileReader();
+  rd.onload=()=>{try{const d=parseCsv(rd.result); if(which==='own')csvOwnData=d;else csvIntData=d;
+    active=clone(SCEN.headon);active.csv=true;active.name="2 CSV croisés";active.dur=Math.min(csvOwnData?csvOwnData.dur:1e9,csvIntData?csvIntData.dur:1e9);
+    selScen.value="csv";simT=0;playing=false; $('csvInfo').textContent=(which==='own'?"OWN":"INTRUS")+" : "+d.samples.length+" pts";
+  }catch(err){$('csvInfo').textContent="Erreur CSV: "+err.message;}}; rd.readAsText(file); }
+
+syncAcSliders();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
