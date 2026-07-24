@@ -11,6 +11,7 @@ import ReplayPage from './pages/ReplayPage'
 import AdminPage from './pages/AdminPage'
 import LogbookPage from './pages/LogbookPage'
 import DiagPage from './pages/DiagPage'
+import DevPage from './pages/DevPage'
 import SelectClubPage from './pages/SelectClubPage'
 import { ClubProvider, useClub } from './contexts/ClubContext'
 
@@ -162,6 +163,13 @@ function AppLayout({ user, role, userClubId }) {
           <Route path="/diag" element={
             <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
               <DiagPage />
+            </RequireRole>
+          } />
+
+          {/* DEV — outils LTE + simulateur, super_admin only */}
+          <Route path="/dev" element={
+            <RequireRole user={user} role={role} allowed={['super_admin']}>
+              <DevPage />
             </RequireRole>
           } />
 

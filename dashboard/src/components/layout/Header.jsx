@@ -37,6 +37,9 @@ function getTabs(role) {
   if (role === 'admin' || role === 'super_admin') {
     tabs.push({ path: '/admin', label: 'ADMIN', icon: '⚙' })
   }
+  if (role === 'super_admin') {
+    tabs.push({ path: '/dev', label: 'DEV', icon: '🛠' })
+  }
   return tabs
 }
 
