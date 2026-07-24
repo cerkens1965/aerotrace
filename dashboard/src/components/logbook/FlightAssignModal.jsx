@@ -18,6 +18,9 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
+  // Édition d'un vol DÉJÀ validé (réattribution) vs première assignation.
+  const isEdit = !!flight.validated
+
   // Statut de vol = champ licence du profil (pas le rôle plateforme)
   // licence='pilot' → breveté → SOLO
   // licence='student' ou absent → en formation → instructor requis
@@ -101,7 +104,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 2, marginBottom: 6 }}>
-            ASSIGNATION VOL
+            {isEdit ? 'ÉDITER LE VOL' : 'ASSIGNATION VOL'}
           </div>
           <div style={{ color: '#0a0e1e', fontSize: 15, fontWeight: 700 }}>
             {flight.fileName || flight.id}
@@ -229,7 +232,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             cursor: canSave && !saving ? 'pointer' : 'not-allowed',
             letterSpacing: 0.5, transition: 'all 0.15s',
           }}>
-            {saving ? '…' : '✓ VALIDER LE VOL'}
+            {saving ? '…' : (isEdit ? '✓ ENREGISTRER' : '✓ VALIDER LE VOL')}
           </button>
         </div>
       </div>

@@ -105,6 +105,12 @@ const DEL_BTN = {
   color: 'rgba(239,68,68,0.85)', fontFamily: 'monospace', fontSize: 11,
   padding: '3px 9px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
 }
+// (édition) Ré-attribution d'un vol DÉJÀ validé — neutre, à côté de REPLAY.
+const EDIT_BTN = {
+  background: 'rgba(10,14,30,0.05)', border: '1px solid rgba(10,14,30,0.18)',
+  color: 'rgba(10,14,30,0.6)', fontFamily: 'monospace', fontSize: 11,
+  padding: '3px 9px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+}
 const DEL_CONFIRM_BTN = {
   ...DEL_BTN, background: '#ef4444', border: '1px solid #ef4444', color: '#fff', fontWeight: 700,
 }
@@ -250,7 +256,10 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                     {f.validated
-                      ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                      ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                        </span>
                       : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
                   </td>
                 </tr>
@@ -332,7 +341,12 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    {f.validated ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button> : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                    {f.validated
+                      ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                        </span>
+                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
                   </td>
                 </tr>
               ))}
@@ -492,7 +506,10 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
                 <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                   <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
                     {f.validated
-                      ? <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                      ? <>
+                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                        </>
                       : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
                     {canDelete && (
                       confirmDelId === f.id
