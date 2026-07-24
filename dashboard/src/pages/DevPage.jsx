@@ -4,7 +4,7 @@ import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage
 import { db, storage } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 
-// ─── DevPage — outils dev (super_admin) ──────────────────────────────────────
+// ─── DevPage — outils dev (admin + super_admin) ──────────────────────────────
 // Trois onglets :
 //  1. LTE DASHBOARD — le VRAI moniteur LTE (public/tools/lte-monitor/) en iframe
 //     plein écran. Charge un ATCORE_LTE_*.csv via son bouton « LOAD SD ».
@@ -164,7 +164,7 @@ export default function DevPage() {
         <TabBtn label="LTE DASHBOARD" active={tab === 'lte'} onClick={() => setTab('lte')} />
         <TabBtn label="SIMULATOR"     active={tab === 'sim'} onClick={() => setTab('sim')} />
         <TabBtn label="QUICK-CHECK"   active={tab === 'check'} onClick={() => setTab('check')} />
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: C.mid, fontFamily: C.mono, paddingRight: 4 }}>super_admin</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: C.mid, fontFamily: C.mono, paddingRight: 4 }}>admin</span>
       </div>
 
       {/* Contenu — les 2 iframes restent montées (display toggle) pour préserver l'état */}

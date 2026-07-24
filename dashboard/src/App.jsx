@@ -166,9 +166,9 @@ function AppLayout({ user, role, userClubId }) {
             </RequireRole>
           } />
 
-          {/* DEV — outils LTE + simulateur, super_admin only */}
+          {/* DEV — outils LTE + simulateur, admin + super_admin */}
           <Route path="/dev" element={
-            <RequireRole user={user} role={role} allowed={['super_admin']}>
+            <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
               <DevPage />
             </RequireRole>
           } />
