@@ -14,6 +14,27 @@ const ALT_MAX = 35000
 // CSS filter: black SVG → red #ef4444
 const SCHOOL_FILTER = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
 
+// Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
+// (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
+// `beacon_type` (STRING : JET, MOTORPLANE, HELICOPTER, UAV, GLIDER…) ; on le mappe
+// vers les mêmes SVG que le radar (public/icons/, monochromes recolorables au filter).
+const BEACON_ICON = {
+  GLIDER: 'glider', MOTOR_GLIDER: 'glider', SAILPLANE: 'glider',
+  TOW_PLANE: 'light_aircraft', DROP_PLANE: 'light_aircraft',
+  HELICOPTER: 'helicopter', ROTORCRAFT: 'helicopter',
+  PARACHUTE: 'parachute', SKYDIVER: 'parachute',
+  HANG_GLIDER: 'hand_glider', HANGGLIDER: 'hand_glider',
+  PARA_GLIDER: 'para_glider', PARAGLIDER: 'para_glider',
+  MOTORPLANE: 'light_aircraft', POWERED_AIRCRAFT: 'light_aircraft', ULTRALIGHT: 'light_aircraft',
+  JET: 'heavy_aircraft',
+  BALLOON: 'ballon', AIRSHIP: 'airship',
+  UAV: 'uav', DRONE: 'uav',
+  GYROCOPTER: 'gyrocopter',
+  STATIC_OBJECT: 'dot',
+  UNKNOWN: 'aircraft',
+}
+const iconForBeacon = (bt) => BEACON_ICON[(bt || '').toUpperCase()] || 'aircraft'
+
 const BASEMAPS = [
   { id: 'dataviz-light', label: 'Light' },
   { id: 'dataviz-dark',  label: 'Dark' },
@@ -225,7 +246,7 @@ export default function AerotraceMap({ flyTo = null }) {
       const el = document.createElement('div')
       el.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
-          <img src="/icons/VL3.svg" style="width:32px;height:32px;transform:rotate(${ac.course || 0}deg);transform-origin:center center;filter:${iconFilter};" />
+          <img src="/icons/${iconForBeacon(ac.beacon_type)}.svg" style="width:32px;height:32px;transform:rotate(${ac.course || 0}deg);transform-origin:center center;filter:${iconFilter};" />
           <div style="margin-top:2px;background:${labelBg};border:${labelBdr};border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;">
             <div style="font-size:10px;font-weight:700;color:${labelClr};">${ac.call_sign || ac.id}</div>
             <div style="font-size:9px;font-weight:400;color:${labelClr};">${ac.altitude || 0} ft</div>
