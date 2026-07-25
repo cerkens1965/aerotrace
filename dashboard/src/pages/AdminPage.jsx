@@ -55,6 +55,7 @@ const EMPTY_PILOT = {
 }
 const EMPTY_AIRCRAFT = {
   registration: '', callSign: '', typeDesig: '', icao24: '', homeBase: '',
+  ownership: 'club', ownerPilotId: '',   // 'club' = avion du club · 'owner' = privé (propriétaire = un pilote)
   photoUrl: '', photoStoragePath: '',
 }
 
@@ -403,7 +404,7 @@ function AircraftPhotoField({ form, setForm }) {
 }
 
 // ─── Aircraft form panel ──────────────────────────────────────────────────────
-function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit }) {
+function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, pilots = [] }) {
   return (
     <div style={{
       background: C.surface, border: `1px solid ${C.border}`,
@@ -441,6 +442,26 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit }
             onChange={v => setForm(p => ({ ...p, homeBase: v.toUpperCase() }))}
             placeholder="EBBY" maxLength={4} />
         </div>
+
+        <div>
+          <Label>OWNERSHIP</Label>
+          <Select
+            value={form.ownership || 'club'}
+            onChange={v => setForm(p => ({ ...p, ownership: v, ownerPilotId: v === 'club' ? '' : p.ownerPilotId }))}
+            options={[{ value: 'club', label: 'Club aircraft' }, { value: 'owner', label: 'Private (owner)' }]}
+          />
+        </div>
+        {form.ownership === 'owner' && (
+          <div>
+            <Label>OWNER (pilot)</Label>
+            <Select
+              value={form.ownerPilotId || ''}
+              onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
+              options={[{ value: '', label: 'Select owner…' },
+                ...pilots.map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))]}
+            />
+          </div>
+        )}
 
         <div style={{ gridColumn: '1/-1' }}>
           <AircraftPhotoField form={form} setForm={setForm} />
@@ -561,7 +582,10 @@ function PilotRow({ pilot, onEdit, onDelete }) {
   )
 }
 
-function AircraftRow({ ac, onEdit, onDelete }) {
+function AircraftRow({ ac, onEdit, onDelete, pilots = [] }) {
+  const isOwner = ac.ownership === 'owner'
+  const owner = isOwner ? pilots.find(p => p.id === ac.ownerPilotId) : null
+  const ownerName = owner ? `${owner.firstName} ${owner.lastName}` : (isOwner ? '—' : '')
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12,
@@ -585,11 +609,20 @@ function AircraftRow({ ac, onEdit, onDelete }) {
       )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
-          {ac.callSign || ac.registration}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
+            {ac.callSign || ac.registration}
+          </span>
+          <span style={{
+            fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+            padding: '2px 6px', borderRadius: 4,
+            background: isOwner ? C.blue10 : C.red10,
+            color: isOwner ? C.blue : C.red,
+            border: `1px solid ${isOwner ? C.blue : C.red}44`,
+          }}>{isOwner ? 'OWNER' : 'CLUB'}</span>
         </div>
         <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, marginTop: 3 }}>
-          {[ac.typeDesig, ac.homeBase, ac.icao24].filter(Boolean).join(' · ') || '—'}
+          {[isOwner ? `👤 ${ownerName}` : null, ac.typeDesig, ac.homeBase, ac.icao24].filter(Boolean).join(' · ') || '—'}
         </div>
       </div>
 
@@ -783,6 +816,8 @@ export default function AdminPage() {
         typeDesig:        aircraftForm.typeDesig,
         icao24:           aircraftForm.icao24,
         homeBase:         aircraftForm.homeBase,
+        ownership:        aircraftForm.ownership || 'club',
+        ownerPilotId:     aircraftForm.ownership === 'owner' ? (aircraftForm.ownerPilotId || '') : '',
         photoUrl:         aircraftForm.photoUrl || '',
         photoStoragePath: aircraftForm.photoStoragePath || '',
         clubId:           clubId,        // toujours le club courant
@@ -905,6 +940,7 @@ export default function AdminPage() {
               <AircraftForm
                 form={aircraftForm}
                 setForm={setAircraftForm}
+                pilots={pilots}
                 saving={saving}
                 error={error}
                 onSave={saveAircraft}
@@ -922,6 +958,7 @@ export default function AdminPage() {
             {aircraft.map(a => (
               <AircraftRow
                 key={a.id} ac={a}
+                pilots={pilots}
                 onEdit={openEditAircraft}
                 onDelete={deleteAircraft}
               />

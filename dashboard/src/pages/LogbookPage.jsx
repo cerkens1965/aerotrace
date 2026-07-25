@@ -118,6 +118,20 @@ const CARD_STYLE = { background: '#ffffff', borderRadius: 8, overflow: 'hidden' 
 
 // ─── PilotCard ────────────────────────────────────────────────────────────────
 
+// Badge propriété avion — CLUB (rouge, = highlight carte live) / OWNER (bleu).
+function OwnershipBadge({ ac }) {
+  const isOwner = ac?.ownership === 'owner'
+  return (
+    <span style={{
+      fontFamily: 'monospace', fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
+      padding: '2px 6px', borderRadius: 4,
+      background: isOwner ? 'rgba(96,165,250,0.10)' : 'rgba(239,68,68,0.10)',
+      color: isOwner ? '#3b82f6' : '#ef4444',
+      border: `1px solid ${isOwner ? 'rgba(96,165,250,0.35)' : 'rgba(239,68,68,0.35)'}`,
+    }}>{isOwner ? 'OWNER' : 'CLUB'}</span>
+  )
+}
+
 function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }) {
   const [open, setOpen] = useState(false)
 
@@ -296,8 +310,11 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
       <div onClick={() => setOpen(v => !v)} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr repeat(4, auto)', gap: 16, padding: '14px 20px', cursor: 'pointer', alignItems: 'center' }}>
         <div style={{ width: 42, height: 42, background: 'rgba(245,166,35,0.07)', border: '1px solid rgba(245,166,35,0.17)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>✈</div>
         <div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{ac.callSign || ac.registration}</div>
-          <div style={{ color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{[ac.typeDesig || ac.type, ac.icao24?.toUpperCase()].filter(Boolean).join(' · ')}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{ac.callSign || ac.registration}</span>
+            <OwnershipBadge ac={ac} />
+          </div>
+          <div style={{ color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{[ac.ownership === 'owner' ? `👤 ${getPilotName(pilots, ac.ownerPilotId)}` : null, ac.typeDesig || ac.type, ac.icao24?.toUpperCase()].filter(Boolean).join(' · ')}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
             {Object.entries(byType).map(([type, cnt]) => {
               const ft = FLIGHT_TYPES[type]

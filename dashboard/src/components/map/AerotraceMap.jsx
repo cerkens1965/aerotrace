@@ -13,6 +13,8 @@ const ALT_MAX = 35000
 
 // CSS filter: black SVG → red #ef4444
 const SCHOOL_FILTER = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
+// Avion du club = ROUGE (SCHOOL_FILTER) · avion PRIVÉ (propriétaire) = BLEU (même base, hue-rotate → bleu).
+const OWNER_FILTER  = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(190deg) brightness(103%)'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
@@ -126,7 +128,7 @@ export default function AerotraceMap({ flyTo = null }) {
   const markersRef = useRef({})
   const [mapBounds, setMapBounds] = useState(null)
   const traffic = useSafeSky(mapBounds)
-  const [schoolIcaos, setSchoolIcaos] = useState(new Set())
+  const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
   const [activeBasemap, setActiveBasemap] = useState('dataviz-light')
   const [visible, setVisible] = useState({ ctr: true, tma: true, danger: true, airports: true, traffic: true })
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
@@ -140,19 +142,19 @@ export default function AerotraceMap({ flyTo = null }) {
     map.current.flyTo({ center: [flyTo.lon, flyTo.lat], zoom: flyTo.zoom ?? 13, duration: 1200 })
   }, [flyTo, mapReady])
 
-  // School aircraft (highlight rouge sur la carte SafeSky) — filtré par clubId
-  // courant pour que super_admin voit la flotte du club sélectionné, pas tout.
+  // Flotte du club courant (highlight carte) : club = ROUGE, propriétaire = BLEU.
+  // Filtré par clubId pour que super_admin voie la flotte du club sélectionné.
   useEffect(() => {
-    if (!clubId) { setSchoolIcaos(new Set()); return }
+    if (!clubId) { setFleetOwn(new Map()); return }
     const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     getDocs(q)
       .then(snap => {
-        const icaos = new Set()
+        const m = new Map()
         snap.forEach(doc => {
-          const { icao24 } = doc.data()
-          if (icao24) icaos.add(icao24.toUpperCase())
+          const d = doc.data()
+          if (d.icao24) m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
         })
-        setSchoolIcaos(icaos)
+        setFleetOwn(m)
       })
       .catch(err => console.error('[AerotraceMap] aircraft load:', err))
   }, [clubId])
@@ -234,13 +236,16 @@ export default function AerotraceMap({ flyTo = null }) {
     const isDark = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
 
     filteredTraffic.forEach(ac => {
-      const isSchool = schoolIcaos.has((ac.id || '').toUpperCase())
+      const own      = fleetOwn.get((ac.id || '').toUpperCase())   // 'club' | 'owner' | undefined
+      const isFleet  = !!own
+      const isOwner  = own === 'owner'
+      const fleetClr = isOwner ? '#60a5fa' : '#ef4444'             // owner=bleu · club=rouge
 
-      const iconFilter = isSchool ? SCHOOL_FILTER : (isDark ? 'invert(1)' : 'none')
-      const labelClr   = isSchool ? '#ef4444' : (isDark ? '#fff' : '#111')
-      const labelBg    = isDark || isSchool ? 'rgba(0,0,0,0.72)' : 'rgba(255,255,255,0.65)'
-      const labelBdr   = isSchool
-        ? '1px solid rgba(239,68,68,0.5)'
+      const iconFilter = isFleet ? (isOwner ? OWNER_FILTER : SCHOOL_FILTER) : (isDark ? 'invert(1)' : 'none')
+      const labelClr   = isFleet ? fleetClr : (isDark ? '#fff' : '#111')
+      const labelBg    = isDark || isFleet ? 'rgba(0,0,0,0.72)' : 'rgba(255,255,255,0.65)'
+      const labelBdr   = isFleet
+        ? `1px solid ${isOwner ? 'rgba(96,165,250,0.5)' : 'rgba(239,68,68,0.5)'}`
         : (isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)')
 
       const el = document.createElement('div')
@@ -257,7 +262,7 @@ export default function AerotraceMap({ flyTo = null }) {
         .setLngLat([ac.longitude, ac.latitude])
         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${ac.call_sign || ac.id}</b>${isSchool ? ' <span style="color:#ef4444;">★ SCHOOL</span>' : ''}<br/>
+            <b>${ac.call_sign || ac.id}</b>${isFleet ? (isOwner ? ' <span style="color:#60a5fa;">● OWNER</span>' : ' <span style="color:#ef4444;">● CLUB</span>') : ''}<br/>
             Type: ${ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${ac.ground_speed} kt<br/>
@@ -267,7 +272,7 @@ export default function AerotraceMap({ flyTo = null }) {
         .addTo(map.current)
       markersRef.current[ac.id] = marker
     })
-  }, [filteredTraffic, visible.traffic, activeBasemap, schoolIcaos])
+  }, [filteredTraffic, visible.traffic, activeBasemap, fleetOwn])
 
   const panel = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
   const titleStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }

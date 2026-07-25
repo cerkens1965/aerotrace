@@ -154,8 +154,16 @@ function AircraftCard({ ac, expanded, onToggle, onLocate }) {
 
         {/* Registration + type */}
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: C.mono, fontSize: 15, fontWeight: 700, color: C.text }}>
-            {ac.callSign || ac.registration}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontFamily: C.mono, fontSize: 15, fontWeight: 700, color: C.text }}>
+              {ac.callSign || ac.registration}
+            </span>
+            <span style={{
+              fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 6px', borderRadius: 4,
+              background: ac.ownership === 'owner' ? 'rgba(96,165,250,0.12)' : 'rgba(239,68,68,0.12)',
+              color: ac.ownership === 'owner' ? '#60a5fa' : '#ef4444',
+              border: `1px solid ${ac.ownership === 'owner' ? 'rgba(96,165,250,0.4)' : 'rgba(239,68,68,0.4)'}`,
+            }}>{ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}</span>
           </div>
           <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid, marginTop: 2 }}>
             {ac.typeDesig || ac.type || '—'}
