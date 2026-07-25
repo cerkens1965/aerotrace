@@ -159,7 +159,6 @@ function AircraftCard({ ac, expanded, onToggle, onLocate }) {
           </div>
           <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid, marginTop: 2 }}>
             {ac.typeDesig || ac.type || '—'}
-            {ac.callSign && ac.registration !== ac.callSign ? ` · ${ac.registration}` : ''}
           </div>
         </div>
 

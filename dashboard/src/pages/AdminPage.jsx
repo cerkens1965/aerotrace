@@ -349,7 +349,7 @@ function AircraftPhotoField({ form, setForm }) {
     setErr(''); setUploading(true)
     try {
       const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase()
-      const reg  = (form.registration || 'unknown').replace(/[^a-zA-Z0-9-]/g, '_')
+      const reg  = (form.callSign || 'unknown').replace(/[^a-zA-Z0-9-]/g, '_')
       const path = `aircraft_photos/${reg}_${Date.now()}.${ext}`
       const r    = storageRef(storage, path)
       await uploadBytes(r, file)
@@ -415,18 +415,11 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit }
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
-          <Label>REGISTRATION</Label>
-          <Input value={form.registration}
-            onChange={v => setForm(p => ({ ...p, registration: v.toUpperCase() }))}
-            placeholder="OO-VBY" />
-        </div>
-        <div>
-          <Label>CALL SIGN (radio)</Label>
+          <Label>CALL SIGN</Label>
           <Input value={form.callSign}
             onChange={v => setForm(p => ({ ...p, callSign: v.toUpperCase() }))}
-            placeholder="VICTOR BRAVO YANKEE" />
+            placeholder="FJFVB" />
         </div>
-
         <div>
           <Label>TYPE DESIGNATOR (ICAO)</Label>
           <Select
@@ -596,10 +589,7 @@ function AircraftRow({ ac, onEdit, onDelete }) {
           {ac.callSign || ac.registration}
         </div>
         <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, marginTop: 3 }}>
-          {ac.registration}
-          {ac.typeDesig && ac.typeDesig !== ac.callSign ? ` · ${ac.typeDesig}` : ''}
-          {ac.homeBase ? ` · ${ac.homeBase}` : ''}
-          {ac.icao24   ? ` · ${ac.icao24}`   : ''}
+          {[ac.typeDesig, ac.homeBase, ac.icao24].filter(Boolean).join(' · ') || '—'}
         </div>
       </div>
 
@@ -681,7 +671,7 @@ export default function AdminPage() {
       const inviteDocs   = iv.docs.map(d => ({ id: d.id, ...d.data() }))
       const memberDocs   = us.docs.map(d => ({ id: d.id, ...d.data() }))
       pilotDocs.sort((a, b)    => (a.lastName     || '').localeCompare(b.lastName     || ''))
-      aircraftDocs.sort((a, b) => (a.registration || '').localeCompare(b.registration || ''))
+      aircraftDocs.sort((a, b) => ((a.callSign || a.registration || '')).localeCompare(b.callSign || b.registration || ''))
       inviteDocs.sort((a, b)   => (a.email        || '').localeCompare(b.email        || ''))
       memberDocs.sort((a, b)   => (a.email        || '').localeCompare(b.email        || ''))
       setPilots(pilotDocs)
@@ -782,12 +772,13 @@ export default function AdminPage() {
   const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...EMPTY_AIRCRAFT, ...a }); setError('') }
 
   const saveAircraft = async () => {
-    if (!aircraftForm.registration) return setError('Registration required')
+    if (!aircraftForm.callSign) return setError('Call sign required')
     if (!clubId) return setError('No club context — please select a club first')
     setSaving(true); setError('')
     try {
       const data = {
-        registration:     aircraftForm.registration,
+        // callSign = identifiant canonique. registration mirroré (legacy, retiré plus tard).
+        registration:     aircraftForm.callSign,
         callSign:         aircraftForm.callSign,
         typeDesig:        aircraftForm.typeDesig,
         icao24:           aircraftForm.icao24,
@@ -810,7 +801,7 @@ export default function AdminPage() {
   }
 
   const deleteAircraft = async (a) => {
-    if (!window.confirm(`Archive aircraft ${a.registration}?`)) return
+    if (!window.confirm(`Archive aircraft ${a.callSign || a.registration}?`)) return
     await updateDoc(doc(db, 'aircraft', a.id), { archived: true, updatedAt: serverTimestamp() })
     setAircraft(prev => prev.filter(x => x.id !== a.id))
   }

@@ -185,7 +185,7 @@ function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) 
         <span style={lbl}>AÉRONEF</span>
         <select value={aircraftIdent} onChange={e => setAircraftIdent(e.target.value)} style={sel}>
           <option value="">Sélectionner…</option>
-          {aircraft.map(a => <option key={a.id} value={a.registration}>{a.callSign || a.registration} — {a.typeDesig || a.type}</option>)}
+          {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
         </select>
       </div>
       <div style={{ marginBottom: 10 }}>

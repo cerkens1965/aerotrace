@@ -9,7 +9,13 @@ import { db } from '../../firebase/config'
 import { formatDate, formatDuration, deriveFlightType, FLIGHT_TYPES } from '../../utils/logbookUtils'
 
 export default function FlightAssignModal({ flight, pilots, aircraft, onSave, onClose }) {
-  const [aircraftIdent,     setAircraftIdent]     = useState(flight.aircraftIdent || '')
+  // callSign = identifiant canonique. Résout un aircraftIdent legacy (ancienne registration
+  // type "59DWG") vers le callSign de l'avion ("FJFVB") pour la pré-sélection.
+  const [aircraftIdent, setAircraftIdent] = useState(() => {
+    const cur = flight.aircraftIdent || ''
+    const a = aircraft.find(x => x.callSign === cur || x.registration === cur)
+    return a ? (a.callSign || a.registration) : cur
+  })
   const [pilotId,           setPilotId]           = useState(flight.pilotId       || '')
   const [instructorId,      setInstructorId]      = useState(flight.instructorId  || '')
   const [instructorOnboard, setInstructorOnboard] = useState(
@@ -121,12 +127,11 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
           <label style={lbl}>AÉRONEF</label>
           <select value={aircraftIdent} onChange={e => setAircraftIdent(e.target.value)} style={sel}>
             <option value="">Sélectionner un avion…</option>
-            {aircraft.map(a => (
-              <option key={a.id} value={a.registration}>
-                {a.callSign || a.registration} — {a.typeDesig || a.type}
-                {a.callSign && a.callSign !== a.registration ? ` (${a.registration})` : ''}
+            {aircraft.map(a => { const cs = a.callSign || a.registration; return (
+              <option key={a.id} value={cs}>
+                {cs} — {a.typeDesig || a.type}
               </option>
-            ))}
+            )})}
           </select>
         </div>
 

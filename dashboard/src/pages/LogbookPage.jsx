@@ -281,7 +281,10 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
 function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
   const [open, setOpen] = useState(false)
 
-  const acFlights = useMemo(() => sortByDateDesc(flights.filter(f => f.aircraftIdent === ac.registration)), [flights, ac.registration])
+  const acFlights = useMemo(() => {
+    const ids = [ac.callSign, ac.registration].filter(Boolean)   // callSign canonique + registration legacy
+    return sortByDateDesc(flights.filter(f => ids.includes(f.aircraftIdent)))
+  }, [flights, ac.callSign, ac.registration])
   const total = sumDuration(acFlights)
   const last  = acFlights[0]
   const lastPilot = last?.pilotId ? getPilotName(pilots, last.pilotId) : null
@@ -294,7 +297,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
         <div style={{ width: 42, height: 42, background: 'rgba(245,166,35,0.07)', border: '1px solid rgba(245,166,35,0.17)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>✈</div>
         <div>
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{ac.callSign || ac.registration}</div>
-          <div style={{ color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{[ac.registration, ac.typeDesig || ac.type, ac.icao24?.toUpperCase()].filter(Boolean).join(' · ')}</div>
+          <div style={{ color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{[ac.typeDesig || ac.type, ac.icao24?.toUpperCase()].filter(Boolean).join(' · ')}</div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
             {Object.entries(byType).map(([type, cnt]) => {
               const ft = FLIGHT_TYPES[type]
@@ -385,7 +388,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     let list = [...flights]
     if (filterPilot)    list = list.filter(f => f.pilotId === filterPilot)
     if (filterInstr)    list = list.filter(f => f.instructorId === filterInstr)
-    if (filterAircraft) list = list.filter(f => f.aircraftIdent === filterAircraft)
+    if (filterAircraft) list = list.filter(f => acLabel(f.aircraftIdent) === filterAircraft)   // résout legacy 59DWG -> callSign
     if (filterType)     list = list.filter(f => f.flightType === filterType)
     if (filterStatus === 'validated') list = list.filter(f =>  f.validated)
     if (filterStatus === 'pending')   list = list.filter(f => !f.validated)
@@ -399,7 +402,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
       return 0
     })
     return list
-  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, sortKey, sortDir])
+  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, sortKey, sortDir, acLabel])
 
   const toggleSort = key => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -433,7 +436,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
         </select>
         <select value={filterAircraft} onChange={e => setFilterAircraft(e.target.value)} style={selectStyle}>
           <option value="">Tous les avions</option>
-          {aircraft.map(a => <option key={a.id} value={a.registration}>{a.registration} — {a.type}</option>)}
+          {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
         </select>
         <select value={filterType} onChange={e => setFilterType(e.target.value)} style={selectStyle}>
           <option value="">Tous types</option>
@@ -546,9 +549,16 @@ export default function LogbookPage({ role }) {
 
   // Affichage avion = indicatif (callSign) si déclaré, sinon immat. f.aircraftIdent
   // reste la clé (filtre/tri) ; partagé avec FlightMatrix et les cartes.
+  // callSign = identifiant canonique. Résout un aircraftIdent (callSign OU ancienne
+  // registration legacy type "59DWG") vers le callSign affiché (ex "FJFVB").
   const acLabel = useMemo(() => {
-    const byReg = new Map(aircraft.map(a => [a.registration, a.callSign]))
-    return reg => (reg ? (byReg.get(reg) || reg) : '—')
+    const byIdent = new Map()
+    aircraft.forEach(a => {
+      const cs = a.callSign || a.registration
+      if (a.registration) byIdent.set(a.registration, cs)
+      if (a.callSign)     byIdent.set(a.callSign, cs)
+    })
+    return ident => (ident ? (byIdent.get(ident) || ident) : '—')
   }, [aircraft])
 
   // Charge pilots/aircraft/flights scopés sur le club courant.
@@ -637,7 +647,8 @@ export default function LogbookPage({ role }) {
 
   const sortedAircraft = useMemo(() => {
     const withStats = aircraft.map(ac => {
-      const acFlights = flights.filter(f => f.aircraftIdent === ac.registration)
+      const ids = [ac.callSign, ac.registration].filter(Boolean)   // callSign canonique + registration legacy
+      const acFlights = flights.filter(f => ids.includes(f.aircraftIdent))
       const last = acFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
       return { ...ac, _totalSecs: acFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
