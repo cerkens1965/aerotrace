@@ -35,6 +35,7 @@ function getTabs(role) {
     tabs.push(        { path: '/logbook', label: 'LOGBOOK',   icon: '📋' })
   }
   if (role === 'admin' || role === 'super_admin') {
+    tabs.push({ path: '/fleet', label: 'FLEET', icon: '📡' })   // état firmware boîtiers/écrans
     tabs.push({ path: '/admin', label: 'ADMIN', icon: '⚙' })
     tabs.push({ path: '/dev',   label: 'DEV',   icon: '🛠' })   // DEV = admin + super_admin
   }

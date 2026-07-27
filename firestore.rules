@@ -91,5 +91,14 @@ service cloud.firestore {
       allow update: if isInstructorOrAdmin();
       allow delete: if isAdmin();
     }
+
+    // ── Devices (boîtiers ATC + écran ATV) — état firmware de la flotte ──────────
+    // doc id = boxId (MAC court). Écrit par le BOÎTIER pendant ses sessions WiFi
+    // (auth anon, comme /flights) → version courante, état OTA, lien callSign.
+    // Lu par le dashboard (FleetPage). Un admin peut éditer (lien callSign manuel).
+    match /devices/{boxId} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn();
+    }
   }
 }

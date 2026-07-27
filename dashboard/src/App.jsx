@@ -12,6 +12,7 @@ import AdminPage from './pages/AdminPage'
 import LogbookPage from './pages/LogbookPage'
 import DiagPage from './pages/DiagPage'
 import DevPage from './pages/DevPage'
+import FleetPage from './pages/FleetPage'
 import SelectClubPage from './pages/SelectClubPage'
 import { ClubProvider, useClub } from './contexts/ClubContext'
 
@@ -170,6 +171,12 @@ function AppLayout({ user, role, userClubId }) {
           <Route path="/dev" element={
             <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
               <DevPage />
+            </RequireRole>
+          } />
+          {/* FLEET — état firmware des boîtiers/écrans, admin + super_admin */}
+          <Route path="/fleet" element={
+            <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
+              <FleetPage />
             </RequireRole>
           } />
 
