@@ -110,6 +110,7 @@ export default function DevPage() {
   const [lte, setLte] = useState(null)      // stats LTE parsées
   const [busy, setBusy] = useState('')      // message d'état
   const fileRef = useRef(null)
+  const lteFrameRef = useRef(null)          // iframe LTE Dashboard (même origine → postMessage)
 
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
@@ -156,6 +157,21 @@ export default function DevPage() {
     } catch (e) { setBusy(e.message) }
   }
 
+  // Balance le CSV LTE d'un vol vers le LTE Dashboard (iframe même origine) pour étude approfondie.
+  const studyLte = async (f) => {
+    setBusy('Envoi LTE → dashboard…')
+    try {
+      const url = await getDownloadURL(storageRef(storage, `flights_lte/${fidOf(f)}.csv`))
+      const txt = await (await fetch(url)).text()
+      setBusy(''); setTab('lte')
+      // l'iframe reste montée (display toggle) → déjà chargée & à l'écoute ; petit délai de sûreté.
+      setTimeout(() => lteFrameRef.current?.contentWindow?.postMessage(
+        { type: 'aerotrace-lte-csv', name: `${fidOf(f)}.csv`, text: txt }, window.location.origin), 80)
+    } catch (e) {
+      setBusy(e.code === 'storage/object-not-found' ? 'Aucun fichier LTE — uploade-le d’abord.' : e.message)
+    }
+  }
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, color: C.text }}>
       {/* Barre d'onglets */}
@@ -170,7 +186,7 @@ export default function DevPage() {
       {/* Contenu — les 2 iframes restent montées (display toggle) pour préserver l'état */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <div style={{ position: 'absolute', inset: 0, display: tab === 'lte' ? 'block' : 'none' }}>
-          <iframe title="LTE Dashboard" src="/tools/lte-monitor/index.html" style={FRAME} />
+          <iframe ref={lteFrameRef} title="LTE Dashboard" src="/tools/lte-monitor/index.html" style={FRAME} />
         </div>
         <div style={{ position: 'absolute', inset: 0, display: tab === 'sim' ? 'block' : 'none' }}>
           <iframe title="Alert Simulator" src="/tools/altsim/index.html" style={FRAME} />
@@ -179,7 +195,7 @@ export default function DevPage() {
           <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '20px 24px' }}>
             <QuickCheck
               C={C} loading={loading} clubId={clubId} flights={flights} sel={sel} lte={lte} busy={busy}
-              fidOf={fidOf} download={download} analyzeLte={analyzeLte} uploadLte={uploadLte} fileRef={fileRef}
+              fidOf={fidOf} download={download} analyzeLte={analyzeLte} uploadLte={uploadLte} studyLte={studyLte} fileRef={fileRef}
             />
           </div>
         )}
@@ -189,7 +205,7 @@ export default function DevPage() {
 }
 
 // ─── QUICK-CHECK — l'outil léger d'origine (liste vols + check LTE express) ────
-function QuickCheck({ C, loading, clubId, flights, sel, lte, busy, fidOf, download, analyzeLte, uploadLte, fileRef }) {
+function QuickCheck({ C, loading, clubId, flights, sel, lte, busy, fidOf, download, analyzeLte, uploadLte, studyLte, fileRef }) {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
@@ -248,6 +264,8 @@ function QuickCheck({ C, loading, clubId, flights, sel, lte, busy, fidOf, downlo
               title="Télécharger le CSV vol (chargeable dans le simulateur)"
               style={btn(C.text, '#fff')}>CSV → SIMU</button>
             <button onClick={() => analyzeLte(f)} style={btn('transparent', C.text, C.border)}>CHECK LTE</button>
+            <button onClick={() => studyLte(f)} title="Charger ce vol dans le LTE Dashboard (étude approfondie)"
+              style={btn('rgba(96,165,250,0.12)', '#2563eb', 'rgba(96,165,250,0.35)')}>→ LTE DASH</button>
             <label style={{ ...btnStyle('transparent', C.mid, C.border), cursor: 'pointer' }}>
               UPLOAD LTE
               <input type="file" accept=".csv" ref={fileRef} style={{ display: 'none' }}

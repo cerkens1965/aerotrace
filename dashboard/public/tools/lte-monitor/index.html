@@ -3519,10 +3519,14 @@ function parseAtCoreLteCSV(text) {
 }
 
 async function loadFromSDFile(file) {
-  const text   = await file.text();
+  loadLteText(await file.text(), file.name);
+}
+
+// Charge un CSV LTE depuis du TEXTE (fichier OU message du dashboard parent).
+function loadLteText(text, name = 'flight.csv') {
   const frames = parseAtCoreLteCSV(text);
   if (frames.length === 0) {
-    alert(`Aucune frame valide dans ${file.name}`);
+    alert(`Aucune frame valide dans ${name}`);
     return;
   }
 
@@ -3562,15 +3566,24 @@ async function loadFromSDFile(file) {
   const badge = document.getElementById('demo-badge');
   if (badge) {
     badge.style.display   = '';
-    badge.textContent     = `REPLAY · ${file.name}`;
+    badge.textContent     = `REPLAY · ${name}`;
   }
   const conn = document.getElementById('status-conn');
   if (conn) {
     conn.dataset.state                        = 'ok';
     conn.querySelector('span:last-child').textContent = 'Replay';
   }
-  console.log(`[SD] Chargé ${frames.length} frames depuis ${file.name} (${errCount} erreurs)`);
+  console.log(`[SD] Chargé ${frames.length} frames depuis ${name} (${errCount} erreurs)`);
 }
+
+// Réception d'un CSV LTE poussé par le dashboard parent (même origine) → étude approfondie.
+window.addEventListener('message', ev => {
+  const d = ev.data;
+  if (d && d.type === 'aerotrace-lte-csv' && typeof d.text === 'string') {
+    try { loadLteText(d.text, d.name || 'flight.csv'); }
+    catch (err) { console.error('[MSG] LTE load error:', err); }
+  }
+});
 
 /* Wire le bouton LOAD SD + drag-and-drop carte */
 document.addEventListener('DOMContentLoaded', () => {
