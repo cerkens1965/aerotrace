@@ -75,26 +75,16 @@ export default function FleetPage() {
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
     setLoading(true)
-    // Le boîtier ne connaît PAS le doc-id Firestore du club (son g_club_id est un legacy
-    // dormant type "EBBY-01") → on ne filtre PAS /devices par clubId. On charge tous les
-    // devices et on garde ceux dont le callSign/icao24 appartient à la flotte du club (club
-    // résolu par l'immat, comme le reste du dashboard). Fallback : clubId qui matche.
+    // (2026-07-28, demande Christophe) PAS DE FILTRE : on affiche TOUS les boîtiers
+    // remontés dans /devices, même ceux à immat placeholder (TBD..) ou pas encore
+    // rattachés à un avion du club. Le filtrage par club viendra plus tard. Les avions
+    // sont quand même chargés pour résoudre le callSign d'affichage (callSignOf).
     Promise.all([
       getDocs(collection(db, 'devices')),
       getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
     ]).then(([ds, as]) => {
       const acList = as.docs.map(d => ({ id: d.id, ...d.data() }))
-      const csSet = new Set(), icaoSet = new Set()
-      acList.forEach(a => {
-        if (a.callSign)     csSet.add(a.callSign.toUpperCase())
-        if (a.registration) csSet.add(a.registration.toUpperCase())
-        if (a.icao24)       icaoSet.add(a.icao24.toUpperCase())
-      })
       const devs = ds.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter(dv =>
-          (dv.callSign && csSet.has(dv.callSign.toUpperCase())) ||
-          (dv.icao24   && icaoSet.has(dv.icao24.toUpperCase())) ||
-          dv.clubId === clubId)
         .sort((a, b) => (a.callSign || a.boxId || a.id).localeCompare(b.callSign || b.boxId || b.id))
       setDevices(devs)
       setAircraft(acList)
