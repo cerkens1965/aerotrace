@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
 import { httpsCallable } from 'firebase/functions'
-import { auth, functions } from './firebase/config'
+import { doc, getDoc } from 'firebase/firestore'
+import { auth, functions, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
 import Header from './components/layout/Header'
 import LivePage from './pages/LivePage'
@@ -70,10 +71,22 @@ export default function App() {
           setRole(data?.role ?? 'user')
           setUserClubId(data?.clubId ?? '')
         } catch (err) {
-          console.error('[App] claimAccess failed:', err)
-          setAuthorized(false)
-          setRole('user')
-          setUserClubId('')
+          // REPLI (résilience) : si la Cloud Function est indisponible (billing coupé,
+          // panne, cold-start KO), on NE verrouille PAS tout le monde. On lit le doc
+          // /users directement : un utilisateur DÉJÀ provisionné (super_admin ou clubId)
+          // garde l'accès. Le provisioning d'un NOUVEL invité, lui, exige la fonction.
+          console.warn('[App] claimAccess indispo → repli lecture /users:', err?.message || err)
+          try {
+            const snap = await getDoc(doc(db, 'users', currentUser.uid))
+            const u = snap.exists() ? snap.data() : null
+            const ok = !!u && (u.role === 'super_admin' || !!u.clubId)
+            setAuthorized(ok)
+            setRole(u?.role ?? 'user')
+            setUserClubId(u?.clubId ?? '')
+          } catch (e2) {
+            console.error('[App] repli /users échoué:', e2)
+            setAuthorized(false); setRole('user'); setUserClubId('')
+          }
         }
       } else {
         setAuthorized(false)
