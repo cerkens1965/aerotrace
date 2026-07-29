@@ -568,9 +568,9 @@ async function runEmnifySync(appToken) {
   //    par le NOM de l'endpoint EMnify qui contient le boxId (ex "ATC-CE276D (FJFVB)")
   //    → la conso remonte AVANT même que les boîtiers soient en v105.
   const devSnap = await db.collection('devices').get()
-  const fleet = []   // { iccid, boxId, ref }
+  const fleet = []   // { iccid, boxId, callSign, ref }
   devSnap.forEach(d => {
-    fleet.push({ iccid: String(d.data().iccid || '').replace(/\D/g, ''), boxId: d.id, ref: d.ref })
+    fleet.push({ iccid: String(d.data().iccid || '').replace(/\D/g, ''), boxId: d.id, callSign: d.data().callSign || '', ref: d.ref })
   })
   const withIccid = fleet.filter(f => f.iccid).length
 
@@ -591,7 +591,7 @@ async function runEmnifySync(appToken) {
   const todayStr = new Date().toISOString().slice(0, 10)   // YYYY-MM-DD (UTC)
   const year = todayStr.slice(0, 4)
   let loggedSample = false
-  let matched = 0, currency = 'EUR'
+  let matched = 0, renamed = 0, currency = 'EUR'
   const tot = { monthMB: 0, monthCost: 0, lastMonthMB: 0, lastMonthCost: 0, lastDayMB: 0, yearMB: 0, overallMB: 0 }
   const batch = db.batch()
   for (const ep of endpoints) {
@@ -603,6 +603,18 @@ async function runEmnifySync(appToken) {
     matched++
 
     const statusName = ep?.sim?.status?.description || ep?.status?.description || ''
+
+    // Pousse l'identité boîtier → nom de la SIM EMnify : "ATC-<boxId> (<immat>)".
+    // Idempotent (PATCH seulement si différent) ; garde le boxId dans le nom (matching futur).
+    const desiredName = `ATC-${box.boxId}${box.callSign ? ` (${box.callSign})` : ''}`
+    if (ep.name !== desiredName) {
+      try {
+        const pr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ name: desiredName }) })
+        if (pr.ok) { renamed++; console.log(`[emnify] rename ${ep.id} "${ep.name}" → "${desiredName}"`) }
+        else console.warn(`[emnify] rename ${ep.id} → ${pr.status}`)
+      } catch (e) { console.warn('[emnify] rename err', ep.id, e.message) }
+    }
+
     let cur = null, last = null
     try {
       const sr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}/stats`, { headers: H })
@@ -635,7 +647,7 @@ async function runEmnifySync(appToken) {
       yearMB: daily.yearMB, overallMB: daily.overallMB,
       simStatus: statusName,
       emnifyEndpointId: ep.id,
-      emnifyName: ep.name || '',
+      emnifyName: desiredName,
       dataUsageUpdatedAt: FieldValue.serverTimestamp(),
     }, { merge: true })
   }
@@ -659,7 +671,7 @@ async function runEmnifySync(appToken) {
   }, { merge: true })
 
   await batch.commit()
-  const summary = { endpoints: endpoints.length, matched,
+  const summary = { endpoints: endpoints.length, matched, renamed,
     monthMB: Math.round(tot.monthMB * 10) / 10, monthCost: Math.round(tot.monthCost * 100) / 100,
     yearMB: Math.round(tot.yearMB * 10) / 10, overallMB: Math.round(tot.overallMB * 10) / 10,
     lastDayMB: Math.round(tot.lastDayMB * 10) / 10 }

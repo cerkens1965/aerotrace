@@ -61,6 +61,13 @@ confirmé à l'usage.)
   Donc € = mois courant/précédent ; année/overall = volume MB seulement (lu en direct, rien cumulé chez nous).
 - (Autre utile : `GET /endpoint/{id}/connectivity` = localisation/opérateur.)
 
+## 6. Push identité boîtier → nom SIM EMnify (écriture)
+
+`PATCH /api/v1/endpoint/{id}` body `{"name":"ATC-<boxId> (<immat>)"}` → **204**. `runEmnifySync`
+renomme chaque SIM matchée en **`ATC-<boxId> (<callSign de /devices>)`** (idempotent : PATCH seulement
+si différent ; garde le boxId dans le nom → matching futur). → l'immat change côté boîtier (P1) et le
+label EMnify suit au sync suivant. Validé 2026-07-29 (3 SIM renommées, ex `ATC-xxxxxx` → `ATC-E61D22 (FJVUD)`).
+
 ## 4. Côté AeroTrace
 
 - **Secret** Firebase : `EMNIFY_APP_TOKEN` (`firebase functions:secrets:set EMNIFY_APP_TOKEN`).
