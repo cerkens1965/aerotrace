@@ -58,20 +58,28 @@ function fmtSeen(v) {
   return 'just now'
 }
 
-// Badge version : vert si >= publiée, ambre (→ cible) si en retard, gris si inconnue.
+// Badge version : petit ✓ vert si à jour, pastille ambre « → vN » si en retard,
+// rien (version seule) si la version publiée est inconnue.
 function VerBadge({ cur, curStr, latest }) {
-  if (cur == null) return <span style={{ color: C.low, fontFamily: C.mono, fontSize: 11 }}>— unknown</span>
+  if (cur == null) return <span style={{ color: C.low, fontFamily: C.mono, fontSize: 11 }}>—</span>
   const known = typeof latest === 'number'
   const upToDate = known && cur >= latest
-  const col = !known ? C.mid : upToDate ? C.green : C.amber
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: C.text }}>{curStr || `v${cur}`}</span>
-      <span style={{
-        fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
-        padding: '2px 6px', borderRadius: 4,
-        background: `${col}1a`, color: col, border: `1px solid ${col}55`,
-      }}>{!known ? '?' : upToDate ? 'UP TO DATE' : `→ v${latest}`}</span>
+      {known && (upToDate ? (
+        <span title={`à jour (v${latest})`} style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 15, height: 15, borderRadius: '50%', flex: '0 0 auto',
+          background: C.green, color: '#fff', fontSize: 10, fontWeight: 900, lineHeight: 1,
+        }}>✓</span>
+      ) : (
+        <span title={`mise à jour dispo : v${latest}`} style={{
+          fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+          padding: '2px 6px', borderRadius: 4,
+          background: `${C.amber}1a`, color: C.amber, border: `1px solid ${C.amber}55`,
+        }}>→ v{latest}</span>
+      ))}
     </span>
   )
 }
@@ -270,6 +278,10 @@ export default function FleetPage() {
             </div>
             {devices.map(dev => {
               const ota = OTA_LABEL[dev.otaState] || OTA_LABEL.idle
+              // Version ATV publiée : par tag écran si connu, sinon la + haute des tags ATV
+              // publiés (tous les écrans partagent le même train VIEW_VERSION) → plus de « ? ».
+              const atvNums = ATV_TAGS.map(t => published[`atv_${t}`]).filter(v => typeof v === 'number')
+              const atvLatest = published[`atv_${dev.atvTag}`] ?? (atvNums.length ? Math.max(...atvNums) : undefined)
               return (
                 <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
                   <div>
@@ -281,7 +293,7 @@ export default function FleetPage() {
                     {callSignOf(dev)} <span style={{ fontSize: 10, opacity: 0.6 }}>✎</span>
                   </div>
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
-                  <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion != null ? `v${dev.atvVersion}` : null} latest={published[`atv_${dev.atvTag}`]} />
+                  <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion ? `v${dev.atvVersion}` : null} latest={atvLatest} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
                   <div title={[
                         dev.iccid ? `ICCID ${dev.iccid}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'non lié à une SIM'),
