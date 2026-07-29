@@ -488,6 +488,34 @@ exports.claimAccess = onCall({ region: 'europe-west1' }, async (req) => {
 })
 
 // ============================================================
+// (v109) reportDevice — le boîtier POST son état firmware/identité en 1 SEUL TLS (pas de token
+// Firebase Auth) → tient avec le BLE connecté sur WROVER → /devices se met à jour de façon FIABLE
+// SANS kill-BLE ni reboot (avant, le report Firestore REST = 2 TLS échouait heap fragmenté → la
+// version ne remontait pas au dashboard sans forcer). MERGE sur les seuls champs du boîtier →
+// préserve les champs EMnify (dataUsageMB…). Public + validation boxId ; posture identique aux
+// écritures ouvertes existantes (/fdr_status). À durcir (secret partagé) pour un large déploiement.
+exports.reportDevice = onRequest({ region: 'europe-west1', cors: true }, async (req, res) => {
+  if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return }
+  const b = req.body || {}
+  const boxId = String(b.boxId || '').trim().toUpperCase()
+  if (!/^[0-9A-F]{4,8}$/.test(boxId)) { res.status(400).json({ error: 'bad boxId' }); return }
+  const db = getFirestore()
+  const f = { boxId, lastSeen: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
+  const num = new Set(['fwVersion', 'atvVersion'])
+  for (const k of ['clubId', 'callSign', 'icao24', 'board', 'fwVersion', 'fwVersionStr', 'atvVersion', 'otaState', 'wifiSsid', 'iccid']) {
+    if (b[k] === undefined || b[k] === null) continue
+    f[k] = num.has(k) ? Number(b[k]) : String(b[k])
+  }
+  try {
+    await db.doc(`devices/${boxId}`).set(f, { merge: true })
+    res.json({ ok: true, boxId })
+  } catch (e) {
+    console.error('[reportDevice]', boxId, e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ============================================================
 // (P3) EMnify — conso data LTE par boîtier + total du pool
 // ------------------------------------------------------------
 // Le boîtier remonte son ICCID dans /devices/{boxId} (firmware v105, AT+CICCID).
