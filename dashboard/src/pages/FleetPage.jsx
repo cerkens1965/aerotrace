@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { collection, getDocs, query, where } from 'firebase/firestore'
+import { collection, getDocs, query, where, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
-import { db, storage } from '../firebase/config'
+import { db, storage, auth } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 
 // ─── FleetPage — état firmware de la flotte de boîtiers (ATC) + écrans (ATV) ────
@@ -71,6 +71,8 @@ export default function FleetPage() {
   const [aircraft, setAircraft] = useState([])
   const [published, setPublished] = useState({})   // tag -> int (dernière version publiée)
   const [loading, setLoading] = useState(true)
+  const [cfgEdit, setCfgEdit] = useState(null)     // (P1) config-pull : {boxId, reg, type, hex, reported:{...}} ou null
+  const [cfgSaving, setCfgSaving] = useState(false)
 
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
@@ -111,6 +113,40 @@ export default function FleetPage() {
     })()
     return () => { alive = false }
   }, [])
+
+  // (P1 config-pull) Ouvre l'éditeur d'identité : pré-remplit avec la config DÉSIRÉE existante
+  // (/deviceConfig/{boxId}) si présente, sinon avec l'état RAPPORTÉ par le boîtier (/devices).
+  const openConfig = async (dev) => {
+    const boxId = dev.boxId || dev.id
+    let cfg = {}
+    try { const s = await getDoc(doc(db, 'deviceConfig', boxId)); if (s.exists()) cfg = s.data() } catch (e) { console.error(e) }
+    setCfgEdit({
+      boxId,
+      reg:  cfg.reg  ?? dev.callSign ?? '',
+      type: cfg.type ?? '',
+      hex:  cfg.hex  ?? (dev.icao24 || ''),
+      reported: { reg: dev.callSign || '', hex: dev.icao24 || '' },
+      hasConfig: !!cfg.reg,
+    })
+  }
+  const saveConfig = async () => {
+    if (!cfgEdit) return
+    const reg = (cfgEdit.reg || '').trim().toUpperCase()
+    if (!reg) return
+    setCfgSaving(true)
+    try {
+      await setDoc(doc(db, 'deviceConfig', cfgEdit.boxId), {
+        boxId: cfgEdit.boxId,
+        reg,
+        type: (cfgEdit.type || '').trim().toUpperCase(),
+        hex:  (cfgEdit.hex  || '').trim().toUpperCase(),
+        updatedAt: serverTimestamp(),
+        updatedBy: auth.currentUser?.email || null,
+      }, { merge: true })
+      setCfgEdit(null)
+    } catch (e) { console.error('[Fleet] saveConfig', e) }
+    finally { setCfgSaving(false) }
+  }
 
   const callSignOf = (dev) => {
     if (dev.callSign) return dev.callSign
@@ -153,7 +189,10 @@ export default function FleetPage() {
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
                   </div>
-                  <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600 }}>{callSignOf(dev)}</div>
+                  <div onClick={() => openConfig(dev)} title="Éditer l'identité — poussée au boîtier par WiFi"
+                    style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: C.blue }}>
+                    {callSignOf(dev)} <span style={{ fontSize: 10, opacity: 0.6 }}>✎</span>
+                  </div>
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
                   <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion != null ? `v${dev.atvVersion}` : null} latest={published[`atv_${dev.atvTag}`]} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
@@ -163,7 +202,55 @@ export default function FleetPage() {
             })}
           </div>
         )}
+
+        {/* (P1) Éditeur d'identité aéronef — écrit /deviceConfig/{boxId}, le boîtier le tire par WiFi */}
+        {cfgEdit && (
+          <div onClick={() => !cfgSaving && setCfgEdit(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: C.surface, borderRadius: 14, padding: 22, width: 420, maxWidth: '92vw', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Identité aéronef — <span style={{ fontFamily: C.mono }}>{cfgEdit.boxId}</span></div>
+              <div style={{ fontSize: 11.5, color: C.mid, marginTop: 4, lineHeight: 1.5 }}>
+                Poussée au boîtier par WiFi (config-pull). S'applique à sa prochaine session WiFi
+                (boot / Report to fleet) → ré-inscription SafeSky automatique.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>IMMATRICULATION / CALLSIGN *</span>
+                  <input value={cfgEdit.reg} autoFocus onChange={e => setCfgEdit(c => ({ ...c, reg: e.target.value }))}
+                    placeholder="OOI43" style={inputStyle} />
+                </label>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>TYPE OACI</span>
+                    <input value={cfgEdit.type} onChange={e => setCfgEdit(c => ({ ...c, type: e.target.value }))}
+                      placeholder="FK9 / VL3…" style={inputStyle} />
+                  </label>
+                  <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>HEX (si transpondeur)</span>
+                    <input value={cfgEdit.hex} onChange={e => setCfgEdit(c => ({ ...c, hex: e.target.value }))}
+                      placeholder="(vide si pas d'ADS-B)" style={inputStyle} />
+                  </label>
+                </div>
+              </div>
+              <div style={{ fontSize: 10.5, color: C.low, marginTop: 10 }}>
+                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}
+                {cfgEdit.hasConfig && <span style={{ color: C.amber }}> · une config est déjà en attente</span>}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                <button onClick={() => setCfgEdit(null)} disabled={cfgSaving}
+                  style={{ padding: '8px 16px', borderRadius: 8, background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, cursor: 'pointer', fontFamily: C.mono, fontSize: 11 }}>Annuler</button>
+                <button onClick={saveConfig} disabled={cfgSaving || !cfgEdit.reg.trim()}
+                  style={{ padding: '8px 18px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700 }}>
+                  {cfgSaving ? '…' : 'Pousser au boîtier'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
+
+const inputStyle = { padding: '8px 10px', borderRadius: 7, border: '1px solid rgba(10,14,30,0.15)', fontFamily: 'monospace', fontSize: 13, color: '#0a0e1e', width: '100%', boxSizing: 'border-box' }

@@ -100,5 +100,16 @@ service cloud.firestore {
       allow read:  if isSignedIn();
       allow write: if isSignedIn();
     }
+
+    // ── Device config (P1 — admin flotte via dashboard, « device shadow ») ──────
+    // État DÉSIRÉ poussé par un admin depuis le dashboard (immat/type/hex ; P2 : WiFi).
+    // Le boîtier LIT sa config (auth anon → isSignedIn) et l'applique ; /devices reflète
+    // l'état RAPPORTÉ. Écriture réservée aux admins.
+    // ⚠️ P2 (WiFi pass) : la lecture par tout user connecté deviendra sensible → à durcir
+    //    (Cloud Function ou doc séparé) quand on ajoutera le mot de passe WiFi.
+    match /deviceConfig/{boxId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
   }
 }
