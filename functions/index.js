@@ -525,19 +525,37 @@ function iccidMatch(a, b) {
   return a === b || a.startsWith(b) || b.startsWith(a)
 }
 
-// Volume data du MOIS COURANT en MB. `GET /endpoint/{id}/stats` renvoie
-// { current_month: { data: { volume:"35.47", volume_rx, volume_tx, month } }, ... }
-// — `volume` est une STRING déjà en MB (confirmé sonde 2026-07-29 : traffic_type.unit="MB").
-function extractMonthMB(stats) {
-  const v = stats?.current_month?.data?.volume
-  const n = typeof v === 'number' ? v : parseFloat(v)
-  return isFinite(n) ? n : 0
+// `GET /endpoint/{id}/stats` renvoie { current_month:{data:{volume(MB, STRING), cost(€),
+// month, currency}}, last_month:{...}, last_hour:{...} } — pas d'historique long.
+// Normalise un bloc current_month / last_month → { key:"2026-07", mb, cost } (ou null).
+function monthBlock(b) {
+  const d = b?.data
+  if (!d?.month) return null
+  return { key: String(d.month).slice(0, 7), mb: parseFloat(d.volume) || 0, cost: parseFloat(d.cost) || 0 }
 }
-// Coût du mois courant (EMnify renvoie current_month.data.cost + currency.code).
-function extractMonthCost(stats) {
-  const d = stats?.current_month?.data
-  const n = parseFloat(d?.cost)
-  return { cost: isFinite(n) ? n : 0, cur: d?.currency?.code || 'EUR' }
+
+// Conso data (MB) par jour PAR ENDPOINT depuis EMnify — LU EN DIRECT, rien stocké chez nous.
+// ⚠️ Chemin PAR CARTE = `/endpoint/{id}/stats/daily` (le `/stats/daily?endpoint=` est org-wide !).
+// ⚠️ La réponse contient une ligne récap `date:"TOTAL"` à EXCLURE. Pas de coût dans le daily.
+// Renvoie { lastDayMB, lastDayDate, yearMB, overallMB }.
+async function fetchDailyRollup(H, epId, year, today) {
+  const url = `${EMNIFY_BASE}/endpoint/${epId}/stats/daily?start_date=2020-01-01&end_date=${today}`
+  const r = await fetch(url, { headers: H })
+  if (!r.ok) return { lastDayMB: 0, lastDayDate: '', yearMB: 0, overallMB: 0 }
+  const arr = await r.json()
+  let overall = 0, yr = 0, lastMB = 0, lastDate = ''
+  for (const b of (Array.isArray(arr) ? arr : [])) {
+    const date = b?.date || ''
+    if (date === 'TOTAL' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue   // saute la ligne récap
+    const mb = parseFloat(b?.data?.volume) || 0
+    overall += mb
+    if (date.startsWith(year)) yr += mb
+    if (date > lastDate) { lastDate = date; lastMB = mb }
+  }
+  return {
+    lastDayMB: Math.round(lastMB * 10) / 10, lastDayDate: lastDate,
+    yearMB: Math.round(yr * 10) / 10, overallMB: Math.round(overall * 10) / 10,
+  }
 }
 
 // Cœur de la synchro. Retourne un résumé { matched, total endpoints, usedMB… }.
@@ -567,9 +585,14 @@ async function runEmnifySync(appToken) {
     if (arr.length < 100) break
   }
 
-  // 3) Pour chaque endpoint, ICCID (sim.iccid) → match flotte → stats mensuelles.
+  // 3) Pour chaque endpoint matché → conso LUE EN DIRECT sur EMnify :
+  //    mensuel (/stats : mois courant + précédent, MB + €) et journalier (/stats/daily :
+  //    dernier jour / année / overall, MB). Aucun cumul stocké chez nous.
+  const todayStr = new Date().toISOString().slice(0, 10)   // YYYY-MM-DD (UTC)
+  const year = todayStr.slice(0, 4)
   let loggedSample = false
-  let matched = 0, totalUsedMB = 0, totalCost = 0, currency = 'EUR'
+  let matched = 0, currency = 'EUR'
+  const tot = { monthMB: 0, monthCost: 0, lastMonthMB: 0, lastMonthCost: 0, lastDayMB: 0, yearMB: 0, overallMB: 0 }
   const batch = db.batch()
   for (const ep of endpoints) {
     const iccid = ep?.sim?.iccid || ep?.iccid
@@ -579,26 +602,37 @@ async function runEmnifySync(appToken) {
     if (!box) continue
     matched++
 
-    // status endpoint (Enabled/Disabled) + status SIM (Activated/Suspended…).
     const statusName = ep?.sim?.status?.description || ep?.status?.description || ''
-    let usedMB = 0, cost = 0
+    let cur = null, last = null
     try {
       const sr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}/stats`, { headers: H })
       if (sr.ok) {
         const stats = await sr.json()
-        if (!loggedSample) { console.log('[emnify] stats sample', JSON.stringify(stats).slice(0, 500)); loggedSample = true }
-        usedMB = extractMonthMB(stats)
-        const c = extractMonthCost(stats); cost = c.cost; currency = c.cur
-      } else {
-        console.warn(`[emnify] stats ${ep.id} → ${sr.status}`)
-      }
+        if (!loggedSample) { console.log('[emnify] stats sample', JSON.stringify(stats).slice(0, 400)); loggedSample = true }
+        cur = monthBlock(stats.current_month)
+        last = monthBlock(stats.last_month)
+        currency = stats.current_month?.data?.currency?.code || currency
+      } else console.warn(`[emnify] stats ${ep.id} → ${sr.status}`)
     } catch (e) { console.warn('[emnify] stats err', ep.id, e.message) }
 
-    totalUsedMB += usedMB; totalCost += cost
+    let daily = { lastDayMB: 0, lastDayDate: '', yearMB: 0, overallMB: 0 }
+    try { daily = await fetchDailyRollup(H, ep.id, year, todayStr) }
+    catch (e) { console.warn('[emnify] daily err', ep.id, e.message) }
+
+    const monthMB = cur?.mb || 0, monthCost = cur?.cost || 0
+    tot.monthMB += monthMB; tot.monthCost += monthCost
+    tot.lastMonthMB += last?.mb || 0; tot.lastMonthCost += last?.cost || 0
+    tot.lastDayMB += daily.lastDayMB; tot.yearMB += daily.yearMB; tot.overallMB += daily.overallMB
+
     batch.set(box.ref, {
-      dataUsageMB: Math.round(usedMB * 10) / 10,
-      dataCost: Math.round(cost * 100) / 100,
+      dataUsageMB: Math.round(monthMB * 10) / 10,        // mois courant (colonne DATA)
+      dataCost: Math.round(monthCost * 100) / 100,       // mois courant (colonne COST €)
       dataCostCur: currency,
+      monthKey: cur?.key || todayStr.slice(0, 7),
+      lastMonthMB: Math.round((last?.mb || 0) * 10) / 10,
+      lastMonthCost: Math.round((last?.cost || 0) * 100) / 100,
+      lastDayMB: daily.lastDayMB, lastDayDate: daily.lastDayDate,
+      yearMB: daily.yearMB, overallMB: daily.overallMB,
       simStatus: statusName,
       emnifyEndpointId: ep.id,
       emnifyName: ep.name || '',
@@ -606,13 +640,17 @@ async function runEmnifySync(appToken) {
     }, { merge: true })
   }
 
-  // 4) Total du pool. La taille du pool (poolTotalMB) est saisie côté dashboard
-  //    (l'endpoint « data pool » EMnify varie selon l'offre) ; on préserve la
-  //    valeur existante et on écrit le consommé + les compteurs.
+  // 4) Récap flotte (cache d'affichage, écrasé à chaque run — 100% EMnify).
+  //    poolTotalMB (barre %) reste saisi à la main (l'endpoint « pool » EMnify varie).
   const metaRef = db.doc('fleetMeta/emnify')
   batch.set(metaRef, {
-    totalUsedMB: Math.round(totalUsedMB * 10) / 10,
-    totalCost: Math.round(totalCost * 100) / 100,
+    monthKey: todayStr.slice(0, 7), year, lastDayDate: todayStr,
+    totalUsedMB: Math.round(tot.monthMB * 10) / 10,      // = mois courant (compat champ existant)
+    totalCost: Math.round(tot.monthCost * 100) / 100,
+    lastMonthMB: Math.round(tot.lastMonthMB * 10) / 10, lastMonthCost: Math.round(tot.lastMonthCost * 100) / 100,
+    lastDayMB: Math.round(tot.lastDayMB * 10) / 10,
+    yearMB: Math.round(tot.yearMB * 10) / 10,
+    overallMB: Math.round(tot.overallMB * 10) / 10,
     currency,
     endpointCount: endpoints.length,
     matchedCount: matched,
@@ -621,7 +659,10 @@ async function runEmnifySync(appToken) {
   }, { merge: true })
 
   await batch.commit()
-  const summary = { endpoints: endpoints.length, fleetWithIccid: withIccid, matched, totalUsedMB: Math.round(totalUsedMB * 10) / 10, totalCost: Math.round(totalCost * 100) / 100 }
+  const summary = { endpoints: endpoints.length, matched,
+    monthMB: Math.round(tot.monthMB * 10) / 10, monthCost: Math.round(tot.monthCost * 100) / 100,
+    yearMB: Math.round(tot.yearMB * 10) / 10, overallMB: Math.round(tot.overallMB * 10) / 10,
+    lastDayMB: Math.round(tot.lastDayMB * 10) / 10 }
   console.log('[emnify] sync', JSON.stringify(summary))
   return summary
 }

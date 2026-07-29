@@ -41,6 +41,12 @@ function fmtMB(mb) {
   if (mb == null) return '—'
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`
 }
+const FR_MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+function monthLabel(key) {   // "2026-07" → "juillet 2026"
+  if (!key || !/^\d{4}-\d{2}$/.test(key)) return 'Mois en cours'
+  const [y, m] = key.split('-')
+  return `${FR_MONTHS[+m - 1]} ${y}`
+}
 function fmtSeen(v) {
   const ms = tsMillis(v); if (!ms) return '—'
   const diff = Date.now() - ms
@@ -201,32 +207,48 @@ export default function FleetPage() {
           {ATC_TAGS.map(t => `${t} v${published[t] ?? '?'}`).join(' · ')}.
         </p>
 
-        {/* (P3) Pool data EMnify */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginTop: 12, padding: '12px 16px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
-          <div style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>DATA POOL · EMNIFY</div>
+        {/* (P3) Récap conso data EMnify — lu en direct depuis EMnify (rien cumulé chez nous) */}
+        <div style={{ marginTop: 12, padding: '14px 16px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>DATA · EMNIFY (flotte)</div>
+            <div style={{ fontSize: 10.5, color: C.low, fontFamily: C.mono }}>
+              {emnify ? `${emnify.matchedCount ?? 0} SIM · maj ${fmtSeen(emnify.updatedAt)}` : 'jamais synchronisé'}
+            </div>
+            <button onClick={refreshEmnify} disabled={refreshing}
+              style={{ marginLeft: 'auto', padding: '7px 14px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: refreshing ? 'default' : 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
+              {refreshing ? 'Sync…' : 'Rafraîchir la conso'}
+            </button>
+          </div>
           {(() => {
-            const used = emnify?.totalUsedMB
-            const pool = emnify?.poolTotalMB
-            const pct = (pool && used != null) ? Math.min(100, Math.round(used / pool * 100)) : null
+            const pool = emnify?.poolTotalMB, month = emnify?.totalUsedMB
+            const pct = (pool && month != null) ? Math.min(100, Math.round(month / pool * 100)) : null
             const col = pct == null ? C.mid : pct >= 90 ? C.red : pct >= 70 ? C.amber : C.green
+            const cur = emnify?.currency || 'EUR'
+            const Tile = ({ label, mb, cost, sub, accent }) => (
+              <div style={{ flex: '1 1 130px', padding: '10px 12px', borderRadius: 9, background: accent ? `${C.blue}0f` : 'rgba(10,14,30,0.03)', border: `1px solid ${accent ? C.blue + '33' : C.border}` }}>
+                <div style={{ fontSize: 9, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.05em', color: C.mid, textTransform: 'uppercase' }}>{label}</div>
+                <div style={{ fontSize: 17, fontWeight: 700, fontFamily: C.mono, color: C.text, marginTop: 3 }}>{mb != null ? fmtMB(mb) : '—'}</div>
+                {cost != null && <div style={{ fontSize: 12, fontWeight: 700, fontFamily: C.mono, color: C.green }}>{cost.toFixed(2)} {cur}</div>}
+                {sub && <div style={{ fontSize: 9.5, color: C.low, fontFamily: C.mono, marginTop: 2 }}>{sub}</div>}
+              </div>
+            )
             return (
               <>
-                <div style={{ fontSize: 15, fontWeight: 700, fontFamily: C.mono, color: C.text }}>
-                  {used != null ? fmtMB(used) : '—'}{pool ? <span style={{ color: C.mid, fontWeight: 400 }}> / {fmtMB(pool)}</span> : ''}
-                  {emnify?.totalCost != null && <span style={{ color: C.mid, fontWeight: 400, fontSize: 13 }}> · {emnify.totalCost.toFixed(2)} {emnify.currency || 'EUR'}</span>}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <Tile label="Overall" mb={emnify?.overallMB} sub="depuis l'activation" />
+                  <Tile label={emnify?.year || '2026'} mb={emnify?.yearMB} sub="année en cours" />
+                  <Tile label={monthLabel(emnify?.monthKey)} mb={month} cost={emnify?.totalCost} accent sub="mois en cours" />
+                  <Tile label="Dernier jour" mb={emnify?.lastDayMB} sub={emnify?.lastDayDate || ''} />
                 </div>
                 {pct != null && (
-                  <div style={{ flex: '1 1 120px', maxWidth: 220, height: 8, borderRadius: 4, background: 'rgba(10,14,30,0.08)', overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: col }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                    <div style={{ fontSize: 10, fontFamily: C.mono, color: C.mid }}>Pool {monthLabel(emnify?.monthKey)}</div>
+                    <div style={{ flex: '1 1 auto', maxWidth: 340, height: 8, borderRadius: 4, background: 'rgba(10,14,30,0.08)', overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: col }} />
+                    </div>
+                    <div style={{ fontSize: 11, fontFamily: C.mono, fontWeight: 700, color: col }}>{pct}% de {fmtMB(pool)}</div>
                   </div>
                 )}
-                <div style={{ fontSize: 10.5, color: C.mid, fontFamily: C.mono }}>
-                  {emnify ? `${emnify.matchedCount ?? 0} SIM · maj ${fmtSeen(emnify.updatedAt)}` : 'jamais synchronisé'}
-                </div>
-                <button onClick={refreshEmnify} disabled={refreshing}
-                  style={{ marginLeft: 'auto', padding: '7px 14px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: refreshing ? 'default' : 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
-                  {refreshing ? 'Sync…' : 'Rafraîchir la conso'}
-                </button>
               </>
             )
           })()}
@@ -243,13 +265,13 @@ export default function FleetPage() {
 
         {!loading && devices.length > 0 && (
           <div style={{ marginTop: 16, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.3fr 1.3fr 1fr 0.8fr 0.8fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
-              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA</div><div>LAST SEEN</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
+              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA/MOIS</div><div>COÛT/MOIS</div><div>LAST SEEN</div>
             </div>
             {devices.map(dev => {
               const ota = OTA_LABEL[dev.otaState] || OTA_LABEL.idle
               return (
-                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.3fr 1.3fr 1fr 0.8fr 0.8fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
+                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
                   <div>
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
@@ -261,13 +283,20 @@ export default function FleetPage() {
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
                   <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion != null ? `v${dev.atvVersion}` : null} latest={published[`atv_${dev.atvTag}`]} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
-                  <div title={dev.iccid ? `ICCID ${dev.iccid}${dev.simStatus ? ` · ${dev.simStatus}` : ''}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'ICCID non remonté (boîtier < v105 ou pas de session LTE)')}>
+                  <div title={[
+                        dev.iccid ? `ICCID ${dev.iccid}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'non lié à une SIM'),
+                        dev.simStatus ? `SIM ${dev.simStatus}` : '',
+                        dev.yearMB != null ? `Année: ${fmtMB(dev.yearMB)}` : '',
+                        dev.overallMB != null ? `Overall: ${fmtMB(dev.overallMB)}` : '',
+                        dev.lastDayMB != null ? `Dernier jour (${dev.lastDayDate || '?'}): ${fmtMB(dev.lastDayMB)}` : '',
+                      ].filter(Boolean).join('\n')}>
                     <div style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 600, color: dev.dataUsageMB != null ? C.text : C.low }}>
                       {dev.dataUsageMB != null ? fmtMB(dev.dataUsageMB) : (dev.iccid || dev.emnifyName ? '—' : '·')}
                     </div>
-                    {dev.dataCost != null && dev.dataCost > 0 && (
-                      <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.dataCost.toFixed(2)} {dev.dataCostCur || 'EUR'}</div>
-                    )}
+                    {dev.overallMB != null && <div style={{ fontFamily: C.mono, fontSize: 8.5, color: C.low }}>Σ {fmtMB(dev.overallMB)}</div>}
+                  </div>
+                  <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: dev.dataCost ? C.green : C.low }}>
+                    {dev.dataCost != null ? `${dev.dataCost.toFixed(2)} ${dev.dataCostCur || 'EUR'}` : '—'}
                   </div>
                   <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>{fmtSeen(dev.lastSeen || dev.updatedAt)}</div>
                 </div>

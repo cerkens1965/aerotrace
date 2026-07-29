@@ -52,7 +52,14 @@ confirmé à l'usage.)
   ```
   **`current_month.data.volume` est une STRING déjà en MB** (unit MB confirmé via `/stats/daily`
   `traffic_type.unit`). `extractMonthMB` = `parseFloat(current_month.data.volume)`.
-- (Autres utiles : `GET /endpoint/{id}/connectivity` = localisation/opérateur ; `GET /stats/daily?endpoint={id}`.)
+- `GET /endpoint/{id}/stats/daily?start_date=&end_date=` → conso **par jour PAR CARTE** (MB, **pas de coût**).
+  ⚠️ Le **`/stats/daily?endpoint={id}` est ORG-WIDE** (ignore le filtre → mêmes chiffres pour toutes les
+  SIM) — utiliser le chemin **`/endpoint/{id}/stats/daily`**. ⚠️ La réponse contient une ligne récap
+  **`date:"TOTAL"`** (= somme de la plage) à **EXCLURE** de la somme. Chaque bucket a `data.volume` (MB)
+  + `sms.volume`. Sert à calculer année / overall / dernier jour PAR CARTE (`fetchDailyRollup`).
+- **Coût** : dispo UNIQUEMENT au mois (current_month/last_month `.cost`) — le daily ne le porte pas.
+  Donc € = mois courant/précédent ; année/overall = volume MB seulement (lu en direct, rien cumulé chez nous).
+- (Autre utile : `GET /endpoint/{id}/connectivity` = localisation/opérateur.)
 
 ## 4. Côté AeroTrace
 
