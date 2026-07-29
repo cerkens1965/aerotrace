@@ -125,14 +125,17 @@ export default function FleetPage() {
       reg:  cfg.reg  ?? dev.callSign ?? '',
       type: cfg.type ?? '',
       hex:  cfg.hex  ?? (dev.icao24 || ''),
-      reported: { reg: dev.callSign || '', hex: dev.icao24 || '' },
-      hasConfig: !!cfg.reg,
+      wifiSsid: cfg.wifiSsid ?? '',
+      wifiPass: cfg.wifiPass ?? '',
+      reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '' },
+      hasConfig: !!(cfg.reg || cfg.wifiSsid),
     })
   }
   const saveConfig = async () => {
     if (!cfgEdit) return
     const reg = (cfgEdit.reg || '').trim().toUpperCase()
-    if (!reg) return
+    const wifiSsid = (cfgEdit.wifiSsid || '').trim()
+    if (!reg && !wifiSsid) return
     setCfgSaving(true)
     try {
       await setDoc(doc(db, 'deviceConfig', cfgEdit.boxId), {
@@ -140,6 +143,8 @@ export default function FleetPage() {
         reg,
         type: (cfgEdit.type || '').trim().toUpperCase(),
         hex:  (cfgEdit.hex  || '').trim().toUpperCase(),
+        wifiSsid,
+        wifiPass: cfgEdit.wifiPass || '',
         updatedAt: serverTimestamp(),
         updatedBy: auth.currentUser?.email || null,
       }, { merge: true })
@@ -209,7 +214,7 @@ export default function FleetPage() {
             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
             <div onClick={e => e.stopPropagation()}
               style={{ background: C.surface, borderRadius: 14, padding: 22, width: 420, maxWidth: '92vw', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Identité aéronef — <span style={{ fontFamily: C.mono }}>{cfgEdit.boxId}</span></div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Config boîtier — <span style={{ fontFamily: C.mono }}>{cfgEdit.boxId}</span></div>
               <div style={{ fontSize: 11.5, color: C.mid, marginTop: 4, lineHeight: 1.5 }}>
                 Poussée au boîtier par WiFi (config-pull). S'applique à sa prochaine session WiFi
                 (boot / Report to fleet) → ré-inscription SafeSky automatique.
@@ -232,15 +237,34 @@ export default function FleetPage() {
                       placeholder="(vide si pas d'ADS-B)" style={inputStyle} />
                   </label>
                 </div>
+
+                {/* (P2) WiFi club poussé au boîtier */}
+                <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <span style={{ fontSize: 10, color: C.mid, fontWeight: 700, letterSpacing: '0.05em' }}>WIFI CLUB (optionnel) — devient le réseau primaire du boîtier</span>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>SSID</span>
+                    <input value={cfgEdit.wifiSsid} onChange={e => setCfgEdit(c => ({ ...c, wifiSsid: e.target.value }))}
+                      placeholder="EBBY" style={inputStyle} />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>MOT DE PASSE</span>
+                    <input type="password" value={cfgEdit.wifiPass} autoComplete="new-password"
+                      onChange={e => setCfgEdit(c => ({ ...c, wifiPass: e.target.value }))}
+                      placeholder={cfgEdit.wifiSsid ? '••••••••' : ''} style={inputStyle} />
+                  </label>
+                  <div style={{ fontSize: 10, color: C.low, lineHeight: 1.4 }}>
+                    ⚠️ Le mot de passe est visible par les membres désignés du dashboard.
+                  </div>
+                </div>
               </div>
               <div style={{ fontSize: 10.5, color: C.low, marginTop: 10 }}>
-                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}
+                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}
                 {cfgEdit.hasConfig && <span style={{ color: C.amber }}> · une config est déjà en attente</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
                 <button onClick={() => setCfgEdit(null)} disabled={cfgSaving}
                   style={{ padding: '8px 16px', borderRadius: 8, background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, cursor: 'pointer', fontFamily: C.mono, fontSize: 11 }}>Annuler</button>
-                <button onClick={saveConfig} disabled={cfgSaving || !cfgEdit.reg.trim()}
+                <button onClick={saveConfig} disabled={cfgSaving || (!cfgEdit.reg.trim() && !cfgEdit.wifiSsid.trim())}
                   style={{ padding: '8px 18px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700 }}>
                   {cfgSaving ? '…' : 'Pousser au boîtier'}
                 </button>
