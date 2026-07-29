@@ -282,6 +282,13 @@ export default function FleetPage() {
               // publiés (tous les écrans partagent le même train VIEW_VERSION) → plus de « ? ».
               const atvNums = ATV_TAGS.map(t => published[`atv_${t}`]).filter(v => typeof v === 'number')
               const atvLatest = published[`atv_${dev.atvTag}`] ?? (atvNums.length ? Math.max(...atvNums) : undefined)
+              // Chaîne ATV complète « comme l'ATC » : le train MAJOR.MINOR est PARTAGÉ ATC↔ATV
+              // (versioning AeroTrace) → préfixe train + suffixe canal de l'ATC, build ATV substitué.
+              // Ex ATC "1.2.105-dev" + atv 191 → "1.2.191-dev". (dev.atvVersionStr prévaut si un jour remonté.)
+              const atvVerStr = dev.atvVersionStr
+                || (dev.fwVersionStr && dev.atvVersion
+                    ? dev.fwVersionStr.replace(/^(\d+\.\d+\.)\d+/, `$1${dev.atvVersion}`)
+                    : (dev.atvVersion ? `v${dev.atvVersion}` : null))
               return (
                 <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
                   <div>
@@ -293,7 +300,7 @@ export default function FleetPage() {
                     {callSignOf(dev)} <span style={{ fontSize: 10, opacity: 0.6 }}>✎</span>
                   </div>
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
-                  <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion ? `v${dev.atvVersion}` : null} latest={atvLatest} />
+                  <VerBadge cur={dev.atvVersion} curStr={atvVerStr} latest={atvLatest} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
                   <div title={[
                         dev.iccid ? `ICCID ${dev.iccid}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'non lié à une SIM'),
