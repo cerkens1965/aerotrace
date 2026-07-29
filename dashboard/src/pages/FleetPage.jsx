@@ -192,7 +192,11 @@ export default function FleetPage() {
         updatedBy: auth.currentUser?.email || null,
       }, { merge: true })
       setCfgEdit(null)
-    } catch (e) { console.error('[Fleet] saveConfig', e) }
+    } catch (e) {
+      console.error('[Fleet] saveConfig', e)
+      alert('Échec de l\'enregistrement : ' + (e.code || e.message || e) +
+        (String(e.code || '').includes('permission') ? '\n\n(Ton compte doit être admin/super_admin pour écrire la config.)' : ''))
+    }
     finally { setCfgSaving(false) }
   }
 
