@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { collection, getDocs, query, where, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
-import { db, storage, auth } from '../firebase/config'
+import { httpsCallable } from 'firebase/functions'
+import { db, storage, auth, functions } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 
 // ─── FleetPage — état firmware de la flotte de boîtiers (ATC) + écrans (ATV) ────
@@ -35,6 +36,10 @@ function tsMillis(v) {
   if (!v) return 0
   if (typeof v === 'number') return v < 1e12 ? v * 1000 : v
   return v.toMillis?.() ?? 0
+}
+function fmtMB(mb) {
+  if (mb == null) return '—'
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`
 }
 function fmtSeen(v) {
   const ms = tsMillis(v); if (!ms) return '—'
@@ -73,6 +78,8 @@ export default function FleetPage() {
   const [loading, setLoading] = useState(true)
   const [cfgEdit, setCfgEdit] = useState(null)     // (P1) config-pull : {boxId, reg, type, hex, reported:{...}} ou null
   const [cfgSaving, setCfgSaving] = useState(false)
+  const [emnify, setEmnify] = useState(null)       // (P3) /fleetMeta/emnify : { totalUsedMB, poolTotalMB, updatedAt… }
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
@@ -84,15 +91,37 @@ export default function FleetPage() {
     Promise.all([
       getDocs(collection(db, 'devices')),
       getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
-    ]).then(([ds, as]) => {
+      getDoc(doc(db, 'fleetMeta', 'emnify')).catch(() => null),
+    ]).then(([ds, as, em]) => {
       const acList = as.docs.map(d => ({ id: d.id, ...d.data() }))
       const devs = ds.docs.map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.callSign || a.boxId || a.id).localeCompare(b.callSign || b.boxId || b.id))
       setDevices(devs)
       setAircraft(acList)
+      setEmnify(em && em.exists() ? em.data() : null)
       setLoading(false)
     }).catch(e => { console.error('[Fleet] load', e); setLoading(false) })
   }, [clubId])
+
+  // (P3) Rafraîchit la conso EMnify à la demande (Cloud Function admin) puis recharge.
+  const refreshEmnify = async () => {
+    setRefreshing(true)
+    try {
+      const res = await httpsCallable(functions, 'refreshEmnify')()
+      const [ds, em] = await Promise.all([
+        getDocs(collection(db, 'devices')),
+        getDoc(doc(db, 'fleetMeta', 'emnify')).catch(() => null),
+      ])
+      setDevices(ds.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.callSign || a.boxId || a.id).localeCompare(b.callSign || b.boxId || b.id)))
+      setEmnify(em && em.exists() ? em.data() : null)
+      console.log('[Fleet] emnify', res.data)
+    } catch (e) {
+      console.error('[Fleet] refreshEmnify', e)
+      alert('Conso EMnify : ' + (e.message || e.code || 'échec') +
+        (String(e.message || '').includes('EMNIFY_APP_TOKEN') ? '\n\nConfigure le token : firebase functions:secrets:set EMNIFY_APP_TOKEN' : ''))
+    } finally { setRefreshing(false) }
+  }
 
   // Dernières versions publiées (Storage public-read) — pour le badge « à jour ».
   useEffect(() => {
@@ -172,6 +201,36 @@ export default function FleetPage() {
           {ATC_TAGS.map(t => `${t} v${published[t] ?? '?'}`).join(' · ')}.
         </p>
 
+        {/* (P3) Pool data EMnify */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginTop: 12, padding: '12px 16px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10 }}>
+          <div style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>DATA POOL · EMNIFY</div>
+          {(() => {
+            const used = emnify?.totalUsedMB
+            const pool = emnify?.poolTotalMB
+            const pct = (pool && used != null) ? Math.min(100, Math.round(used / pool * 100)) : null
+            const col = pct == null ? C.mid : pct >= 90 ? C.red : pct >= 70 ? C.amber : C.green
+            return (
+              <>
+                <div style={{ fontSize: 15, fontWeight: 700, fontFamily: C.mono, color: C.text }}>
+                  {used != null ? fmtMB(used) : '—'}{pool ? <span style={{ color: C.mid, fontWeight: 400 }}> / {fmtMB(pool)}</span> : ''}
+                </div>
+                {pct != null && (
+                  <div style={{ flex: '1 1 120px', maxWidth: 220, height: 8, borderRadius: 4, background: 'rgba(10,14,30,0.08)', overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: col }} />
+                  </div>
+                )}
+                <div style={{ fontSize: 10.5, color: C.mid, fontFamily: C.mono }}>
+                  {emnify ? `${emnify.matchedCount ?? 0}/${emnify.fleetWithIccid ?? 0} SIM · maj ${fmtSeen(emnify.updatedAt)}` : 'jamais synchronisé'}
+                </div>
+                <button onClick={refreshEmnify} disabled={refreshing}
+                  style={{ marginLeft: 'auto', padding: '7px 14px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: refreshing ? 'default' : 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
+                  {refreshing ? 'Sync…' : 'Rafraîchir la conso'}
+                </button>
+              </>
+            )
+          })()}
+        </div>
+
         {loading && <div style={{ color: C.low, fontSize: 12, paddingTop: 30 }}>Chargement…</div>}
         {!loading && !clubId && <div style={{ color: C.low, fontSize: 12 }}>Sélectionne un club d'abord.</div>}
         {!loading && clubId && devices.length === 0 && (
@@ -183,13 +242,13 @@ export default function FleetPage() {
 
         {!loading && devices.length > 0 && (
           <div style={{ marginTop: 16, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.4fr 1.4fr 1.1fr 0.9fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
-              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>LAST SEEN</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.3fr 1.3fr 1fr 0.8fr 0.8fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
+              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA</div><div>LAST SEEN</div>
             </div>
             {devices.map(dev => {
               const ota = OTA_LABEL[dev.otaState] || OTA_LABEL.idle
               return (
-                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.4fr 1.4fr 1.1fr 0.9fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
+                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1.3fr 1.3fr 1fr 0.8fr 0.8fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
                   <div>
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
@@ -201,6 +260,10 @@ export default function FleetPage() {
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
                   <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion != null ? `v${dev.atvVersion}` : null} latest={published[`atv_${dev.atvTag}`]} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
+                  <div style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 600, color: dev.dataUsageMB != null ? C.text : C.low }}
+                    title={dev.iccid ? `ICCID ${dev.iccid}${dev.simStatus ? ` · ${dev.simStatus}` : ''}` : 'ICCID non remonté (boîtier < v105 ou pas de session LTE)'}>
+                    {dev.dataUsageMB != null ? fmtMB(dev.dataUsageMB) : (dev.iccid ? '—' : '·')}
+                  </div>
                   <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>{fmtSeen(dev.lastSeen || dev.updatedAt)}</div>
                 </div>
               )

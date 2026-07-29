@@ -1,5 +1,6 @@
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https')
 const { onDocumentWritten, onDocumentDeleted } = require('firebase-functions/v2/firestore')
+const { onSchedule } = require('firebase-functions/v2/scheduler')
 const { defineSecret } = require('firebase-functions/params')
 const { initializeApp, getApps } = require('firebase-admin/app')
 const { getFirestore, FieldValue } = require('firebase-admin/firestore')
@@ -12,6 +13,7 @@ const STORAGE_BUCKET = 'aerotrace-74217.firebasestorage.app'
 if (getApps().length === 0) initializeApp()
 
 const SAFESKY_KEY = defineSecret('SAFESKY_KEY')
+const EMNIFY_APP_TOKEN = defineSecret('EMNIFY_APP_TOKEN')   // (P3) EMnify API application token
 
 function deriveKid(apiKey) {
   const hash = crypto.createHash('sha256').update('kid:' + apiKey).digest()
@@ -484,3 +486,152 @@ exports.claimAccess = onCall({ region: 'europe-west1' }, async (req) => {
   const u = userSnap.exists ? userSnap.data() : {}
   return { authorized: false, role: u.role || 'user', clubId: u.clubId || '', email }
 })
+
+// ============================================================
+// (P3) EMnify — conso data LTE par boîtier + total du pool
+// ------------------------------------------------------------
+// Le boîtier remonte son ICCID dans /devices/{boxId} (firmware v105, AT+CICCID).
+// Ici on interroge l'API EMnify (REST v1), on associe chaque endpoint SIM à un
+// boîtier par ICCID, et on écrit la conso data dans /devices/{boxId} + un total
+// dans /fleetMeta/emnify → affiché dans FLEET.
+//
+// Secret requis :  firebase functions:secrets:set EMNIFY_APP_TOKEN
+//   (EMnify Portal → Integrations → API Tokens → "Application Token")
+//
+// ⚠️ Le SCHÉMA exact des stats EMnify peut varier selon l'offre — l'extraction
+// du volume est DÉFENSIVE (essaie plusieurs chemins) et LOGUE le 1er payload
+// brut : si la conso ressort à 0 au 1er run réel, ajuster extractVolumeBytes()
+// d'après le log `[emnify] stats sample`.
+const EMNIFY_BASE = 'https://cdn.emnify.net/api/v1'
+
+async function emnifyAuth(appToken) {
+  const r = await fetch(`${EMNIFY_BASE}/authenticate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ application_token: appToken }),
+  })
+  if (!r.ok) throw new Error(`emnify auth ${r.status}: ${(await r.text()).slice(0, 200)}`)
+  const j = await r.json()
+  if (!j.auth_token) throw new Error('emnify auth: pas de auth_token')
+  return j.auth_token
+}
+
+// Deux ICCID « matchent » si l'un est préfixe de l'autre (gère le check-digit
+// 19 vs 20 chiffres, et les espaces éventuels).
+function iccidMatch(a, b) {
+  a = String(a || '').replace(/\D/g, '')
+  b = String(b || '').replace(/\D/g, '')
+  if (!a || !b) return false
+  return a === b || a.startsWith(b) || b.startsWith(a)
+}
+
+// Extraction défensive d'un volume d'octets depuis une réponse EMnify de stats.
+function extractVolumeBytes(stats) {
+  let total = 0
+  const buckets = Array.isArray(stats) ? stats : (stats?.stats || stats?.data || [])
+  for (const b of (Array.isArray(buckets) ? buckets : [])) {
+    const v = b?.volume ?? b?.data_volume ?? b?.usage ?? b
+    if (typeof v === 'number') { total += v; continue }
+    const t = v?.total ?? v?.value ?? ((v?.rx || 0) + (v?.tx || 0))
+    if (typeof t === 'number') total += t
+  }
+  return total
+}
+
+// Cœur de la synchro. Retourne un résumé { matched, total endpoints, usedMB… }.
+async function runEmnifySync(appToken) {
+  const db = getFirestore()
+  const authToken = await emnifyAuth(appToken)
+  const H = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' }
+
+  // 1) Liste des boîtiers de la flotte avec un ICCID connu.
+  const devSnap = await db.collection('devices').get()
+  const fleet = []   // { iccid, boxId, ref }
+  devSnap.forEach(d => {
+    const iccid = String(d.data().iccid || '').replace(/\D/g, '')
+    if (iccid) fleet.push({ iccid, boxId: d.id, ref: d.ref })
+  })
+
+  // 2) Liste des endpoints EMnify (SIMs), paginée.
+  const endpoints = []
+  for (let page = 1; page <= 20; page++) {
+    const r = await fetch(`${EMNIFY_BASE}/endpoint?page=${page}&per_page=100`, { headers: H })
+    if (!r.ok) { if (page === 1) throw new Error(`emnify endpoints ${r.status}`); break }
+    const arr = await r.json()
+    if (!Array.isArray(arr) || arr.length === 0) break
+    endpoints.push(...arr)
+    if (arr.length < 100) break
+  }
+
+  // 3) Pour chaque endpoint, ICCID (sim.iccid) → match flotte → stats mensuelles.
+  let loggedSample = false
+  let matched = 0, totalUsedBytes = 0
+  const batch = db.batch()
+  for (const ep of endpoints) {
+    const iccid = ep?.sim?.iccid || ep?.iccid
+    if (!iccid) continue
+    const box = fleet.find(f => iccidMatch(f.iccid, iccid))
+    if (!box) continue
+    matched++
+
+    let usedBytes = 0, statusName = ep?.status?.description || ep?.status?.name || ''
+    try {
+      const sr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}/stats/month`, { headers: H })
+      if (sr.ok) {
+        const stats = await sr.json()
+        if (!loggedSample) { console.log('[emnify] stats sample', JSON.stringify(stats).slice(0, 500)); loggedSample = true }
+        usedBytes = extractVolumeBytes(stats)
+      } else {
+        console.warn(`[emnify] stats ${ep.id} → ${sr.status}`)
+      }
+    } catch (e) { console.warn('[emnify] stats err', ep.id, e.message) }
+
+    totalUsedBytes += usedBytes
+    batch.set(box.ref, {
+      dataUsageMB: Math.round(usedBytes / 1048576 * 10) / 10,
+      simStatus: statusName,
+      emnifyEndpointId: ep.id,
+      emnifyName: ep.name || '',
+      dataUsageUpdatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
+  }
+
+  // 4) Total du pool. La taille du pool (poolTotalMB) est saisie côté dashboard
+  //    (l'endpoint « data pool » EMnify varie selon l'offre) ; on préserve la
+  //    valeur existante et on écrit le consommé + les compteurs.
+  const metaRef = db.doc('fleetMeta/emnify')
+  batch.set(metaRef, {
+    totalUsedMB: Math.round(totalUsedBytes / 1048576 * 10) / 10,
+    endpointCount: endpoints.length,
+    matchedCount: matched,
+    fleetWithIccid: fleet.length,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true })
+
+  await batch.commit()
+  const summary = { endpoints: endpoints.length, fleetWithIccid: fleet.length, matched, totalUsedMB: Math.round(totalUsedBytes / 1048576 * 10) / 10 }
+  console.log('[emnify] sync', JSON.stringify(summary))
+  return summary
+}
+
+// Callable admin — bouton « Rafraîchir la conso » dans FLEET.
+exports.refreshEmnify = onCall({ region: 'europe-west1', secrets: [EMNIFY_APP_TOKEN] }, async (req) => {
+  const uid = req.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+  const db = getFirestore()
+  const role = (await db.doc(`users/${uid}`).get()).data()?.role
+  if (!['admin', 'super_admin'].includes(role)) throw new HttpsError('permission-denied', 'Admin only')
+  const token = EMNIFY_APP_TOKEN.value()
+  if (!token) throw new HttpsError('failed-precondition', 'EMNIFY_APP_TOKEN non configuré')
+  try { return await runEmnifySync(token) }
+  catch (e) { console.error('[emnify] refresh', e); throw new HttpsError('internal', e.message) }
+})
+
+// Planifié — rafraîchit la conso 4×/jour (EMnify agrège de toute façon lentement).
+exports.emnifyUsageScheduled = onSchedule(
+  { region: 'europe-west1', schedule: 'every 6 hours', secrets: [EMNIFY_APP_TOKEN] },
+  async () => {
+    const token = EMNIFY_APP_TOKEN.value()
+    if (!token) { console.warn('[emnify] scheduled: pas de token'); return }
+    try { await runEmnifySync(token) } catch (e) { console.error('[emnify] scheduled', e) }
+  })
