@@ -277,7 +277,14 @@ export default function FleetPage() {
               <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA/MOIS</div><div>COÛT/MOIS</div><div>LAST SEEN</div>
             </div>
             {devices.map(dev => {
-              const ota = OTA_LABEL[dev.otaState] || OTA_LABEL.idle
+              // OTA : quand rien n'est en cours (idle) ET l'ATC est à jour → « à jour » (vert)
+              // au lieu du « idle » peu parlant. Sinon on garde l'état OTA live (available/downloading…).
+              const atcLatest = published[dev.board]
+              const atcUpToDate = typeof atcLatest === 'number' && dev.fwVersion >= atcLatest
+              const otaState = dev.otaState || 'idle'
+              const ota = (otaState === 'idle' && atcUpToDate)
+                ? { t: 'à jour', c: C.green }
+                : (OTA_LABEL[otaState] || OTA_LABEL.idle)
               // Version ATV publiée : par tag écran si connu, sinon la + haute des tags ATV
               // publiés (tous les écrans partagent le même train VIEW_VERSION) → plus de « ? ».
               const atvNums = ATV_TAGS.map(t => published[`atv_${t}`]).filter(v => typeof v === 'number')
