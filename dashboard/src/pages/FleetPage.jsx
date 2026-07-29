@@ -187,18 +187,26 @@ export default function FleetPage() {
     const reg = (cfgEdit.reg || '').trim().toUpperCase()
     const wifiSsid = (cfgEdit.wifiSsid || '').trim()
     if (!reg && !wifiSsid) return
+    const type = (cfgEdit.type || '').trim().toUpperCase()
+    const hex  = (cfgEdit.hex  || '').trim().toUpperCase()
     setCfgSaving(true)
     try {
+      const email = auth.currentUser?.email || null
+      // (v108) IDENTITÉ dans un doc PUBLIC (reg/type/hex) → le boîtier la lit en 1 TLS SANS auth
+      // (pas de kill-BLE/reboot). JAMAIS de WiFi ici (pass sensible). Écrit seulement si reg fourni.
+      if (reg) {
+        await setDoc(doc(db, 'deviceConfigPublic', cfgEdit.boxId), {
+          boxId: cfgEdit.boxId, reg, type, hex, updatedAt: serverTimestamp(), updatedBy: email,
+        }, { merge: true })
+      }
+      // Doc AUTH complet (WiFi + trace/affichage). Le boîtier lit le WiFi ici (best-effort, auth).
       await setDoc(doc(db, 'deviceConfig', cfgEdit.boxId), {
-        boxId: cfgEdit.boxId,
-        reg,
-        type: (cfgEdit.type || '').trim().toUpperCase(),
-        hex:  (cfgEdit.hex  || '').trim().toUpperCase(),
-        wifiSsid,
-        wifiPass: cfgEdit.wifiPass || '',
-        updatedAt: serverTimestamp(),
-        updatedBy: auth.currentUser?.email || null,
+        boxId: cfgEdit.boxId, reg, type, hex,
+        wifiSsid, wifiPass: cfgEdit.wifiPass || '',
+        updatedAt: serverTimestamp(), updatedBy: email,
       }, { merge: true })
+      // Reflète tout de suite l'immat DÉSIRÉE dans la liste (le report /devices peut retarder).
+      setDevices(ds => ds.map(d => (d.boxId || d.id) === cfgEdit.boxId ? { ...d, desiredCallSign: reg || d.desiredCallSign } : d))
       setCfgEdit(null)
     } catch (e) {
       console.error('[Fleet] saveConfig', e)
@@ -314,10 +322,18 @@ export default function FleetPage() {
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
                   </div>
-                  <div onClick={() => openConfig(dev)} title="Éditer l'identité — poussée au boîtier par WiFi"
-                    style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: C.blue }}>
-                    {callSignOf(dev)} <span style={{ fontSize: 10, opacity: 0.6 }}>✎</span>
-                  </div>
+                  {(() => {
+                    const reported = callSignOf(dev)
+                    const pending = dev.desiredCallSign && dev.desiredCallSign !== reported
+                    return (
+                      <div onClick={() => openConfig(dev)}
+                        title={pending ? `Poussé : ${dev.desiredCallSign} (le boîtier l'applique à sa prochaine session WiFi)` : "Éditer l'identité — poussée au boîtier"}
+                        style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 600, cursor: 'pointer', color: C.blue }}>
+                        {pending ? dev.desiredCallSign : reported} <span style={{ fontSize: 10, opacity: 0.6 }}>✎</span>
+                        {pending && <div style={{ fontSize: 8.5, color: C.amber, fontWeight: 700 }}>→ en attente (était {reported})</div>}
+                      </div>
+                    )
+                  })()}
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
                   <VerBadge cur={dev.atvVersion} curStr={atvVerStr} latest={atvLatest} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>

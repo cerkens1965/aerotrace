@@ -112,6 +112,16 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Device config PUBLIC (v108 — identité aéronef seule : reg/type/hex) ──────
+    // Lu par le BOÎTIER en 1 SEUL TLS SANS auth (GET non authentifié) → tient avec le
+    // BLE connecté sur WROVER → config-pull d'immat SANS kill-BLE ni reboot (le reboot
+    // cassait SafeSky). PUBLIC en lecture = OK, rien de sensible (JAMAIS le mot de passe
+    // WiFi ici — il reste dans /deviceConfig auth-only). Écriture réservée aux admins.
+    match /deviceConfigPublic/{boxId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
     // ── Fleet meta (P3 — total conso pool EMnify, écrit par la Cloud Function) ────
     // La fonction emnifyUsage écrit via l'admin SDK (bypass règles). Le dashboard
     // lit le total ; un admin peut saisir la taille du pool (poolTotalMB).
