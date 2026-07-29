@@ -525,17 +525,19 @@ function iccidMatch(a, b) {
   return a === b || a.startsWith(b) || b.startsWith(a)
 }
 
-// Extraction défensive d'un volume d'octets depuis une réponse EMnify de stats.
-function extractVolumeBytes(stats) {
-  let total = 0
-  const buckets = Array.isArray(stats) ? stats : (stats?.stats || stats?.data || [])
-  for (const b of (Array.isArray(buckets) ? buckets : [])) {
-    const v = b?.volume ?? b?.data_volume ?? b?.usage ?? b
-    if (typeof v === 'number') { total += v; continue }
-    const t = v?.total ?? v?.value ?? ((v?.rx || 0) + (v?.tx || 0))
-    if (typeof t === 'number') total += t
-  }
-  return total
+// Volume data du MOIS COURANT en MB. `GET /endpoint/{id}/stats` renvoie
+// { current_month: { data: { volume:"35.47", volume_rx, volume_tx, month } }, ... }
+// — `volume` est une STRING déjà en MB (confirmé sonde 2026-07-29 : traffic_type.unit="MB").
+function extractMonthMB(stats) {
+  const v = stats?.current_month?.data?.volume
+  const n = typeof v === 'number' ? v : parseFloat(v)
+  return isFinite(n) ? n : 0
+}
+// Coût du mois courant (EMnify renvoie current_month.data.cost + currency.code).
+function extractMonthCost(stats) {
+  const d = stats?.current_month?.data
+  const n = parseFloat(d?.cost)
+  return { cost: isFinite(n) ? n : 0, cur: d?.currency?.code || 'EUR' }
 }
 
 // Cœur de la synchro. Retourne un résumé { matched, total endpoints, usedMB… }.
@@ -544,13 +546,15 @@ async function runEmnifySync(appToken) {
   const authToken = await emnifyAuth(appToken)
   const H = { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' }
 
-  // 1) Liste des boîtiers de la flotte avec un ICCID connu.
+  // 1) Liste des boîtiers de la flotte. Match par ICCID (firmware v105+) OU, en repli,
+  //    par le NOM de l'endpoint EMnify qui contient le boxId (ex "ATC-CE276D (FJFVB)")
+  //    → la conso remonte AVANT même que les boîtiers soient en v105.
   const devSnap = await db.collection('devices').get()
   const fleet = []   // { iccid, boxId, ref }
   devSnap.forEach(d => {
-    const iccid = String(d.data().iccid || '').replace(/\D/g, '')
-    if (iccid) fleet.push({ iccid, boxId: d.id, ref: d.ref })
+    fleet.push({ iccid: String(d.data().iccid || '').replace(/\D/g, ''), boxId: d.id, ref: d.ref })
   })
+  const withIccid = fleet.filter(f => f.iccid).length
 
   // 2) Liste des endpoints EMnify (SIMs), paginée.
   const endpoints = []
@@ -565,30 +569,36 @@ async function runEmnifySync(appToken) {
 
   // 3) Pour chaque endpoint, ICCID (sim.iccid) → match flotte → stats mensuelles.
   let loggedSample = false
-  let matched = 0, totalUsedBytes = 0
+  let matched = 0, totalUsedMB = 0, totalCost = 0, currency = 'EUR'
   const batch = db.batch()
   for (const ep of endpoints) {
     const iccid = ep?.sim?.iccid || ep?.iccid
-    if (!iccid) continue
-    const box = fleet.find(f => iccidMatch(f.iccid, iccid))
+    const epName = (ep?.name || '').toUpperCase()
+    const box = (iccid && fleet.find(f => iccidMatch(f.iccid, iccid)))
+             || fleet.find(f => f.boxId && epName.includes(f.boxId.toUpperCase()))
     if (!box) continue
     matched++
 
-    let usedBytes = 0, statusName = ep?.status?.description || ep?.status?.name || ''
+    // status endpoint (Enabled/Disabled) + status SIM (Activated/Suspended…).
+    const statusName = ep?.sim?.status?.description || ep?.status?.description || ''
+    let usedMB = 0, cost = 0
     try {
-      const sr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}/stats/month`, { headers: H })
+      const sr = await fetch(`${EMNIFY_BASE}/endpoint/${ep.id}/stats`, { headers: H })
       if (sr.ok) {
         const stats = await sr.json()
         if (!loggedSample) { console.log('[emnify] stats sample', JSON.stringify(stats).slice(0, 500)); loggedSample = true }
-        usedBytes = extractVolumeBytes(stats)
+        usedMB = extractMonthMB(stats)
+        const c = extractMonthCost(stats); cost = c.cost; currency = c.cur
       } else {
         console.warn(`[emnify] stats ${ep.id} → ${sr.status}`)
       }
     } catch (e) { console.warn('[emnify] stats err', ep.id, e.message) }
 
-    totalUsedBytes += usedBytes
+    totalUsedMB += usedMB; totalCost += cost
     batch.set(box.ref, {
-      dataUsageMB: Math.round(usedBytes / 1048576 * 10) / 10,
+      dataUsageMB: Math.round(usedMB * 10) / 10,
+      dataCost: Math.round(cost * 100) / 100,
+      dataCostCur: currency,
       simStatus: statusName,
       emnifyEndpointId: ep.id,
       emnifyName: ep.name || '',
@@ -601,15 +611,17 @@ async function runEmnifySync(appToken) {
   //    valeur existante et on écrit le consommé + les compteurs.
   const metaRef = db.doc('fleetMeta/emnify')
   batch.set(metaRef, {
-    totalUsedMB: Math.round(totalUsedBytes / 1048576 * 10) / 10,
+    totalUsedMB: Math.round(totalUsedMB * 10) / 10,
+    totalCost: Math.round(totalCost * 100) / 100,
+    currency,
     endpointCount: endpoints.length,
     matchedCount: matched,
-    fleetWithIccid: fleet.length,
+    fleetWithIccid: withIccid,
     updatedAt: FieldValue.serverTimestamp(),
   }, { merge: true })
 
   await batch.commit()
-  const summary = { endpoints: endpoints.length, fleetWithIccid: fleet.length, matched, totalUsedMB: Math.round(totalUsedBytes / 1048576 * 10) / 10 }
+  const summary = { endpoints: endpoints.length, fleetWithIccid: withIccid, matched, totalUsedMB: Math.round(totalUsedMB * 10) / 10, totalCost: Math.round(totalCost * 100) / 100 }
   console.log('[emnify] sync', JSON.stringify(summary))
   return summary
 }

@@ -213,6 +213,7 @@ export default function FleetPage() {
               <>
                 <div style={{ fontSize: 15, fontWeight: 700, fontFamily: C.mono, color: C.text }}>
                   {used != null ? fmtMB(used) : '—'}{pool ? <span style={{ color: C.mid, fontWeight: 400 }}> / {fmtMB(pool)}</span> : ''}
+                  {emnify?.totalCost != null && <span style={{ color: C.mid, fontWeight: 400, fontSize: 13 }}> · {emnify.totalCost.toFixed(2)} {emnify.currency || 'EUR'}</span>}
                 </div>
                 {pct != null && (
                   <div style={{ flex: '1 1 120px', maxWidth: 220, height: 8, borderRadius: 4, background: 'rgba(10,14,30,0.08)', overflow: 'hidden' }}>
@@ -220,7 +221,7 @@ export default function FleetPage() {
                   </div>
                 )}
                 <div style={{ fontSize: 10.5, color: C.mid, fontFamily: C.mono }}>
-                  {emnify ? `${emnify.matchedCount ?? 0}/${emnify.fleetWithIccid ?? 0} SIM · maj ${fmtSeen(emnify.updatedAt)}` : 'jamais synchronisé'}
+                  {emnify ? `${emnify.matchedCount ?? 0} SIM · maj ${fmtSeen(emnify.updatedAt)}` : 'jamais synchronisé'}
                 </div>
                 <button onClick={refreshEmnify} disabled={refreshing}
                   style={{ marginLeft: 'auto', padding: '7px 14px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: refreshing ? 'default' : 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700, opacity: refreshing ? 0.6 : 1 }}>
@@ -260,9 +261,13 @@ export default function FleetPage() {
                   <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
                   <VerBadge cur={dev.atvVersion} curStr={dev.atvVersion != null ? `v${dev.atvVersion}` : null} latest={published[`atv_${dev.atvTag}`]} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
-                  <div style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 600, color: dev.dataUsageMB != null ? C.text : C.low }}
-                    title={dev.iccid ? `ICCID ${dev.iccid}${dev.simStatus ? ` · ${dev.simStatus}` : ''}` : 'ICCID non remonté (boîtier < v105 ou pas de session LTE)'}>
-                    {dev.dataUsageMB != null ? fmtMB(dev.dataUsageMB) : (dev.iccid ? '—' : '·')}
+                  <div title={dev.iccid ? `ICCID ${dev.iccid}${dev.simStatus ? ` · ${dev.simStatus}` : ''}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'ICCID non remonté (boîtier < v105 ou pas de session LTE)')}>
+                    <div style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 600, color: dev.dataUsageMB != null ? C.text : C.low }}>
+                      {dev.dataUsageMB != null ? fmtMB(dev.dataUsageMB) : (dev.iccid || dev.emnifyName ? '—' : '·')}
+                    </div>
+                    {dev.dataCost != null && dev.dataCost > 0 && (
+                      <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.dataCost.toFixed(2)} {dev.dataCostCur || 'EUR'}</div>
+                    )}
                   </div>
                   <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>{fmtSeen(dev.lastSeen || dev.updatedAt)}</div>
                 </div>
