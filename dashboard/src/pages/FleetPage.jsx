@@ -95,6 +95,14 @@ export default function FleetPage() {
   const [emnify, setEmnify] = useState(null)       // (P3) /fleetMeta/emnify : { totalUsedMB, poolTotalMB, updatedAt… }
   const [refreshing, setRefreshing] = useState(false)
 
+  // (fix modale) Échap ferme l'éditeur config (sauf pendant l'enregistrement).
+  useEffect(() => {
+    if (!cfgEdit) return
+    const onKey = (e) => { if (e.key === 'Escape' && !cfgSaving) setCfgEdit(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cfgEdit, cfgSaving])
+
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
     setLoading(true)
@@ -337,10 +345,12 @@ export default function FleetPage() {
 
         {/* (P1) Éditeur d'identité aéronef — écrit /deviceConfig/{boxId}, le boîtier le tire par WiFi */}
         {cfgEdit && (
-          <div onClick={() => !cfgSaving && setCfgEdit(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-            <div onClick={e => e.stopPropagation()}
-              style={{ background: C.surface, borderRadius: 14, padding: 22, width: 420, maxWidth: '92vw', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+            {/* (fix) la modale ne se ferme plus sur un clic-fond parasite (elle « sautait toute seule »)
+                → fermeture UNIQUEMENT par ✕ / Annuler / Échap. Pas de onClick sur le fond. */}
+            <div style={{ background: C.surface, borderRadius: 14, padding: 22, width: 420, maxWidth: '92vw', boxShadow: '0 10px 40px rgba(0,0,0,0.3)', position: 'relative' }}>
+              <button onClick={() => !cfgSaving && setCfgEdit(null)} title="Fermer" aria-label="Fermer"
+                style={{ position: 'absolute', top: 12, right: 12, width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.mid, cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>×</button>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Config boîtier — <span style={{ fontFamily: C.mono }}>{cfgEdit.boxId}</span></div>
               <div style={{ fontSize: 11.5, color: C.mid, marginTop: 4, lineHeight: 1.5 }}>
                 Poussée au boîtier par WiFi (config-pull). S'applique à sa prochaine session WiFi
