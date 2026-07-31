@@ -312,9 +312,11 @@ export default function FleetPage() {
               // Chaîne ATV complète « comme l'ATC » : le train MAJOR.MINOR est PARTAGÉ ATC↔ATV
               // (versioning AeroTrace) → préfixe train + suffixe canal de l'ATC, build ATV substitué.
               // Ex ATC "1.2.105-dev" + atv 191 → "1.2.191-dev". (dev.atvVersionStr prévaut si un jour remonté.)
+              // \w+ (et non \d+) : le train BANC est « X.1 » (ATC v141) — l'ancien regex chiffres-seuls
+              // ne matchait pas → la colonne ATV affichait la version ATC telle quelle (ex X.1.142 au lieu de X.1.204).
               const atvVerStr = dev.atvVersionStr
                 || (dev.fwVersionStr && dev.atvVersion
-                    ? dev.fwVersionStr.replace(/^(\d+\.\d+\.)\d+/, `$1${dev.atvVersion}`)
+                    ? dev.fwVersionStr.replace(/^(\w+\.\w+\.)\d+/, `$1${dev.atvVersion}`)
                     : (dev.atvVersion ? `v${dev.atvVersion}` : null))
               return (
                 <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
