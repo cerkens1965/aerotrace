@@ -129,7 +129,13 @@ export default function AerotraceMap({ flyTo = null }) {
   const [mapBounds, setMapBounds] = useState(null)
   const traffic = useSafeSky(mapBounds)
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
-  const [activeBasemap, setActiveBasemap] = useState('dataviz-light')
+  // Fond de carte : persisté (localStorage) — sans ça, chaque changement de page
+  // démontait le composant et revenait au fond standard (demande Christophe 01/08).
+  const [activeBasemap, setActiveBasemap] = useState(() => {
+    const saved = localStorage.getItem('at_basemap')
+    return BASEMAPS.some(b => b.id === saved) ? saved : 'dataviz-light'
+  })
+  useEffect(() => { localStorage.setItem('at_basemap', activeBasemap) }, [activeBasemap])
   const [visible, setVisible] = useState({ ctr: true, tma: true, danger: true, airports: true, traffic: true })
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
   const [activeAirports, setActiveAirports] = useState(['fixed'])
