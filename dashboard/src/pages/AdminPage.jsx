@@ -582,8 +582,9 @@ function PilotRow({ pilot, onEdit, onDelete }) {
   )
 }
 
-function AircraftRow({ ac, onEdit, onDelete, pilots = [] }) {
+function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
   const isOwner = ac.ownership === 'owner'
+  const archived = !!ac.archived
   const owner = isOwner ? pilots.find(p => p.id === ac.ownerPilotId) : null
   const ownerName = owner ? `${owner.firstName} ${owner.lastName}` : (isOwner ? '—' : '')
   return (
@@ -591,6 +592,7 @@ function AircraftRow({ ac, onEdit, onDelete, pilots = [] }) {
       display: 'flex', alignItems: 'center', gap: 12,
       padding: '12px 16px', background: C.surface,
       border: `1px solid ${C.border}`, borderRadius: 8,
+      opacity: archived ? 0.45 : 1,
     }}>
       {ac.photoUrl ? (
         <img src={ac.photoUrl} alt="" style={{
@@ -613,6 +615,12 @@ function AircraftRow({ ac, onEdit, onDelete, pilots = [] }) {
           <span style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
             {ac.callSign || ac.registration}
           </span>
+          {archived && (
+            <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+              color: '#94a3b8', border: '1px solid #94a3b855', borderRadius: 4, padding: '1px 6px' }}>
+              ARCHIVED
+            </span>
+          )}
           <span style={{
             fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
             padding: '2px 6px', borderRadius: 4,
@@ -632,11 +640,19 @@ function AircraftRow({ ac, onEdit, onDelete, pilots = [] }) {
           background: 'transparent', border: `1px solid ${C.border}`,
           fontFamily: C.mono, fontSize: 9, color: C.mid,
         }}>EDIT</button>
-        <button onClick={() => onDelete(ac)} style={{
-          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-          background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
-          fontFamily: C.mono, fontSize: 9, color: C.red,
-        }}>✕</button>
+        {archived ? (
+          <button onClick={() => onRestore(ac)} style={{
+            padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+            background: 'transparent', border: `1px solid rgba(34,197,94,0.35)`,
+            fontFamily: C.mono, fontSize: 9, color: '#22c55e',
+          }}>RESTORE</button>
+        ) : (
+          <button onClick={() => onDelete(ac)} style={{
+            padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+            background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
+            fontFamily: C.mono, fontSize: 9, color: C.red,
+          }}>✕</button>
+        )}
       </div>
     </div>
   )
@@ -838,7 +854,15 @@ export default function AdminPage() {
   const deleteAircraft = async (a) => {
     if (!window.confirm(`Archive aircraft ${a.callSign || a.registration}?`)) return
     await updateDoc(doc(db, 'aircraft', a.id), { archived: true, updatedAt: serverTimestamp() })
-    setAircraft(prev => prev.filter(x => x.id !== a.id))
+    // (T18) on GARDE la ligne (badge ARCHIVED + Restore) au lieu de la masquer localement —
+    // avant, l'avion disparaissait de l'écran mais REVENAIT au rechargement (aucune vue ne
+    // filtrait archived) → « la suppression ne marche pas ». Les vues live filtrent désormais.
+    setAircraft(prev => prev.map(x => x.id === a.id ? { ...x, archived: true } : x))
+  }
+
+  const restoreAircraft = async (a) => {
+    await updateDoc(doc(db, 'aircraft', a.id), { archived: false, updatedAt: serverTimestamp() })
+    setAircraft(prev => prev.map(x => x.id === a.id ? { ...x, archived: false } : x))
   }
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -955,12 +979,13 @@ export default function AdminPage() {
                 No aircraft yet. Click + NEW AIRCRAFT to add one.
               </div>
             )}
-            {aircraft.map(a => (
+            {[...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0)).map(a => (
               <AircraftRow
                 key={a.id} ac={a}
                 pilots={pilots}
                 onEdit={openEditAircraft}
                 onDelete={deleteAircraft}
+                onRestore={restoreAircraft}
               />
             ))}
           </div>

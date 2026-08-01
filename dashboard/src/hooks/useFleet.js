@@ -32,7 +32,7 @@ export default function useFleet(clubId) {
     if (!clubId) return
     const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     const unsub = onSnapshot(q,
-      snap => { setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoading(false) },
+      snap => { setAircraft(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => !a.archived)); setLoading(false) },   // (T18) archivés exclus des vues live
       err  => { console.error('[useFleet] aircraft:', err); setError(err); setLoading(false) }
     )
     return () => unsub()

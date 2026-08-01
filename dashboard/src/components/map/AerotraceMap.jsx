@@ -152,7 +152,7 @@ export default function AerotraceMap({ flyTo = null }) {
         const m = new Map()
         snap.forEach(doc => {
           const d = doc.data()
-          if (d.icao24) m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
+          if (!d.archived && d.icao24) m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')   // (T18) archivés hors vues live
         })
         setFleetOwn(m)
       })
