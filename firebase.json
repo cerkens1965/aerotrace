@@ -10,22 +10,48 @@
   },
   "hosting": {
     "public": "dashboard/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
     "rewrites": [
-      { "source": "/safesky/traffic", "function": "safeskyTraffic", "region": "europe-west1" },
-      { "source": "**", "destination": "/index.html" }
+      {
+        "source": "/safesky/traffic",
+        "function": "safeskyTraffic",
+        "region": "europe-west1"
+      },
+      {
+        "source": "/safesky/fleet",
+        "function": "fleetBeacons",
+        "region": "europe-west1"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
     ],
     "//headers": "ORDRE IMPORTANT : quand plusieurs règles matchent, Firebase applique la DERNIÈRE (vérifié au curl 2026-07-17). Le cas général vient donc en premier, les assets ensuite pour gagner.",
     "headers": [
       {
         "//": "Cas général = l'index.html de la SPA (les routes /logbook, /replay... y sont réécrites, et les en-têtes sont matchés sur l'URL demandée, pas sur la cible réécrite). DOIT être revalidé à chaque visite : sinon le défaut max-age=3600 fige l'index sur l'ANCIEN bundle hashé pendant 1 h après un déploiement. Vécu le 2026-07-17 : le Replay échouait sur les vols G3X fraîchement importés (l'ancien bundle n'avait pas le parser 'Lcl Date') alors que le fix était en ligne.",
         "source": "**",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       },
       {
         "//": "Assets Vite : le nom porte un hash de contenu → un changement = un nouveau nom, jamais de périmé servi. Cache long. Doit rester APRÈS la règle ** pour la surcharger.",
         "source": "/assets/**",
-        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
       }
     ]
   },

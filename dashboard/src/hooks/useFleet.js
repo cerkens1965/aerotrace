@@ -22,6 +22,7 @@ export default function useFleet(clubId) {
   const [aircraft,  setAircraft]  = useState([])
   const [fdrStatus, setFdrStatus] = useState({})
   const [safesky,   setSafesky]   = useState([])
+  const [fleetBcn,  setFleetBcn]  = useState({})   // FlyADSL /beacons/search par callsign — réseau + monde entier
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
   const timerRef = useRef(null)
@@ -75,10 +76,47 @@ export default function useFleet(clubId) {
     return () => clearInterval(timerRef.current)
   }, [fetchSafeSky])
 
+  // ── 3bis. Balises FlyADSL par callsign (réseau : app SafeSky, ADS-L AeroTrace…) ──
+  // Le flux uav-api ci-dessus = sources RADIO uniquement. Ici on interroge FlyADSL
+  // pour CHAQUE avion listé du club — toutes sources, sans limite de viewport (un
+  // membre en voyage dans les Alpes reste vu). Poll 15 s (N requêtes côté CF).
+  useEffect(() => {
+    const signs = aircraft.map(a => a.callSign).filter(Boolean)
+    if (!signs.length) return
+    let stop = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`/safesky/fleet?call_signs=${signs.join(',')}`)
+        if (!res.ok) throw new Error(`fleet ${res.status}`)
+        const data = await res.json()
+        if (!stop) setFleetBcn(data.beacons ?? {})
+      } catch (err) { console.warn('[useFleet] fleet beacons poll failed:', err.message) }
+    }
+    poll()
+    const t = setInterval(poll, 15000)
+    return () => { stop = true; clearInterval(t) }
+  }, [aircraft])
+
   // ── 4. Fusion statut ──────────────────────────────────────────────────────
   const fleet = aircraft.map(ac => {
     const fdr = fdrStatus[ac.icao24] ?? null
-    const sky = safesky.find(t =>
+    // Balise FlyADSL (réseau) fraîche < 3 min → source PRIORITAIRE (elle voit l'app
+    // SafeSky et les balises AeroTrace, que le flux radio uav-api ne contient pas).
+    const bcnRaw = ac.callSign ? fleetBcn[ac.callSign.toUpperCase()] : null
+    const bcnFresh = bcnRaw && (Date.now() / 1000 - (bcnRaw.timestamp ?? 0)) < 180
+    const bcn = bcnFresh ? {
+      id: bcnRaw.address,
+      call_sign: bcnRaw.call_sign,
+      latitude: bcnRaw.latitude,
+      longitude: bcnRaw.longitude,
+      altitude: bcnRaw.altitude != null ? Math.round(bcnRaw.altitude * 3.28084) : null,  // m → ft
+      ground_speed: bcnRaw.ground_speed,
+      vertical_rate: bcnRaw.vertical_rate,
+      course: bcnRaw.ground_track,
+      status: bcnRaw.flight_state,           // AIRBORNE | GROUNDED
+      source: 'network',
+    } : null
+    const sky = bcn ?? safesky.find(t =>
       t.id?.toUpperCase() === ac.icao24?.toUpperCase() ||
       (ac.callSign && t.call_sign?.toUpperCase() === ac.callSign.toUpperCase())
     ) ?? null

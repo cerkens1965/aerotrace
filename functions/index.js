@@ -13,6 +13,7 @@ const STORAGE_BUCKET = 'aerotrace-74217.firebasestorage.app'
 if (getApps().length === 0) initializeApp()
 
 const SAFESKY_KEY = defineSecret('SAFESKY_KEY')
+const FLYADSL_KEY = defineSecret('FLYADSL_KEY')   // clé courte FlyADSL (x-api-key, même que les boîtiers)
 const EMNIFY_APP_TOKEN = defineSecret('EMNIFY_APP_TOKEN')   // (P3) EMnify API application token
 
 function deriveKid(apiKey) {
@@ -431,6 +432,42 @@ exports.safeskyTraffic = onRequest(
       res.json({ nearby_traffic: traffic })
     } catch (error) {
       console.error('SafeSky error:', error)
+      res.status(500).json({ error: error.message })
+    }
+  }
+)
+
+// ─── Statut « En vol » de la flotte via FlyADSL /v1/beacons/search ─────────────
+// Le flux uav-api /v1/uav ne contient QUE les sources radio (ADS-B/Mode-S/FLARM) —
+// jamais les membres RÉSEAU (app SafeSky, balises ADS-L AeroTrace). FlyADSL expose
+// en revanche la recherche de balise live PAR CALLSIGN, toutes sources réseau
+// confondues et SANS limite de viewport (un membre en voyage reste visible).
+// Auth : header x-api-key (même clé que le registry / les boîtiers).
+// GET /safesky/fleet?call_signs=FJMLV,OOI43,... → { beacons: { FJMLV: {...}, ... } }
+exports.fleetBeacons = onRequest(
+  { secrets: [FLYADSL_KEY], cors: true, region: 'europe-west1' },
+  async (req, res) => {
+    const raw = (req.query.call_signs || '').toString()
+    const signs = raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean).slice(0, 20)
+    if (!signs.length) return res.status(400).json({ error: 'Missing call_signs' })
+    const key = FLYADSL_KEY.value()
+    try {
+      const { default: fetch } = await import('node-fetch')
+      const out = {}
+      await Promise.all(signs.map(async cs => {
+        try {
+          const r = await fetch(
+            `https://api.flyadsl.com/v1/beacons/search?call_sign=${encodeURIComponent(cs)}`,
+            { headers: { 'x-api-key': key } })
+          if (!r.ok) return                    // 404 = pas de balise live pour ce callsign
+          const b = await r.json()
+          if (b && b.call_sign) out[b.call_sign.toUpperCase()] = b
+        } catch (e) { /* best-effort par callsign */ }
+      }))
+      res.set('Cache-Control', 'no-store')
+      res.json({ beacons: out })
+    } catch (error) {
+      console.error('fleetBeacons error:', error)
       res.status(500).json({ error: error.message })
     }
   }
