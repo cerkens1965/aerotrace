@@ -23,8 +23,11 @@ const C = {
   mono: 'monospace', amber: '#F5A623', green: '#22c55e', red: '#ef4444', blue: '#60a5fa',
 }
 
-const ATC_TAGS = ['s3', 'wrover']
-const ATV_TAGS = ['ws241', 't4s3', 'trgb', 'ws216']
+const ATC_TAGS = ['s3', 'wrover', 's3dev']
+const ATV_TAGS = ['ws241', 't4s3', 'trgb', 'ws216', 'ws241dev']
+// (T30) tag écran déduit du board boîtier quand dev.atvTag est absent : boîtier de banc (s3dev)
+// → écran de banc (ws241dev) ; sinon ws241 (flotte WS-241).
+const atvTagForBoard = (board) => board === 's3dev' ? 'ws241dev' : 'ws241'
 
 const OTA_LABEL = {
   idle: { t: 'idle', c: C.mid }, available: { t: 'update available', c: C.amber },
@@ -60,13 +63,23 @@ function fmtSeen(v) {
 
 // Badge version : petit ✓ vert si à jour, pastille ambre « → vN » si en retard,
 // rien (version seule) si la version publiée est inconnue.
-function VerBadge({ cur, curStr, latest }) {
+function VerBadge({ cur, curStr, latest, fleetMax }) {
   if (cur == null) return <span style={{ color: C.low, fontFamily: C.mono, fontSize: 11 }}>—</span>
   const known = typeof latest === 'number'
   const upToDate = known && cur >= latest
+  // (2026-08-03) « périmé vs PARC » : à jour sur son tag OTA mais un build PLUS RÉCENT roule déjà
+  // sur un autre appareil (flash USB dev, pas encore béni/publié) → badge gris discret.
+  const behindFleet = typeof fleetMax === 'number' && fleetMax > cur && (!known || cur >= latest)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: C.text }}>{curStr || `v${cur}`}</span>
+      {behindFleet && (
+        <span title={`un build plus récent roule dans le parc : v${fleetMax} (dev, non publié sur le tag OTA)`} style={{
+          fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
+          padding: '2px 6px', borderRadius: 4,
+          background: `${C.low}14`, color: C.low, border: `1px solid ${C.low}44`,
+        }}>← v{fleetMax} dev</span>
+      )}
       {known && (upToDate ? (
         <span title={`à jour (v${latest})`} style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -92,7 +105,10 @@ export default function FleetPage() {
   const [loading, setLoading] = useState(true)
   const [cfgEdit, setCfgEdit] = useState(null)     // (P1) config-pull : {boxId, reg, type, hex, reported:{...}} ou null
   const [cfgSaving, setCfgSaving] = useState(false)
-  const [emnify, setEmnify] = useState(null)       // (P3) /fleetMeta/emnify : { totalUsedMB, poolTotalMB, updatedAt… }
+  const [emnify, setEmnify] = useState(null)
+  // (2026-08-03) version max VUE dans le parc (FW_VERSION/VIEW_VERSION monotones toutes cartes)
+  const fleetMaxFw  = devices.reduce((m, d) => Math.max(m, d.fwVersion  || 0), 0)
+  const fleetMaxAtv = devices.reduce((m, d) => Math.max(m, d.atvVersion || 0), 0)       // (P3) /fleetMeta/emnify : { totalUsedMB, poolTotalMB, updatedAt… }
   const [refreshing, setRefreshing] = useState(false)
 
   // (fix modale) Échap ferme l'éditeur config (sauf pendant l'enregistrement).
@@ -308,7 +324,7 @@ export default function FleetPage() {
               // Version ATV publiée : par tag écran si connu, sinon la + haute des tags ATV
               // publiés (tous les écrans partagent le même train VIEW_VERSION) → plus de « ? ».
               const atvNums = ATV_TAGS.map(t => published[`atv_${t}`]).filter(v => typeof v === 'number')
-              const atvLatest = published[`atv_${dev.atvTag}`] ?? (atvNums.length ? Math.max(...atvNums) : undefined)
+              const atvLatest = published[`atv_${dev.atvTag || atvTagForBoard(dev.board)}`] ?? (atvNums.length ? Math.max(...atvNums) : undefined)
               // Chaîne ATV complète « comme l'ATC » : le train MAJOR.MINOR est PARTAGÉ ATC↔ATV
               // (versioning AeroTrace) → préfixe train + suffixe canal de l'ATC, build ATV substitué.
               // Ex ATC "1.2.105-dev" + atv 191 → "1.2.191-dev". (dev.atvVersionStr prévaut si un jour remonté.)
@@ -336,8 +352,8 @@ export default function FleetPage() {
                       </div>
                     )
                   })()}
-                  <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} />
-                  <VerBadge cur={dev.atvVersion} curStr={atvVerStr} latest={atvLatest} />
+                  <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={published[dev.board]} fleetMax={fleetMaxFw} />
+                  <VerBadge cur={dev.atvVersion} curStr={atvVerStr} latest={atvLatest} fleetMax={fleetMaxAtv} />
                   <div style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700, color: ota.c }}>{ota.t}</div>
                   <div title={[
                         dev.iccid ? `ICCID ${dev.iccid}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'non lié à une SIM'),
