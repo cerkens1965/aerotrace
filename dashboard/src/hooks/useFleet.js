@@ -94,7 +94,9 @@ export default function useFleet(clubId) {
       } catch (err) { console.warn('[useFleet] fleet beacons poll failed:', err.message) }
     }
     poll()
-    const t = setInterval(poll, 15000)
+    const t = setInterval(poll, 5000)   // 15→5 s (2026-08-11) : fraîcheur ~5-8 s ; en-dessous de 5 s
+                                        // le gain est nul (latence pipeline SafeSky 2-5 s) et le fan-out
+                                        // par callsign ferait ~500k appels FlyADSL/jour par client à 1 Hz
     return () => { stop = true; clearInterval(t) }
   }, [aircraft])
 
