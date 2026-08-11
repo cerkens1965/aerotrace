@@ -271,7 +271,7 @@ export default function AerotraceMap({ flyTo = null }) {
             <b>${ac.call_sign || ac.id}</b>${isFleet ? (isOwner ? ' <span style="color:#60a5fa;">● OWNER</span>' : ' <span style="color:#ef4444;">● CLUB</span>') : ''}<br/>
             Type: ${ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
-            Spd: ${ac.ground_speed} kt<br/>
+            Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
             Status: ${ac.status}
           </div>`))

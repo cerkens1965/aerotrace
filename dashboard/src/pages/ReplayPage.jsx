@@ -255,7 +255,7 @@ function FlightItem({ flight, selected, onSelect }) {
       <div style={{ display: 'flex', gap: 12 }}>
         {[
           { l: 'ALT', v: `${flight.maxAlt}ft` },
-          { l: 'SPD', v: `${flight.maxSpd}kt` },
+          { l: 'SPD', v: `${Math.round(flight.maxSpd * 1.852)}km/h` },
           { l: 'G',   v: `${flight.maxG}g` },
         ].map(s => (
           <div key={s.l}>
@@ -366,7 +366,7 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
 function DataStrip({ frame }) {
   if (!frame) return null
   const items = [
-    { l: 'GS',    v: `${Math.round(frame.spd)}kt` },
+    { l: 'GS',    v: `${Math.round(frame.spd * 1.852)}km/h` },
     { l: 'ALT',   v: `${Math.round(frame.alt)}ft` },
     { l: 'AGL',   v: `${Math.round(frame.agl)}ft` },
     { l: 'VSI',   v: `${frame.vspd > 0 ? '+' : ''}${Math.round(frame.vspd)}fpm` },

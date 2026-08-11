@@ -116,6 +116,7 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
 
 // ─── Airspeed Indicator ───────────────────────────────────────────────────────
 function AirspeedIndicator({ ias = 0, size = 110 }) {
+  const kmh = ias * 1.852   // interne kt → cadran/affichage km/h (décision 2026-08-10)
   const canvasRef = useRef(null)
   useEffect(() => {
     const canvas = canvasRef.current
@@ -131,22 +132,22 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
 
     // Speed arc colors (green 60-120kt, yellow 120-140kt)
     const drawArc = (start, end, color) => {
-      const s = ((start/200) * 270 - 225) * Math.PI/180
-      const e = ((end/200) * 270 - 225) * Math.PI/180
+      const s = ((start/370) * 270 - 225) * Math.PI/180
+      const e = ((end/370) * 270 - 225) * Math.PI/180
       ctx.beginPath()
       ctx.arc(cx, cy, r-4, s, e)
       ctx.strokeStyle = color
       ctx.lineWidth = 4
       ctx.stroke()
     }
-    drawArc(60, 120, '#22c55e')
-    drawArc(120, 140, '#eab308')
-    drawArc(140, 160, '#ef4444')
+    drawArc(110, 220, '#22c55e')
+    drawArc(220, 260, '#eab308')
+    drawArc(260, 300, '#ef4444')
 
     // Tick marks
-    for (let v = 0; v <= 200; v += 10) {
-      const angle = (v/200 * 270 - 225) * Math.PI/180
-      const isMajor = v % 20 === 0
+    for (let v = 0; v <= 370; v += 20) {
+      const angle = (v/370 * 270 - 225) * Math.PI/180
+      const isMajor = v % 40 === 0
       const r1 = r - (isMajor ? 10 : 6)
       ctx.beginPath()
       ctx.moveTo(cx + r1 * Math.cos(angle), cy + r1 * Math.sin(angle))
@@ -166,7 +167,7 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
     }
 
     // Needle
-    const angle = (Math.min(ias, 200)/200 * 270 - 225) * Math.PI/180
+    const angle = (Math.min(kmh, 370)/370 * 270 - 225) * Math.PI/180
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + (r-8) * Math.cos(angle), cy + (r-8) * Math.sin(angle))
@@ -186,7 +187,7 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
     ctx.fillStyle = C.amber
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
-    ctx.fillText(`${Math.round(ias)}kt`, cx, cy + 22)
+    ctx.fillText(`${Math.round(kmh)}km/h`, cx, cy + 22)
   }, [ias, size])
 
   return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />

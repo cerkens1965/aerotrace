@@ -12,7 +12,7 @@ const C = {
 
 const PARAMS = [
   { key: 'alt',    label: 'ALT',   unit: 'ft',  color: '#60a5fa', defaultOn: true  },
-  { key: 'spd',    label: 'GS',    unit: 'kt',  color: '#22c55e', defaultOn: true  },
+  { key: 'spd',    label: 'GS',    unit: 'km/h', mul: 1.852, color: '#22c55e', defaultOn: true  },
   { key: 'vspd',   label: 'VSI',   unit: 'fpm', color: '#a78bfa', defaultOn: false },
   { key: 'normAc', label: 'G',     unit: 'g',   color: '#f97316', defaultOn: false },
   { key: 'rpm',    label: 'RPM',   unit: '',    color: '#F5A623', defaultOn: false },
@@ -46,7 +46,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
     const px = ts => ((ts - startTs) / totalTs) * W
 
     activeParams.forEach(param => {
-      const vals = data.map(f => f[param.key]).filter(v => !isNaN(v))
+      const vals = data.map(f => f[param.key] * (param.mul || 1)).filter(v => !isNaN(v))
       if (vals.length === 0) return
       const minV = Math.min(...vals)
       const maxV = Math.max(...vals)
@@ -56,7 +56,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       // Ghost
       ctx.beginPath()
       data.forEach((f, i) => {
-        i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key])) : ctx.lineTo(px(f.ts), py(f[param.key]))
+        i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key] * (param.mul || 1))) : ctx.lineTo(px(f.ts), py(f[param.key] * (param.mul || 1)))
       })
       ctx.strokeStyle = `${param.color}55`
       ctx.lineWidth = 1.5
@@ -67,7 +67,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       if (played.length > 1) {
         ctx.beginPath()
         played.forEach((f, i) => {
-          i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key])) : ctx.lineTo(px(f.ts), py(f[param.key]))
+          i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key] * (param.mul || 1))) : ctx.lineTo(px(f.ts), py(f[param.key] * (param.mul || 1)))
         })
         ctx.strokeStyle = param.color
         ctx.lineWidth = 2
@@ -78,7 +78,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       const cur = played[played.length - 1]
       if (cur) {
         ctx.beginPath()
-        ctx.arc(px(cur.ts), py(cur[param.key]), 4, 0, Math.PI * 2)
+        ctx.arc(px(cur.ts), py(cur[param.key] * (param.mul || 1)), 4, 0, Math.PI * 2)
         ctx.fillStyle = param.color
         ctx.fill()
         ctx.strokeStyle = '#000000'
@@ -140,7 +140,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         {PARAMS.map(p => {
           const on = active[p.key]
-          const val = curFrame ? curFrame[p.key] : null
+          const val = curFrame && curFrame[p.key] != null ? curFrame[p.key] * (p.mul || 1) : null
           const displayVal = val != null ? (Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val)) : '—'
           return (
             <button key={p.key} onClick={() => toggle(p.key)} style={{

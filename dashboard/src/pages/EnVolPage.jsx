@@ -34,7 +34,7 @@ const STATUS = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtAlt = ft  => ft  != null ? `${Math.round(ft)} ft` : '—'
-const fmtSpd = kt  => kt  != null ? `${Math.round(kt)} kt` : '—'
+const fmtSpd = kt  => kt  != null ? `${Math.round(kt * 1.852)} km/h` : '—'   // interne kt, affichage km/h (décision 2026-08-10)
 const fmtHdg = deg => deg != null ? `${Math.round(deg)}°`  : '—'
 
 function fmtDuration(startTs) {

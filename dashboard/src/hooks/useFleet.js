@@ -110,7 +110,7 @@ export default function useFleet(clubId) {
       latitude: bcnRaw.latitude,
       longitude: bcnRaw.longitude,
       altitude: bcnRaw.altitude != null ? Math.round(bcnRaw.altitude * 3.28084) : null,  // m → ft
-      ground_speed: bcnRaw.ground_speed,
+      ground_speed: bcnRaw.ground_speed != null ? bcnRaw.ground_speed * 1.94384 : null,  // m/s → kt (FlyADSL est en SI, cf altitude m→ft ci-dessus ; affiché brut la vitesse était ~2× trop basse)
       vertical_rate: bcnRaw.vertical_rate,
       course: bcnRaw.ground_track,
       status: bcnRaw.flight_state,           // AIRBORNE | GROUNDED

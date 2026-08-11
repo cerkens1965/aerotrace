@@ -124,7 +124,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
           <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 12, marginTop: 4 }}>
             {formatDate(flight.startTs)} · {formatDuration(flight.duration)}
             {flight.maxAlt ? ` · ${Math.round(flight.maxAlt)} ft max` : ''}
-            {flight.maxSpd ? ` · ${Math.round(flight.maxSpd)} kt max` : ''}
+            {flight.maxSpd ? ` · ${Math.round(flight.maxSpd * 1.852)} km/h max` : ''}
           </div>
         </div>
 
