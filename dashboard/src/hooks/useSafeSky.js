@@ -18,7 +18,8 @@ export default function useSafeSky(bounds) {
         // ⚠️ API REST SafeSky /traffic = altitude en MÈTRES (le viewer live.safesky.app convertit
         // en pieds, pas l'API). Le dashboard affiche en « ft » → conversion m→ft à la source.
         if (data.nearby_traffic) setTraffic(data.nearby_traffic.map(t =>
-          ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude })))
+          ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude,
+           ground_speed: t.ground_speed != null ? t.ground_speed * 1.94384 : t.ground_speed })))   // ⚠️ ground_speed aussi en SI (m/s) → kt (un liner affichait 176 « kt » réels 343)
       } catch (error) {
         console.error('SafeSky fetch error:', error)
       }

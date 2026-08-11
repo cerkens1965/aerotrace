@@ -63,7 +63,8 @@ export default function useFleet(clubId) {
       // convertit en pieds, mais pas l'API). Tout le dashboard l'affiche en « ft » → on convertit
       // m→ft ICI, à la source, pour que tous les consommateurs (carte, En Vol) soient justes.
       const tr = Array.isArray(data?.nearby_traffic) ? data.nearby_traffic.map(t =>
-        ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude })) : []
+        ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude,
+           ground_speed: t.ground_speed != null ? t.ground_speed * 1.94384 : t.ground_speed })) : []   // ⚠️ ground_speed aussi en SI (m/s) → kt, cohérent avec le chemin beacon
       setSafesky(tr)
     } catch (err) {
       console.warn('[useFleet] SafeSky poll failed:', err.message)
