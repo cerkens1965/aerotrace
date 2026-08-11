@@ -129,6 +129,9 @@ export default function AerotraceMap({ flyTo = null }) {
   const [mapBounds, setMapBounds] = useState(null)
   const traffic = useSafeSky(mapBounds)
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
+  const [fleetRole, setFleetRole] = useState(new Map())  // callSign -> 'club' | 'owner' (balises AeroTrace)
+  const [fleetBcn, setFleetBcn]   = useState({})         // callSign -> balise FlyADSL (avions HORS flux radar)
+  const drRef = useRef({})                               // dead-reckoning par cible (anticipation cap/vitesse)
   // Fond de carte : persisté (localStorage) — sans ça, chaque changement de page
   // démontait le composant et revenait au fond standard (demande Christophe 01/08).
   const [activeBasemap, setActiveBasemap] = useState(() => {
@@ -155,12 +158,14 @@ export default function AerotraceMap({ flyTo = null }) {
     const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     getDocs(q)
       .then(snap => {
-        const m = new Map()
+        const m = new Map(); const roles = new Map()
         snap.forEach(doc => {
           const d = doc.data()
-          if (!d.archived && d.icao24) m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')   // (T18) archivés hors vues live
+          if (d.archived) return                                  // (T18) archivés hors vues live
+          if (d.icao24)   m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
+          if (d.callSign) roles.set(d.callSign.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
         })
-        setFleetOwn(m)
+        setFleetOwn(m); setFleetRole(roles)
       })
       .catch(err => console.error('[AerotraceMap] aircraft load:', err))
   }, [clubId])
@@ -169,6 +174,41 @@ export default function AerotraceMap({ flyTo = null }) {
     const alt = ac.altitude || 0
     return alt >= altRange[0] && alt <= altRange[1]
   })
+
+  // (2026-08-11) BALISES AeroTrace sur la carte : un FK9 SANS transpondeur n'existe pas dans le
+  // flux radar uav-api → on interroge FlyADSL par callsign (comme la page En vol, poll 5 s) et on
+  // l'affiche en marqueur dédié (dédupliqué si le radar voit déjà ce callsign).
+  useEffect(() => {
+    const signs = [...fleetRole.keys()]
+    if (!signs.length) { setFleetBcn({}); return }
+    let stop = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`/safesky/fleet?call_signs=${signs.join(',')}`)
+        if (res.ok) { const d = await res.json(); if (!stop) setFleetBcn(d.beacons ?? {}) }
+      } catch { /* best-effort */ }
+    }
+    poll()
+    const t = setInterval(poll, 5000)
+    return () => { stop = true; clearInterval(t) }
+  }, [fleetRole])
+
+  const radarSigns = new Set(filteredTraffic.map(a => (a.call_sign || '').toUpperCase()).filter(Boolean))
+  const beaconTargets = Object.values(fleetBcn ?? {}).filter(b => {
+    if (!b || b.latitude == null) return false
+    const fresh = (Date.now() / 1000 - (b.timestamp ?? 0)) < 180
+    return fresh && !radarSigns.has((b.call_sign || '').toUpperCase())
+  }).map(b => ({
+    id: `BCN_${b.call_sign}`,
+    call_sign: b.call_sign,
+    latitude: b.latitude, longitude: b.longitude,
+    altitude: b.altitude != null ? Math.round(b.altitude * 3.28084) : 0,   // m → ft (FlyADSL = SI)
+    ground_speed: b.ground_speed != null ? b.ground_speed * 1.94384 : 0,   // m/s → kt
+    course: b.ground_track ?? 0,
+    beacon_type: 'MOTORPLANE', status: b.flight_state ?? '',
+    _fleetBeacon: true,
+  })).filter(a => (a.altitude || 0) >= altRange[0] && (a.altitude || 0) <= altRange[1])
+  const allTargets = [...filteredTraffic, ...beaconTargets]
 
   const toggleLayer = (id) => {
     const next = { ...visible, [id]: !visible[id] }
@@ -241,8 +281,9 @@ export default function AerotraceMap({ flyTo = null }) {
 
     const isDark = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
 
-    filteredTraffic.forEach(ac => {
-      const own      = fleetOwn.get((ac.id || '').toUpperCase())   // 'club' | 'owner' | undefined
+    allTargets.forEach(ac => {
+      const own      = ac._fleetBeacon ? fleetRole.get((ac.call_sign || '').toUpperCase())
+                                       : fleetOwn.get((ac.id || '').toUpperCase())   // 'club' | 'owner' | undefined
       const isFleet  = !!own
       const isOwner  = own === 'owner'
       const fleetClr = isOwner ? '#60a5fa' : '#ef4444'             // owner=bleu · club=rouge
@@ -264,12 +305,18 @@ export default function AerotraceMap({ flyTo = null }) {
           </div>
         </div>`
 
+      // (DR) reprendre la position AFFICHÉE précédente → la correction converge sans saut
+      const prevDr  = drRef.current[ac.id]
+      const dispLat = prevDr ? prevDr.dispLat : ac.latitude
+      const dispLon = prevDr ? prevDr.dispLon : ac.longitude
+      drRef.current[ac.id] = { lat: ac.latitude, lon: ac.longitude, gs: ac.ground_speed || 0,
+                               course: ac.course || 0, t0: Date.now(), dispLat, dispLon }
       const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([ac.longitude, ac.latitude])
+        .setLngLat([dispLon, dispLat])
         .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
             <b>${ac.call_sign || ac.id}</b>${isFleet ? (isOwner ? ' <span style="color:#60a5fa;">● OWNER</span>' : ' <span style="color:#ef4444;">● CLUB</span>') : ''}<br/>
-            Type: ${ac.beacon_type}<br/>
+            Type: ${ac._fleetBeacon ? 'Balise AeroTrace' : ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
@@ -278,7 +325,34 @@ export default function AerotraceMap({ flyTo = null }) {
         .addTo(map.current)
       markersRef.current[ac.id] = marker
     })
-  }, [filteredTraffic, visible.traffic, activeBasemap, fleetOwn])
+    Object.keys(drRef.current).forEach(k => { if (!markersRef.current[k]) delete drRef.current[k] })
+  }, [filteredTraffic, fleetBcn, fleetRole, visible.traffic, activeBasemap, fleetOwn])
+
+  // (2026-08-11) DEAD RECKONING d'affichage (demande Christophe) : entre deux polls (5 s), chaque
+  // cible avance au cap/vitesse connus (tick 500 ms) ; quand la position réelle arrive, l'affichage
+  // CONVERGE vers elle (25 %/tick ≈ correction en ~1,5 s) au lieu de sauter. Gardes : pas
+  // d'anticipation sous 15 kt (jitter sol) ni au-delà de 30 s sans donnée (cible gelée).
+  useEffect(() => {
+    const t = setInterval(() => {
+      const now = Date.now()
+      Object.entries(drRef.current).forEach(([k, d]) => {
+        const m = markersRef.current[k]
+        if (!m) return
+        const age = (now - d.t0) / 1000
+        let tgtLat = d.lat, tgtLon = d.lon
+        if (d.gs > 15 && age < 30) {
+          const dist = d.gs * 0.514444 * age                     // kt → mètres parcourus
+          const cr = (d.course || 0) * Math.PI / 180
+          tgtLat = d.lat + (dist * Math.cos(cr)) / 111320
+          tgtLon = d.lon + (dist * Math.sin(cr)) / (111320 * Math.cos(d.lat * Math.PI / 180))
+        }
+        d.dispLat += (tgtLat - d.dispLat) * 0.25
+        d.dispLon += (tgtLon - d.dispLon) * 0.25
+        m.setLngLat([d.dispLon, d.dispLat])
+      })
+    }, 500)
+    return () => clearInterval(t)
+  }, [])
 
   const panel = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
   const titleStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }
