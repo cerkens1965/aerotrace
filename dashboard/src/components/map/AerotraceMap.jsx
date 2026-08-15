@@ -11,10 +11,15 @@ const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
 const CENTER = { lat: 50.6083, lon: 4.4650 } // EBBY
 const ALT_MAX = 35000
 
+// Sémantique couleur carte (demande Christophe 2026-08-14) :
+//   FLOTTE EBBY (émet via ATC/AeroTrace, owner OU club) = ROUGE #ef4444
+//   TRAFIC SafeSky ambiant (tout le reste)              = BLEU VIF #1e90ff
 // CSS filter: black SVG → red #ef4444
-const SCHOOL_FILTER = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
-// Avion du club = ROUGE (SCHOOL_FILTER) · avion PRIVÉ (propriétaire) = BLEU (même base, hue-rotate → bleu).
-const OWNER_FILTER  = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(190deg) brightness(103%)'
+const FLEET_FILTER   = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
+// black SVG → bleu vif (dodger) #1e90ff
+const SAFESKY_FILTER = 'brightness(0) saturate(100%) invert(39%) sepia(57%) saturate(2618%) hue-rotate(196deg) brightness(101%) contrast(101%)'
+const FLEET_CLR   = '#ef4444'
+const SAFESKY_CLR = '#1e90ff'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
@@ -273,60 +278,94 @@ export default function AerotraceMap({ flyTo = null }) {
     return () => { map.current?.remove(); map.current = null }
   }, [])
 
+  // Marqueurs trafic — RÉCONCILIÉS EN PLACE (pas de teardown/recreate à chaque poll).
+  // Avant : on rasait tous les marqueurs et on recréait chaque <img> → le SVG se rechargeait
+  // et « flashait » en noir (icône sans filtre) une frame avant que le filtre CSS s'applique.
+  // Maintenant : on crée le marqueur une seule fois, puis on ne met à jour icône/filtre/rotation/
+  // label QUE si sa signature a changé → plus de clignotement rouge↔noir.
   useEffect(() => {
     if (!map.current) return
-    Object.values(markersRef.current).forEach(m => m.remove())
-    markersRef.current = {}
-    if (!visible.traffic) return
+    if (!visible.traffic) {
+      Object.values(markersRef.current).forEach(o => o.marker.remove())
+      markersRef.current = {}
+      return
+    }
 
-    const isDark = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
-
+    const seen = new Set()
     allTargets.forEach(ac => {
-      const own      = ac._fleetBeacon ? fleetRole.get((ac.call_sign || '').toUpperCase())
-                                       : fleetOwn.get((ac.id || '').toUpperCase())   // 'club' | 'owner' | undefined
-      const isFleet  = !!own
-      const isOwner  = own === 'owner'
-      const fleetClr = isOwner ? '#60a5fa' : '#ef4444'             // owner=bleu · club=rouge
+      // Appartenance flotte : par HEX (icao24) OU par CALLSIGN. Les FK9 club sans transpondeur
+      // apparaissent dans SafeSky avec un hex ≠ leur icao24 enregistré → le match par callsign
+      // (immatriculation) les reconnaît quand même comme flotte (rouge) au lieu de trafic (bleu).
+      const own      = ac._fleetBeacon
+        ? fleetRole.get((ac.call_sign || '').toUpperCase())
+        : (fleetOwn.get((ac.id || '').toUpperCase()) || fleetRole.get((ac.call_sign || '').toUpperCase()))   // 'club' | 'owner' | undefined
+      const isFleet  = !!own                                       // membre flotte EBBY = émet via ATC
+      const isOwner  = own === 'owner'                             // conservé pour le popup (owner/club)
 
-      const iconFilter = isFleet ? (isOwner ? OWNER_FILTER : SCHOOL_FILTER) : (isDark ? 'invert(1)' : 'none')
-      const labelClr   = isFleet ? fleetClr : (isDark ? '#fff' : '#111')
-      const labelBg    = isDark || isFleet ? 'rgba(0,0,0,0.72)' : 'rgba(255,255,255,0.65)'
-      const labelBdr   = isFleet
-        ? `1px solid ${isOwner ? 'rgba(96,165,250,0.5)' : 'rgba(239,68,68,0.5)'}`
-        : (isDark ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(0,0,0,0.5)')
-
-      const el = document.createElement('div')
-      el.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
-          <img src="/icons/${iconForBeacon(ac.beacon_type)}.svg" style="width:32px;height:32px;transform:rotate(${ac.course || 0}deg);transform-origin:center center;filter:${iconFilter};" />
-          <div style="margin-top:2px;background:${labelBg};border:${labelBdr};border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;">
-            <div style="font-size:10px;font-weight:700;color:${labelClr};">${ac.call_sign || ac.id}</div>
-            <div style="font-size:9px;font-weight:400;color:${labelClr};">${ac.altitude || 0} ft</div>
-          </div>
-        </div>`
+      // Flotte EBBY = ROUGE · trafic SafeSky ambiant = BLEU VIF (lisible sur fond clair ET sombre)
+      const iconFilter = isFleet ? FLEET_FILTER : SAFESKY_FILTER
+      const labelClr   = isFleet ? FLEET_CLR : SAFESKY_CLR
+      const labelBdr   = `1px solid ${isFleet ? 'rgba(239,68,68,0.5)' : 'rgba(30,144,255,0.5)'}`
+      const iconSrc    = `/icons/${iconForBeacon(ac.beacon_type)}.svg`
+      const rot        = ac.course || 0
+      const callTxt    = ac.call_sign || ac.id
+      const altTxt     = `${ac.altitude || 0} ft`
+      seen.add(ac.id)
 
       // (DR) reprendre la position AFFICHÉE précédente → la correction converge sans saut
       const prevDr  = drRef.current[ac.id]
       const dispLat = prevDr ? prevDr.dispLat : ac.latitude
       const dispLon = prevDr ? prevDr.dispLon : ac.longitude
       drRef.current[ac.id] = { lat: ac.latitude, lon: ac.longitude, gs: ac.ground_speed || 0,
-                               course: ac.course || 0, t0: Date.now(), dispLat, dispLon }
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([dispLon, dispLat])
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`
+                               course: rot, t0: Date.now(), dispLat, dispLon }
+
+      let o = markersRef.current[ac.id]
+      if (!o) {
+        const el = document.createElement('div')
+        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;'
+        const img = document.createElement('img')
+        img.style.cssText = 'width:32px;height:32px;transform-origin:center center;'
+        const lbl = document.createElement('div')
+        lbl.style.cssText = 'margin-top:2px;background:rgba(0,0,0,0.72);border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;'
+        const callEl = document.createElement('div'); callEl.style.cssText = 'font-size:10px;font-weight:700;'
+        const altEl  = document.createElement('div'); altEl.style.cssText  = 'font-size:9px;font-weight:400;'
+        lbl.append(callEl, altEl); el.append(img, lbl)
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([dispLon, dispLat])
+          .setPopup(new maplibregl.Popup({ offset: 25 }))
+          .addTo(map.current)
+        o = { marker, img, lbl, callEl, altEl, sig: '' }
+        markersRef.current[ac.id] = o
+      }
+
+      // MAJ visuelle SEULEMENT si un attribut a changé (le src ne bouge pas → pas de reload SVG)
+      const sig = `${iconSrc}|${iconFilter}|${rot}|${labelClr}|${labelBdr}|${callTxt}|${altTxt}`
+      if (o.sig !== sig) {
+        if (o.img.getAttribute('src') !== iconSrc) o.img.setAttribute('src', iconSrc)
+        o.img.style.filter = iconFilter
+        o.img.style.transform = `rotate(${rot}deg)`
+        o.lbl.style.border = labelBdr
+        o.callEl.style.color = labelClr; o.callEl.textContent = callTxt
+        o.altEl.style.color  = labelClr; o.altEl.textContent  = altTxt
+        o.sig = sig
+      }
+
+      o.marker.getPopup().setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${ac.call_sign || ac.id}</b>${isFleet ? (isOwner ? ' <span style="color:#60a5fa;">● OWNER</span>' : ' <span style="color:#ef4444;">● CLUB</span>') : ''}<br/>
+            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : ` <span style="color:${SAFESKY_CLR};">● SafeSky</span>`}<br/>
             Type: ${ac._fleetBeacon ? 'Balise AeroTrace' : ac.beacon_type}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
             Status: ${ac.status}
-          </div>`))
-        .addTo(map.current)
-      markersRef.current[ac.id] = marker
+          </div>`)
     })
-    Object.keys(drRef.current).forEach(k => { if (!markersRef.current[k]) delete drRef.current[k] })
-  }, [filteredTraffic, fleetBcn, fleetRole, visible.traffic, activeBasemap, fleetOwn])
+
+    // retirer les marqueurs des cibles disparues du flux
+    Object.keys(markersRef.current).forEach(id => {
+      if (!seen.has(id)) { markersRef.current[id].marker.remove(); delete markersRef.current[id]; delete drRef.current[id] }
+    })
+  }, [allTargets, fleetRole, fleetOwn, visible.traffic])
 
   // (2026-08-11) DEAD RECKONING d'affichage (demande Christophe) : entre deux polls (5 s), chaque
   // cible avance au cap/vitesse connus (tick 500 ms) ; quand la position réelle arrive, l'affichage
@@ -336,8 +375,8 @@ export default function AerotraceMap({ flyTo = null }) {
     const t = setInterval(() => {
       const now = Date.now()
       Object.entries(drRef.current).forEach(([k, d]) => {
-        const m = markersRef.current[k]
-        if (!m) return
+        const o = markersRef.current[k]
+        if (!o) return
         const age = (now - d.t0) / 1000
         let tgtLat = d.lat, tgtLon = d.lon
         if (d.gs > 15 && age < 30) {
@@ -348,7 +387,7 @@ export default function AerotraceMap({ flyTo = null }) {
         }
         d.dispLat += (tgtLat - d.dispLat) * 0.25
         d.dispLon += (tgtLon - d.dispLon) * 0.25
-        m.setLngLat([d.dispLon, d.dispLat])
+        o.marker.setLngLat([d.dispLon, d.dispLat])
       })
     }, 500)
     return () => clearInterval(t)
