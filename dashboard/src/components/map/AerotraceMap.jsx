@@ -304,8 +304,10 @@ export default function AerotraceMap({ flyTo = null }) {
 
       // Flotte EBBY = ROUGE · trafic SafeSky ambiant = BLEU VIF (lisible sur fond clair ET sombre)
       const iconFilter = isFleet ? FLEET_FILTER : SAFESKY_FILTER
-      const labelClr   = isFleet ? FLEET_CLR : SAFESKY_CLR
-      const labelBdr   = `1px solid ${isFleet ? 'rgba(239,68,68,0.5)' : 'rgba(30,144,255,0.5)'}`
+      // (2026-08-15, demande Christophe) SEULE L'ICÔNE porte la couleur (rouge flotte / bleu trafic) ;
+      // le label reste BLANC sur fond noir = lisibilité maximale sur tout fond de carte.
+      const labelClr   = '#fff'
+      const labelBdr   = '1px solid rgba(255,255,255,0.25)'
       const iconSrc    = `/icons/${iconForBeacon(ac.beacon_type)}.svg`
       const rot        = ac.course || 0
       const callTxt    = ac.call_sign || ac.id
