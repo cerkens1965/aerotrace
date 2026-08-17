@@ -211,6 +211,7 @@ export default function AerotraceMap({ flyTo = null }) {
     ground_speed: b.ground_speed != null ? b.ground_speed * 1.94384 : 0,   // m/s → kt
     course: b.ground_track ?? 0,
     beacon_type: 'MOTORPLANE', status: b.flight_state ?? '',
+    _ts: b.timestamp,                       // (2026-08-17) heure du FIX → ancrage DR
     _fleetBeacon: true,
   })).filter(a => (a.altitude || 0) >= altRange[0] && (a.altitude || 0) <= altRange[1])
   const allTargets = [...filteredTraffic, ...beaconTargets]
@@ -314,12 +315,21 @@ export default function AerotraceMap({ flyTo = null }) {
       const altTxt     = `${ac.altitude || 0} ft`
       seen.add(ac.id)
 
-      // (DR) reprendre la position AFFICHÉE précédente → la correction converge sans saut
+      // (2026-08-17) ANCRAGE SUR L'HEURE DU FIX (last_update radar / timestamp balise), plus sur
+      // l'heure d'arrivée du poll. Deux maux guéris d'un coup (comparaison côte à côte Christophe
+      // vs live.safesky.app) : (a) le RETARD permanent = l'âge du fix (3-15 s) disparaît — on
+      // extrapole depuis l'instant réel de la mesure, comme le viewer SafeSky ; (b) re-servir le
+      // MÊME fix au poll suivant ne redémarre plus l'extrapolation depuis l'ancienne position
+      // (c'était la « MARCHE ARRIÈRE » : avance 5 s → recule → avance — le bug base_ms de l'écran
+      // v207, jamais reporté ici). Un fix identique ré-ancre au même point : continuité parfaite.
+      const rawTs = ac._fleetBeacon ? ac._ts : ac.last_update
+      let fixMs = Number(rawTs) || 0
+      if (fixMs > 1e12) { /* déjà en ms */ } else if (fixMs > 1e9) { fixMs *= 1000 } else { fixMs = Date.now() }
       const prevDr  = drRef.current[ac.id]
       const dispLat = prevDr ? prevDr.dispLat : ac.latitude
       const dispLon = prevDr ? prevDr.dispLon : ac.longitude
       drRef.current[ac.id] = { lat: ac.latitude, lon: ac.longitude, gs: ac.ground_speed || 0,
-                               course: rot, t0: Date.now(), dispLat, dispLon }
+                               course: rot, turn: Number(ac.turn_rate) || 0, fixMs, dispLat, dispLon }
 
       let o = markersRef.current[ac.id]
       if (!o) {
@@ -379,11 +389,20 @@ export default function AerotraceMap({ flyTo = null }) {
       Object.entries(drRef.current).forEach(([k, d]) => {
         const o = markersRef.current[k]
         if (!o) return
-        const age = (now - d.t0) / 1000
+        let age = (now - d.fixMs) / 1000
+        if (age < 0) age = 0                                     // garde horloge client en avance
         let tgtLat = d.lat, tgtLon = d.lon
-        if (d.gs > 15 && age < 30) {
+        if (d.gs > 15 && age < 60) {
           const dist = d.gs * 0.514444 * age                     // kt → mètres parcourus
-          const cr = (d.course || 0) * Math.PI / 180
+          // (2026-08-17) anticipation COURBE : turn_rate (°/s) du flux radar → cap moyen sur
+          // l'intervalle = course + turn·age/2 (arc approx). En tour de piste le virage est
+          // suivi au lieu de « couper » tout droit. Clamp ±180° cumulés (anti-dérive).
+          let hdg = d.course || 0
+          if (Math.abs(d.turn) > 0.5 && Math.abs(d.turn) < 15) {
+            const dturn = Math.max(-180, Math.min(180, d.turn * age))
+            hdg += dturn / 2
+          }
+          const cr = hdg * Math.PI / 180
           tgtLat = d.lat + (dist * Math.cos(cr)) / 111320
           tgtLon = d.lon + (dist * Math.sin(cr)) / (111320 * Math.cos(d.lat * Math.PI / 180))
         }

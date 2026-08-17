@@ -26,7 +26,7 @@ export default function useSafeSky(bounds) {
     }
 
     fetchTraffic()
-    intervalRef.current = setInterval(fetchTraffic, 5000)
+    intervalRef.current = setInterval(fetchTraffic, 3000)   // (2026-08-17) 5→3 s : fluidité live (1 requête viewport, pas de fan-out)
     return () => clearInterval(intervalRef.current)
   }, [bounds?.latMin, bounds?.lonMin, bounds?.latMax, bounds?.lonMax])
 
