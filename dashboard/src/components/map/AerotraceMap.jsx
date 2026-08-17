@@ -25,8 +25,10 @@ const SAFESKY_CLR = '#1e90ff'
 // = GRIS : il ne « participe » pas, il est simplement vu. transponder_type fait foi.
 const RADIO_SRC    = new Set(['ADS-B', 'ADS-BI', 'ADSB', 'MODE-S', 'MODE-C', 'MLAT', 'FLARM', 'OGN'])
 const RADIO_CLR    = '#111111'
-// icône SVG → NOIR pur (demande Christophe — comme les avions du radar écran)
-const RADIO_FILTER = 'brightness(0)'
+// icône SVG radio : NOIR sur fonds clairs, BLANC sur fonds sombres (Dark + Satellite/photo) —
+// flotte (rouge) et partageurs SafeSky (bleu) inchangés quel que soit le fond (demande Christophe).
+const RADIO_FILTER_LIGHT = 'brightness(0)'
+const RADIO_FILTER_DARK  = 'brightness(0) invert(1)'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
@@ -313,7 +315,8 @@ export default function AerotraceMap({ flyTo = null }) {
       // Flotte EBBY = ROUGE · PARTAGEURS SafeSky (app/ADS-L) = BLEU · trafic RADIO (ADS-B/
       // Mode-S/FLARM, simplement capté) = GRIS. Un type inconnu/vide = réseau → bleu.
       const isSharer   = ac._fleetBeacon || !RADIO_SRC.has(String(ac.transponder_type || '').toUpperCase())
-      const iconFilter = isFleet ? FLEET_FILTER : (isSharer ? SAFESKY_FILTER : RADIO_FILTER)
+      const darkMap    = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
+      const iconFilter = isFleet ? FLEET_FILTER : (isSharer ? SAFESKY_FILTER : (darkMap ? RADIO_FILTER_DARK : RADIO_FILTER_LIGHT))
       // (2026-08-15, demande Christophe) SEULE L'ICÔNE porte la couleur (rouge flotte / bleu trafic) ;
       // le label reste BLANC sur fond noir = lisibilité maximale sur tout fond de carte.
       const labelClr   = '#fff'
@@ -387,7 +390,7 @@ export default function AerotraceMap({ flyTo = null }) {
     Object.keys(markersRef.current).forEach(id => {
       if (!seen.has(id)) { markersRef.current[id].marker.remove(); delete markersRef.current[id]; delete drRef.current[id] }
     })
-  }, [allTargets, fleetRole, fleetOwn, visible.traffic])
+  }, [allTargets, fleetRole, fleetOwn, visible.traffic, activeBasemap])
 
   // (2026-08-11) DEAD RECKONING d'affichage (demande Christophe) : entre deux polls (5 s), chaque
   // cible avance au cap/vitesse connus (tick 500 ms) ; quand la position réelle arrive, l'affichage
