@@ -20,6 +20,13 @@ const FLEET_FILTER   = 'brightness(0) saturate(100%) invert(27%) sepia(94%) satu
 const SAFESKY_FILTER = 'brightness(0) saturate(100%) invert(39%) sepia(57%) saturate(2618%) hue-rotate(196deg) brightness(101%) contrast(101%)'
 const FLEET_CLR   = '#ef4444'
 const SAFESKY_CLR = '#1e90ff'
+// (2026-08-17, demande Christophe) BLEU = UNIQUEMENT ceux qui PARTAGENT leur position via la
+// technologie SafeSky (app / balises ADS-L). Le trafic capté par RADIO (ADS-B/Mode-S/FLARM…)
+// = GRIS : il ne « participe » pas, il est simplement vu. transponder_type fait foi.
+const RADIO_SRC    = new Set(['ADS-B', 'ADS-BI', 'ADSB', 'MODE-S', 'MODE-C', 'MLAT', 'FLARM', 'OGN'])
+const RADIO_CLR    = '#94a3b8'
+// noir → gris moyen (slate) lisible sur fond clair ET sombre
+const RADIO_FILTER = 'brightness(0) saturate(100%) invert(69%) sepia(11%) saturate(407%) hue-rotate(176deg) brightness(93%) contrast(87%)'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
@@ -303,8 +310,10 @@ export default function AerotraceMap({ flyTo = null }) {
       const isFleet  = !!own                                       // membre flotte EBBY = émet via ATC
       const isOwner  = own === 'owner'                             // conservé pour le popup (owner/club)
 
-      // Flotte EBBY = ROUGE · trafic SafeSky ambiant = BLEU VIF (lisible sur fond clair ET sombre)
-      const iconFilter = isFleet ? FLEET_FILTER : SAFESKY_FILTER
+      // Flotte EBBY = ROUGE · PARTAGEURS SafeSky (app/ADS-L) = BLEU · trafic RADIO (ADS-B/
+      // Mode-S/FLARM, simplement capté) = GRIS. Un type inconnu/vide = réseau → bleu.
+      const isSharer   = ac._fleetBeacon || !RADIO_SRC.has(String(ac.transponder_type || '').toUpperCase())
+      const iconFilter = isFleet ? FLEET_FILTER : (isSharer ? SAFESKY_FILTER : RADIO_FILTER)
       // (2026-08-15, demande Christophe) SEULE L'ICÔNE porte la couleur (rouge flotte / bleu trafic) ;
       // le label reste BLANC sur fond noir = lisibilité maximale sur tout fond de carte.
       const labelClr   = '#fff'
@@ -364,8 +373,9 @@ export default function AerotraceMap({ flyTo = null }) {
 
       o.marker.getPopup().setHTML(`
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : ` <span style="color:${SAFESKY_CLR};">● SafeSky</span>`}<br/>
+            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : (isSharer ? ` <span style="color:${SAFESKY_CLR};">● SafeSky (partage)</span>` : ` <span style="color:${RADIO_CLR};">● Radio</span>`)}<br/>
             Type: ${ac._fleetBeacon ? 'Balise AeroTrace' : ac.beacon_type}<br/>
+            Src: ${ac._fleetBeacon ? 'ADS-L (AeroTrace)' : (ac.transponder_type || 'réseau SafeSky')}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
