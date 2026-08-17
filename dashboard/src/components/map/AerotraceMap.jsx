@@ -122,21 +122,24 @@ function fmtAirspaceLimit(p, which) {
         if (j && j.value != null) return fmtAirspaceLimit({ [`${which}_limit_value`]: j.value, [`${which}_limit_unit`]: j.unit, [`${which}_limit_reference`]: j.referenceDatum ?? j.reference }, which) } catch { /* brut */ }
   return String(raw)
 }
-function airspacePopupHTML(feats) {
-  const seen = new Set(); const rows = []
+function airspaceItems(feats) {
+  const seen = new Set(); const items = []
   for (const f of feats) {
     const p = f.properties || {}
     const key = `${p.name}|${p.type}`
     if (seen.has(key)) continue
     seen.add(key)
-    const cls = p.icao_class != null && ICAO_CLASS[Number(p.icao_class)] ? ` · classe ${ICAO_CLASS[Number(p.icao_class)]}` : ''
     const typ = String(p.type || '').toUpperCase()
-    const color = typ === 'CTR' ? '#dc3232' : (['TMA', 'CTA'].includes(typ) ? '#1e64dc' : '#ff8c00')
-    rows.push(`<div data-asp="${encodeURIComponent(p.name || '')}" style="margin:5px 0;padding:2px 4px 2px 8px;border-left:3px solid ${color};cursor:pointer;border-radius:3px;" title="Cliquer pour surligner la zone sur la carte">
-      <b>${p.name || '?'}</b> <span style="color:#64748b;">(${typ}${cls})</span><br/>
-      <span style="font-family:monospace;">${fmtAirspaceLimit(p, 'lower')} → ${fmtAirspaceLimit(p, 'upper')}</span></div>`)
+    items.push({
+      name: p.name || '?',
+      typ,
+      cls: p.icao_class != null && ICAO_CLASS[Number(p.icao_class)] ? ICAO_CLASS[Number(p.icao_class)] : null,
+      lo: fmtAirspaceLimit(p, 'lower'),
+      up: fmtAirspaceLimit(p, 'upper'),
+      color: typ === 'CTR' ? '#dc3232' : (['TMA', 'CTA'].includes(typ) ? '#1e64dc' : '#ff8c00'),
+    })
   }
-  return `<div style="font-size:12px;line-height:1.45;max-height:260px;overflow-y:auto;">${rows.join('')}</div>`
+  return items
 }
 
 function addOpenAIPLayers(map, activeAirportTypes) {
@@ -197,6 +200,8 @@ export default function AerotraceMap({ flyTo = null }) {
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
   const [fleetRole, setFleetRole] = useState(new Map())  // callSign -> 'club' | 'owner' (balises AeroTrace)
   const [fleetBcn, setFleetBcn]   = useState({})         // callSign -> balise FlyADSL (avions HORS flux radar)
+  const [aspItems, setAspItems]   = useState(null)       // (2026-08-17) panneau espaces aériens (clic carte)
+  const [aspHl, setAspHl]         = useState(null)       // nom de la zone surlignée (trame + contour épais)
   const drRef = useRef({})                               // dead-reckoning par cible (anticipation cap/vitesse)
   // Fond de carte : persisté (localStorage) — sans ça, chaque changement de page
   // démontait le composant et revenait au fond standard (demande Christophe 01/08).
@@ -235,6 +240,17 @@ export default function AerotraceMap({ flyTo = null }) {
       })
       .catch(err => console.error('[AerotraceMap] aircraft load:', err))
   }, [clubId])
+
+  // Surlignage de zone : filtre des couches HL piloté par l'état (réappliqué au changement de fond,
+  // les couches étant recréées avec un filtre « rien »)
+  useEffect(() => {
+    if (!map.current) return
+    const f = aspHl ? ['==', ['get', 'name'], aspHl] : ['==', ['get', 'name'], '__none__']
+    if (map.current.getLayer('airspace-hl-fill')) {
+      map.current.setFilter('airspace-hl-fill', f)
+      map.current.setFilter('airspace-hl-line', f)
+    }
+  }, [aspHl, activeBasemap, mapReady])
 
   const filteredTraffic = traffic.filter(ac => {
     const alt = ac.altitude || 0
@@ -343,32 +359,11 @@ export default function AerotraceMap({ flyTo = null }) {
       const layers = AIRSPACE_QUERY_LAYERS.filter(l => map.current.getLayer(l))
       if (!layers.length) return
       const feats = map.current.queryRenderedFeatures(e.point, { layers })
-      if (!feats.length) return
-      const setHl = (name) => {
-        map.current.__aspHl = name || null
-        const f = name ? ['==', ['get', 'name'], name] : ['==', ['get', 'name'], '__none__']
-        if (map.current.getLayer('airspace-hl-fill')) {
-          map.current.setFilter('airspace-hl-fill', f)
-          map.current.setFilter('airspace-hl-line', f)
-        }
-      }
-      const popup = new maplibregl.Popup({ offset: 6, maxWidth: '340px' })
-        .setLngLat(e.lngLat)
-        .setHTML(airspacePopupHTML(feats))
-        .addTo(map.current)
-      // clic sur une ligne → surligne la zone (trame + contour épais) ; re-clic → éteint
-      const el = popup.getElement()
-      el.querySelectorAll('[data-asp]').forEach(row => {
-        row.addEventListener('click', (ev) => {
-          ev.stopPropagation()
-          const name = decodeURIComponent(row.dataset.asp)
-          const on = map.current.__aspHl !== name
-          setHl(on ? name : null)
-          el.querySelectorAll('[data-asp]').forEach(r => { r.style.background = 'transparent' })
-          if (on) row.style.background = 'rgba(100,116,139,0.15)'
-        })
-      })
-      popup.on('close', () => setHl(null))
+      // (2026-08-17) le dialogue vit dans un COIN de l'écran (panneau React bas-gauche), pas en
+      // popup sur la zone → le surlignage reste entièrement visible. Clic dans le vide = fermer.
+      if (!feats.length) { setAspItems(null); setAspHl(null); return }
+      setAspHl(null)
+      setAspItems(airspaceItems(feats))
     })
     map.current.on('moveend', updateBounds)
     return () => { map.current?.remove(); map.current = null }
@@ -523,6 +518,28 @@ export default function AerotraceMap({ flyTo = null }) {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+
+      {aspItems && (
+        <div style={{ position: 'absolute', left: 12, bottom: 24, zIndex: 10, width: 280, maxHeight: '42vh', overflowY: 'auto',
+                      background: 'rgba(5,8,20,0.88)', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.9)' }}>ESPACES AÉRIENS</span>
+            <span onClick={() => { setAspItems(null); setAspHl(null) }}
+                  style={{ cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 15, lineHeight: 1, padding: '0 3px' }}>×</span>
+          </div>
+          {aspItems.map((it, i) => (
+            <div key={i} onClick={() => setAspHl(aspHl === it.name ? null : it.name)}
+                 title="Cliquer pour surligner la zone sur la carte"
+                 style={{ margin: '5px 0', padding: '3px 6px 3px 8px', borderLeft: `3px solid ${it.color}`, borderRadius: 3, cursor: 'pointer',
+                          background: aspHl === it.name ? 'rgba(255,255,255,0.10)' : 'transparent' }}>
+              <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
+                {it.name} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>({it.typ}{it.cls ? ` · classe ${it.cls}` : ''})</span>
+              </div>
+              <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.8)' }}>{it.lo} → {it.up}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10, minWidth: 172 }}>
 
