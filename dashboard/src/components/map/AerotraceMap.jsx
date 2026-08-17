@@ -101,6 +101,44 @@ function getAirportFilter(active) {
   return parts.length === 1 ? parts[0] : ['any', ...parts]
 }
 
+// (2026-08-17, demande Christophe) Clic dans une zone (hors icône avion) → popup des espaces
+// aériens EMPILÉS sous le curseur (CTR + étages TMA + zones D/R/P), avec nom, classe et
+// plancher→plafond. Tolérant aux variations de schéma OpenAIP (limites sous plusieurs formes).
+const AIRSPACE_QUERY_LAYERS = ['airspace-ctr-fill', 'airspace-tma-fill', 'airspace-danger-fill']
+const ICAO_CLASS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+function fmtAirspaceLimit(p, which) {
+  const v = p[`${which}_limit_value`] ?? p[`${which}LimitValue`]
+  const u = p[`${which}_limit_unit`]  ?? p[`${which}LimitUnit`]
+  const r = p[`${which}_limit_reference`] ?? p[`${which}LimitReference`]
+  if (v != null) {
+    const unit = String(u ?? 'ft').toUpperCase() === 'FL' || Number(u) === 6 ? 'FL' : 'ft'
+    if (unit === 'FL') return `FL${v}`
+    const ref = r != null ? ` ${String(r).toUpperCase() === 'MSL' || Number(r) === 1 ? 'AMSL' : (String(r).toUpperCase() === 'GND' || Number(r) === 0 ? 'AGL' : String(r))}` : ''
+    return `${v} ${unit}${ref}`
+  }
+  const raw = p[`${which}_limit`] ?? p[`${which}Limit`]
+  if (raw == null) return '?'
+  try { const j = typeof raw === 'string' ? JSON.parse(raw) : raw
+        if (j && j.value != null) return fmtAirspaceLimit({ [`${which}_limit_value`]: j.value, [`${which}_limit_unit`]: j.unit, [`${which}_limit_reference`]: j.referenceDatum ?? j.reference }, which) } catch { /* brut */ }
+  return String(raw)
+}
+function airspacePopupHTML(feats) {
+  const seen = new Set(); const rows = []
+  for (const f of feats) {
+    const p = f.properties || {}
+    const key = `${p.name}|${p.type}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const cls = p.icao_class != null && ICAO_CLASS[Number(p.icao_class)] ? ` · classe ${ICAO_CLASS[Number(p.icao_class)]}` : ''
+    const typ = String(p.type || '').toUpperCase()
+    const color = typ === 'CTR' ? '#dc3232' : (['TMA', 'CTA'].includes(typ) ? '#1e64dc' : '#ff8c00')
+    rows.push(`<div style="margin:5px 0;padding-left:8px;border-left:3px solid ${color};">
+      <b>${p.name || '?'}</b> <span style="color:#64748b;">(${typ}${cls})</span><br/>
+      <span style="font-family:monospace;">${fmtAirspaceLimit(p, 'lower')} → ${fmtAirspaceLimit(p, 'upper')}</span></div>`)
+  }
+  return `<div style="font-size:12px;line-height:1.45;max-height:260px;overflow-y:auto;">${rows.join('')}</div>`
+}
+
 function addOpenAIPLayers(map, activeAirportTypes) {
   if (map.getSource('openaip')) return
   map.addSource('openaip', {
@@ -283,6 +321,19 @@ export default function AerotraceMap({ flyTo = null }) {
       addOpenAIPLayers(map.current, activeAirports)
       updateBounds()
       setMapReady(true)
+    })
+    // (2026-08-17) Clic hors icône avion (les marqueurs DOM interceptent leurs propres clics) →
+    // popup des espaces aériens sous le curseur. Enregistré UNE fois au montage (survit aux
+    // changements de style : l'événement est sur la map, pas sur les couches).
+    map.current.on('click', (e) => {
+      const layers = AIRSPACE_QUERY_LAYERS.filter(l => map.current.getLayer(l))
+      if (!layers.length) return
+      const feats = map.current.queryRenderedFeatures(e.point, { layers })
+      if (!feats.length) return
+      new maplibregl.Popup({ offset: 6, maxWidth: '340px' })
+        .setLngLat(e.lngLat)
+        .setHTML(airspacePopupHTML(feats))
+        .addTo(map.current)
     })
     map.current.on('moveend', updateBounds)
     return () => { map.current?.remove(); map.current = null }
