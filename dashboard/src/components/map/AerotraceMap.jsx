@@ -132,7 +132,7 @@ function airspacePopupHTML(feats) {
     const cls = p.icao_class != null && ICAO_CLASS[Number(p.icao_class)] ? ` · classe ${ICAO_CLASS[Number(p.icao_class)]}` : ''
     const typ = String(p.type || '').toUpperCase()
     const color = typ === 'CTR' ? '#dc3232' : (['TMA', 'CTA'].includes(typ) ? '#1e64dc' : '#ff8c00')
-    rows.push(`<div style="margin:5px 0;padding-left:8px;border-left:3px solid ${color};">
+    rows.push(`<div data-asp="${encodeURIComponent(p.name || '')}" style="margin:5px 0;padding:2px 4px 2px 8px;border-left:3px solid ${color};cursor:pointer;border-radius:3px;" title="Cliquer pour surligner la zone sur la carte">
       <b>${p.name || '?'}</b> <span style="color:#64748b;">(${typ}${cls})</span><br/>
       <span style="font-family:monospace;">${fmtAirspaceLimit(p, 'lower')} → ${fmtAirspaceLimit(p, 'upper')}</span></div>`)
   }
@@ -152,6 +152,20 @@ function addOpenAIPLayers(map, activeAirportTypes) {
   map.addLayer({ id: 'airspace-tma-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['tma', 'cta']]], paint: { 'line-color': 'rgba(30,100,220,0.85)', 'line-width': 1.5 } })
   map.addLayer({ id: 'airspace-danger-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['danger', 'restricted', 'prohibited']]], paint: { 'fill-color': 'rgba(0,0,0,0)' } })
   map.addLayer({ id: 'airspace-danger-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces', filter: ['in', ['get', 'type'], ['literal', ['danger', 'restricted', 'prohibited']]], paint: { 'line-color': 'rgba(255,140,0,0.9)', 'line-width': 1.5, 'line-dasharray': [3, 2] } })
+
+  // (2026-08-17) Couches HIGHLIGHT de zone (clic sur une ligne du popup) : trame de fond de la
+  // couleur du type + contour NET épais. Filtre « rien » par défaut, piloté par setFilter.
+  const HL_NONE = ['==', ['get', 'name'], '__none__']
+  const HL_FILL = ['match', ['get', 'type'],
+    'ctr', 'rgba(220,50,50,0.20)',
+    'tma', 'rgba(30,100,220,0.18)', 'cta', 'rgba(30,100,220,0.18)',
+    'rgba(255,140,0,0.20)']
+  const HL_LINE = ['match', ['get', 'type'],
+    'ctr', 'rgba(220,50,50,1)',
+    'tma', 'rgba(30,100,220,1)', 'cta', 'rgba(30,100,220,1)',
+    'rgba(255,140,0,1)']
+  map.addLayer({ id: 'airspace-hl-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces', filter: HL_NONE, paint: { 'fill-color': HL_FILL } })
+  map.addLayer({ id: 'airspace-hl-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces', filter: HL_NONE, paint: { 'line-color': HL_LINE, 'line-width': 4 } })
 
   map.addLayer({ id: 'airports', type: 'circle', source: 'openaip', 'source-layer': 'airports', paint: { 'circle-radius': 5, 'circle-color': '#1a3a6b', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
   map.addLayer({ id: 'airports-labels', type: 'symbol', source: 'openaip', 'source-layer': 'airports', layout: { 'text-field': ['get', 'icao_code'], 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top' }, paint: { 'text-color': '#1a3a6b', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } })
@@ -330,10 +344,31 @@ export default function AerotraceMap({ flyTo = null }) {
       if (!layers.length) return
       const feats = map.current.queryRenderedFeatures(e.point, { layers })
       if (!feats.length) return
-      new maplibregl.Popup({ offset: 6, maxWidth: '340px' })
+      const setHl = (name) => {
+        map.current.__aspHl = name || null
+        const f = name ? ['==', ['get', 'name'], name] : ['==', ['get', 'name'], '__none__']
+        if (map.current.getLayer('airspace-hl-fill')) {
+          map.current.setFilter('airspace-hl-fill', f)
+          map.current.setFilter('airspace-hl-line', f)
+        }
+      }
+      const popup = new maplibregl.Popup({ offset: 6, maxWidth: '340px' })
         .setLngLat(e.lngLat)
         .setHTML(airspacePopupHTML(feats))
         .addTo(map.current)
+      // clic sur une ligne → surligne la zone (trame + contour épais) ; re-clic → éteint
+      const el = popup.getElement()
+      el.querySelectorAll('[data-asp]').forEach(row => {
+        row.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          const name = decodeURIComponent(row.dataset.asp)
+          const on = map.current.__aspHl !== name
+          setHl(on ? name : null)
+          el.querySelectorAll('[data-asp]').forEach(r => { r.style.background = 'transparent' })
+          if (on) row.style.background = 'rgba(100,116,139,0.15)'
+        })
+      })
+      popup.on('close', () => setHl(null))
     })
     map.current.on('moveend', updateBounds)
     return () => { map.current?.remove(); map.current = null }
