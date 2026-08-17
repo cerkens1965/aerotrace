@@ -24,9 +24,9 @@ const SAFESKY_CLR = '#1e90ff'
 // technologie SafeSky (app / balises ADS-L). Le trafic capté par RADIO (ADS-B/Mode-S/FLARM…)
 // = GRIS : il ne « participe » pas, il est simplement vu. transponder_type fait foi.
 const RADIO_SRC    = new Set(['ADS-B', 'ADS-BI', 'ADSB', 'MODE-S', 'MODE-C', 'MLAT', 'FLARM', 'OGN'])
-const RADIO_CLR    = '#94a3b8'
-// noir → gris moyen (slate) lisible sur fond clair ET sombre
-const RADIO_FILTER = 'brightness(0) saturate(100%) invert(69%) sepia(11%) saturate(407%) hue-rotate(176deg) brightness(93%) contrast(87%)'
+const RADIO_CLR    = '#111111'
+// icône SVG → NOIR pur (demande Christophe — comme les avions du radar écran)
+const RADIO_FILTER = 'brightness(0)'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
