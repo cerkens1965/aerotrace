@@ -701,6 +701,17 @@ async function runEmnifySync(appToken) {
     tot.lastMonthMB += last?.mb || 0; tot.lastMonthCost += last?.cost || 0
     tot.lastDayMB += daily.lastDayMB; tot.yearMB += daily.yearMB; tot.overallMB += daily.overallMB
 
+    // (2026-08-26, suivi conso/heure) HISTORIQUE JOURNALIER : un doc par jour et par boîtier
+    // (/devices/{box}/usage/{YYYY-MM-DD}) — idempotent (merge, la synchro 6 h réécrit le même
+    // doc). Permet de croiser conso quotidienne × sessions de vol (Mo/h par vol, audit forfait).
+    if (daily.lastDayDate) {
+      batch.set(box.ref.collection('usage').doc(daily.lastDayDate), {
+        mb: daily.lastDayMB, date: daily.lastDayDate,
+        monthMB: Math.round(monthMB * 10) / 10,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
+    }
+
     batch.set(box.ref, {
       dataUsageMB: Math.round(monthMB * 10) / 10,        // mois courant (colonne DATA)
       dataCost: Math.round(monthCost * 100) / 100,       // mois courant (colonne COST €)

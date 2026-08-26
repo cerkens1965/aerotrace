@@ -106,6 +106,27 @@ export default function FleetPage() {
   const [cfgEdit, setCfgEdit] = useState(null)     // (P1) config-pull : {boxId, reg, type, hex, reported:{...}} ou null
   const [cfgSaving, setCfgSaving] = useState(false)
   const [emnify, setEmnify] = useState(null)
+  const [hoursByBox, setHoursByBox] = useState({})  // (2026-08-26) heures de vol du mois par boxId (docs /flights uploadés)
+
+  // Heures de vol du MOIS COURANT par boîtier — pour la colonne Mo/h (conso ÷ heures).
+  // Requête single-field (endTs epoch ms ≥ début de mois) → pas d'index composite ; somme
+  // des durations (secondes) groupée par boxId côté client. Ne compte évidemment que les
+  // vols UPLOADÉS (cloud ON) — sans vols, la colonne affiche « — ».
+  useEffect(() => {
+    const now = new Date()
+    const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    getDocs(query(collection(db, 'flights'), where('endTs', '>=', monthStartMs)))
+      .then(snap => {
+        const h = {}
+        snap.forEach(d => {
+          const f = d.data()
+          if (!f.boxId || !f.duration) return
+          h[f.boxId] = (h[f.boxId] || 0) + Number(f.duration) / 3600
+        })
+        setHoursByBox(h)
+      })
+      .catch(err => console.warn('[Fleet] flight hours:', err.message))
+  }, [])
   // (2026-08-03) version max VUE dans le parc (FW_VERSION/VIEW_VERSION monotones toutes cartes)
   const fleetMaxFw  = devices.reduce((m, d) => Math.max(m, d.fwVersion  || 0), 0)
   const fleetMaxAtv = devices.reduce((m, d) => Math.max(m, d.atvVersion || 0), 0)       // (P3) /fleetMeta/emnify : { totalUsedMB, poolTotalMB, updatedAt… }
@@ -309,8 +330,8 @@ export default function FleetPage() {
 
         {!loading && devices.length > 0 && (
           <div style={{ marginTop: 16, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
-              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA/MOIS</div><div>COÛT/MOIS</div><div>LAST SEEN</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.6fr 0.65fr 0.7fr', gap: 8, padding: '10px 16px', borderBottom: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>
+              <div>BOX</div><div>AIRCRAFT</div><div>ATC FIRMWARE</div><div>ATV (screen)</div><div>OTA</div><div>DATA/MOIS</div><div>COÛT/MOIS</div><div>MO/H</div><div>LAST SEEN</div>
             </div>
             {devices.map(dev => {
               // OTA : quand rien n'est en cours (idle) ET l'ATC est à jour → « à jour » (vert)
@@ -335,7 +356,7 @@ export default function FleetPage() {
                     ? dev.fwVersionStr.replace(/^(\w+\.\w+\.)\d+/, `$1${dev.atvVersion}`)
                     : (dev.atvVersion ? `v${dev.atvVersion}` : null))
               return (
-                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.7fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
+                <div key={dev.id} style={{ display: 'grid', gridTemplateColumns: '1fr 0.9fr 1.15fr 1.15fr 0.85fr 0.7fr 0.6fr 0.65fr 0.7fr', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${C.border}`, alignItems: 'center' }}>
                   <div>
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
@@ -370,6 +391,16 @@ export default function FleetPage() {
                   <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700, color: dev.dataCost ? C.green : C.low }}>
                     {dev.dataCost != null ? `${dev.dataCost.toFixed(2)} ${dev.dataCostCur || 'EUR'}` : '—'}
                   </div>
+                  {(() => {   // (2026-08-26) Mo/h = conso mois ÷ heures de vol uploadées du mois
+                    const h = hoursByBox[dev.id] || 0
+                    const ok = h >= 0.5 && dev.dataUsageMB != null   // <30 min de vol = ratio non significatif
+                    return (
+                      <div title={h > 0 ? `${h.toFixed(1)} h de vol uploadées ce mois` : 'aucun vol uploadé ce mois (cloud OFF ?)'}
+                           style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 600, color: ok ? C.text : C.low }}>
+                        {ok ? `${(dev.dataUsageMB / h).toFixed(1)}` : '—'}
+                      </div>
+                    )
+                  })()}
                   <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>{fmtSeen(dev.lastSeen || dev.updatedAt)}</div>
                 </div>
               )
