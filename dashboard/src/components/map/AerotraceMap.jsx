@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { fetchWebPhoto } from '../../lib/webphoto'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { collection, getDocs, query, where } from 'firebase/firestore'
@@ -50,6 +51,14 @@ const BEACON_ICON = {
   UNKNOWN: 'aircraft',
 }
 const iconForBeacon = (bt) => BEACON_ICON[(bt || '').toUpperCase()] || 'aircraft'
+
+// (2026-08-31) Photo en tête de popup — v = {url,credit,link} (fiche club ou planespotters),
+// false/null/undefined = rien. Crédit photographe cliquable (condition planespotters).
+const popupPhotoHtml = (v) => (v && v.url) ? `
+  <div style="margin:-4px -4px 6px;">
+    <img src="${v.url}" alt="" style="display:block;width:100%;max-height:150px;object-fit:cover;border-radius:4px;"/>
+    ${v.credit ? `<a href="${v.link || '#'}" target="_blank" rel="noreferrer" style="font-family:monospace;font-size:9px;color:#888;text-decoration:none;">© ${v.credit} · planespotters.net</a>` : ''}
+  </div>` : ''
 
 const BASEMAPS = [
   { id: 'dataviz-light', label: 'Light' },
@@ -200,6 +209,10 @@ export default function AerotraceMap({ flyTo = null }) {
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
   const [fleetRole, setFleetRole] = useState(new Map())  // callSign -> 'club' | 'owner' (balises AeroTrace)
   const [fleetBcn, setFleetBcn]   = useState({})         // callSign -> balise FlyADSL (avions HORS flux radar)
+  // (2026-08-31, demande Christophe) PHOTO dans le popup : photo de la fiche club (aircraft.photoUrl)
+  // prioritaire, sinon planespotters par hex/immat — fetch UNIQUEMENT à l'ouverture du popup.
+  const fleetPhotoRef = useRef(new Map())   // HEX ou CALLSIGN (upper) -> {url,credit,link}
+  const popupPhotoRef = useRef({})          // id cible -> {url,credit,link} | false(introuvable) | null(fetch en cours)
   const [aspItems, setAspItems]   = useState(null)       // (2026-08-17) panneau espaces aériens (clic carte)
   const [aspHl, setAspHl]         = useState(null)       // nom de la zone surlignée (trame + contour épais)
   const drRef = useRef({})                               // dead-reckoning par cible (anticipation cap/vitesse)
@@ -235,6 +248,11 @@ export default function AerotraceMap({ flyTo = null }) {
           if (d.archived) return                                  // (T18) archivés hors vues live
           if (d.icao24)   m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
           if (d.callSign) roles.set(d.callSign.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
+          if (d.photoUrl) {   // (photo popup) fiche club → prioritaire sur planespotters
+            const ph = { url: d.photoUrl, credit: d.photoCredit || '', link: d.photoLink || '' }
+            if (d.icao24)   fleetPhotoRef.current.set(d.icao24.toUpperCase(), ph)
+            if (d.callSign) fleetPhotoRef.current.set(d.callSign.toUpperCase(), ph)
+          }
         })
         setFleetOwn(m); setFleetRole(roles)
       })
@@ -435,12 +453,33 @@ export default function AerotraceMap({ flyTo = null }) {
         const callEl = document.createElement('div'); callEl.style.cssText = 'font-size:10px;font-weight:700;'
         const altEl  = document.createElement('div'); altEl.style.cssText  = 'font-size:9px;font-weight:400;'
         lbl.append(callEl, altEl); el.append(img, lbl)
+        const popup = new maplibregl.Popup({ offset: 25 })
         const marker = new maplibregl.Marker({ element: el })
           .setLngLat([dispLon, dispLat])
-          .setPopup(new maplibregl.Popup({ offset: 25 }))
+          .setPopup(popup)
           .addTo(map.current)
-        o = { marker, img, lbl, callEl, altEl, sig: '' }
+        o = { marker, img, lbl, callEl, altEl, sig: '', bodyHtml: '' }
         markersRef.current[ac.id] = o
+        // (photo popup) fetch à l'OUVERTURE seulement : fiche club d'abord, sinon planespotters
+        // (hex si l'id en est un, sinon immat). Résultat mémorisé → réouvertures instantanées.
+        const tgtId = ac.id
+        popup.on('open', () => {
+          const cur = popupPhotoRef.current[tgtId]
+          if (cur !== undefined && cur !== null) return   // déjà résolu (photo ou false)
+          const rec = markersRef.current[tgtId]; if (!rec) return
+          const stored = fleetPhotoRef.current.get((rec.callEl.textContent || '').toUpperCase())
+            || (/^[0-9A-F]{6}$/i.test(tgtId) ? fleetPhotoRef.current.get(tgtId.toUpperCase()) : null)
+          const apply = (v) => {
+            popupPhotoRef.current[tgtId] = v || false
+            const r2 = markersRef.current[tgtId]
+            if (r2 && popup.isOpen()) popup.setHTML(popupPhotoHtml(v) + r2.bodyHtml)
+          }
+          if (stored) return apply(stored)
+          if (cur === null) return                        // fetch déjà en cours
+          popupPhotoRef.current[tgtId] = null
+          fetchWebPhoto({ hex: /^[0-9A-F]{6}$/i.test(tgtId) ? tgtId : undefined,
+                          reg: rec.callEl.textContent || undefined }).then(apply)
+        })
       }
 
       // MAJ visuelle SEULEMENT si un attribut a changé (le src ne bouge pas → pas de reload SVG)
@@ -455,7 +494,7 @@ export default function AerotraceMap({ flyTo = null }) {
         o.sig = sig
       }
 
-      o.marker.getPopup().setHTML(`
+      o.bodyHtml = `
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
             <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : (isSharer ? ` <span style="color:${SAFESKY_CLR};">● SafeSky (partage)</span>` : ` <span style="color:${RADIO_CLR};">● Radio</span>`)}<br/>
             Type: ${ac._fleetBeacon ? 'Balise AeroTrace' : ac.beacon_type}<br/>
@@ -464,7 +503,8 @@ export default function AerotraceMap({ flyTo = null }) {
             Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
             Status: ${ac.status}
-          </div>`)
+          </div>`
+      o.marker.getPopup().setHTML(popupPhotoHtml(popupPhotoRef.current[ac.id]) + o.bodyHtml)
     })
 
     // retirer les marqueurs des cibles disparues du flux
