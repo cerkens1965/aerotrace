@@ -57,6 +57,7 @@ const EMPTY_AIRCRAFT = {
   registration: '', callSign: '', typeDesig: '', icao24: '', homeBase: '',
   ownership: 'club', ownerPilotId: '',   // 'club' = avion du club · 'owner' = privé (propriétaire = un pilote)
   photoUrl: '', photoStoragePath: '',
+  photoCredit: '', photoLink: '', photoSource: '',   // (2026-08-31) photo web auto (planespotters)
 }
 
 // ─── Reusable form components ─────────────────────────────────────────────────
@@ -337,6 +338,36 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, saving, error, onS
   )
 }
 
+// ─── (2026-08-31, demande Christophe) Photo web AUTOMATIQUE — planespotters.net ──────────────
+// API publique https://api.planespotters.net/pub/photos/{hex|reg}/… : gratuite, CORS ouvert,
+// hotlink des vignettes autorisé À CONDITION d'afficher le crédit photographe + lien vers la
+// page photo (leurs conditions). Fetch par ICAO24 d'abord (fiable), fallback immatriculation.
+// Cache localStorage 7 j (clé psphoto:<hex|reg>) → pas de spam API à chaque render.
+const PS_CACHE_MS = 7 * 24 * 3600 * 1000
+async function fetchWebPhoto({ hex, reg }) {
+  const key = `psphoto:${(hex || reg || '').toLowerCase()}`
+  if (!hex && !reg) return null
+  try {
+    const c = JSON.parse(localStorage.getItem(key) || 'null')
+    if (c && Date.now() - c.at < PS_CACHE_MS) return c.v
+  } catch { /* cache illisible → refetch */ }
+  let v = null
+  for (const path of [hex && `hex/${hex.toLowerCase()}`, reg && `reg/${encodeURIComponent(reg)}`].filter(Boolean)) {
+    try {
+      const r = await fetch(`https://api.planespotters.net/pub/photos/${path}`)
+      if (!r.ok) continue
+      const ph = (await r.json())?.photos?.[0]
+      if (ph) {
+        v = { url: ph.thumbnail_large?.src || ph.thumbnail?.src || '', credit: ph.photographer || '', link: ph.link || '' }
+        if (v.url) break
+        v = null
+      }
+    } catch { /* réseau/CORS → essai suivant */ }
+  }
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v })) } catch { /* quota plein */ }
+  return v
+}
+
 // ─── Aircraft photo uploader ──────────────────────────────────────────────────
 function AircraftPhotoField({ form, setForm }) {
   const inputRef = useRef(null)
@@ -360,7 +391,17 @@ function AircraftPhotoField({ form, setForm }) {
     finally { setUploading(false) }
   }
 
-  const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '' }))
+  const [fetching, setFetching] = useState(false)
+  // AUTO (WEB) : cherche la photo par hex/immat sur planespotters → URL externe + crédit.
+  const autoFetch = async () => {
+    setErr(''); setFetching(true)
+    const v = await fetchWebPhoto({ hex: form.icao24, reg: form.callSign })
+    setFetching(false)
+    if (!v) return setErr('No web photo found (try after filling ICAO24 / call sign)')
+    setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: 'planespotters' }))
+  }
+
+  const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '', photoCredit: '', photoLink: '', photoSource: '' }))
 
   return (
     <div>
@@ -386,6 +427,21 @@ function AircraftPhotoField({ form, setForm }) {
             }}>
             {uploading ? 'UPLOADING…' : form.photoUrl ? 'REPLACE' : 'UPLOAD'}
           </button>
+          <button type="button" onClick={autoFetch} disabled={fetching || uploading}
+            title="Cherche automatiquement une photo sur planespotters.net (par ICAO24, sinon immat)"
+            style={{
+              padding: '6px 14px', borderRadius: 6, cursor: fetching ? 'wait' : 'pointer',
+              background: 'transparent', border: `1px solid ${C.border}`,
+              fontFamily: C.mono, fontSize: 10, color: C.text, alignSelf: 'flex-start',
+            }}>
+            {fetching ? 'SEARCHING…' : 'AUTO (WEB)'}
+          </button>
+          {form.photoSource === 'planespotters' && form.photoUrl && (
+            <a href={form.photoLink || 'https://www.planespotters.net'} target="_blank" rel="noreferrer"
+              style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textDecoration: 'none' }}>
+              © {form.photoCredit || '?'} · planespotters.net
+            </a>
+          )}
           {form.photoUrl && !uploading && (
             <button type="button" onClick={remove}
               style={{
@@ -583,6 +639,19 @@ function PilotRow({ pilot, onEdit, onDelete }) {
 }
 
 function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
+  // (2026-08-31) pas de photo enregistrée → tentative web auto (planespotters, cache 7 j).
+  // Affichage seul : rien n'est écrit en base (l'admin fige via AUTO (WEB) + Save dans la fiche).
+  const [webPhoto, setWebPhoto] = useState(null)
+  useEffect(() => {
+    if (ac.photoUrl || (!ac.icao24 && !ac.callSign)) return undefined
+    let on = true
+    fetchWebPhoto({ hex: ac.icao24, reg: ac.callSign }).then(v => { if (on && v?.url) setWebPhoto(v) })
+    return () => { on = false }
+  }, [ac.photoUrl, ac.icao24, ac.callSign])
+  const photoUrl = ac.photoUrl || webPhoto?.url
+  const photoTitle = ac.photoUrl
+    ? (ac.photoSource === 'planespotters' ? `© ${ac.photoCredit || '?'} · planespotters.net` : '')
+    : (webPhoto ? `© ${webPhoto.credit || '?'} · planespotters.net` : '')
   const isOwner = ac.ownership === 'owner'
   const archived = !!ac.archived
   const owner = isOwner ? pilots.find(p => p.id === ac.ownerPilotId) : null
@@ -594,8 +663,8 @@ function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
       border: `1px solid ${C.border}`, borderRadius: 8,
       opacity: archived ? 0.45 : 1,
     }}>
-      {ac.photoUrl ? (
-        <img src={ac.photoUrl} alt="" style={{
+      {photoUrl ? (
+        <img src={photoUrl} alt="" title={photoTitle} style={{
           width: 56, height: 36, borderRadius: 6, flexShrink: 0,
           objectFit: 'cover', border: `1px solid ${C.border}`,
         }} />
@@ -836,6 +905,9 @@ export default function AdminPage() {
         ownerPilotId:     aircraftForm.ownership === 'owner' ? (aircraftForm.ownerPilotId || '') : '',
         photoUrl:         aircraftForm.photoUrl || '',
         photoStoragePath: aircraftForm.photoStoragePath || '',
+        photoCredit:      aircraftForm.photoCredit || '',
+        photoLink:        aircraftForm.photoLink   || '',
+        photoSource:      aircraftForm.photoSource || '',
         clubId:           clubId,        // toujours le club courant
         updatedAt:        serverTimestamp(),
       }
