@@ -437,6 +437,42 @@ exports.safeskyTraffic = onRequest(
   }
 )
 
+// ─── (2026-08-31, « Pourquoi ce n'est pas automatique ? ») SYNC fiche aéronef → boîtier ──────
+// La fiche (collection aircraft, éditée au dashboard Admin) est la SOURCE ; ce trigger reporte
+// automatiquement reg/type/hex vers /deviceConfigPublic/{boxId} du boîtier dont le callSign
+// correspond (rapporté dans /devices) → plus AUCUNE double saisie Fleet ✎. Écrit via l'admin
+// SDK (bypass règles). Garde-fous : ne réagit qu'aux champs d'identité (pas aux photos), ne
+// réécrit que si différent, ne TOUCHE PAS au WiFi (doc auth /deviceConfig).
+exports.syncAircraftIdentity = onDocumentWritten(
+  { document: 'aircraft/{acId}', region: 'europe-west1' },
+  async (event) => {
+    const before = event.data?.before?.data() || null
+    const after  = event.data?.after?.data()  || null
+    if (!after) return                                       // suppression → rien
+    const cs  = String(after.callSign || after.registration || '').trim().toUpperCase()
+    if (!cs) return
+    const hex  = String(after.icao24 || '').trim().toUpperCase()
+    const type = String(after.typeDesig || '').trim().toUpperCase()
+    const same = (k) => String(before?.[k] ?? '') === String(after[k] ?? '')
+    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig')) return
+    const db = getFirestore()
+    const devs = await db.collection('devices').where('callSign', '==', cs).get()
+    if (devs.empty) { console.log(`[syncAircraft] ${cs}: aucun boîtier`); return }
+    for (const d of devs.docs) {
+      const boxId = d.data().boxId || d.id
+      const ref = db.doc(`deviceConfigPublic/${boxId}`)
+      const cur = (await ref.get()).data() || {}
+      if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type) continue
+      await ref.set({
+        boxId, reg: cs, type, hex,
+        updatedAt: FieldValue.serverTimestamp(),
+        updatedBy: `auto-sync fiche aéronef (${event.params.acId})`,
+      }, { merge: true })
+      console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type}`)
+    }
+  }
+)
+
 // ─── (2026-08-31) Proxy photo airport-data.com — PAS de CORS chez eux → rewrite Hosting
 // /api/acphoto?r=OO-I44 → { photo: {url, credit, link} | null }. Couverture ULM belges
 // excellente (OO-I44/I43/H63/I35/H14 vérifiés), complète planespotters côté dashboard.
