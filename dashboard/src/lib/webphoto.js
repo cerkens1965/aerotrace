@@ -35,12 +35,51 @@ export async function fetchWebPhoto({ hex, reg }) {
       if (!r.ok) continue
       const ph = (await r.json())?.photos?.[0]
       if (ph) {
-        v = { url: ph.thumbnail_large?.src || ph.thumbnail?.src || '', credit: ph.photographer || '', link: ph.link || '' }
+        v = { url: ph.thumbnail_large?.src || ph.thumbnail?.src || '', credit: ph.photographer || '', link: ph.link || '', site: 'planespotters.net' }
         if (v.url) break
         v = null
       }
     } catch { /* réseau/CORS → essai suivant */ }
   }
+  // (2026-08-31, demande Christophe « va voir dans jetphotos ») JetPhotos n'a PAS d'API publique
+  // (banque photo FR24, scraping interdit) → repli AIRPORT-DATA.COM via notre proxy Cloud Function
+  // /api/acphoto (pas de CORS chez eux). Couverture ULM belges excellente (OO-I44/I43/H63/I35).
+  if (!v) {
+    for (const r of regVariants(reg)) {
+      try {
+        const j = await (await fetch(`/api/acphoto?r=${encodeURIComponent(r)}`)).json()
+        if (j?.photo?.url) { v = { ...j.photo, site: 'airport-data.com' }; break }
+      } catch { /* proxy KO → variante suivante */ }
+    }
+  }
   try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v })) } catch { /* quota plein */ }
+  return v
+}
+
+// ─── (2026-08-31) Immat → HEX transpondeur (Mode S) — hexdb.io puis adsbdb.com ────────────────
+// Les deux sont gratuites et CORS ouvert (vérifié). Couverture partielle : les OO-Hxx/OO-I35 y
+// sont, les OO-I4x et indicatifs français F-Jxxx non (→ saisie manuelle via FR24). Les valeurs
+// trouvées ont été validées identiques aux relevés FR24 de Christophe (44A3FB/44A3CA/44A7DF).
+export async function fetchHexForReg(reg) {
+  if (!reg) return null
+  const key = `reghex:${reg.trim().toLowerCase()}`
+  try {
+    const c = JSON.parse(localStorage.getItem(key) || 'null')
+    if (c && Date.now() - c.at < PS_CACHE_MS) return c.v
+  } catch { /* cache illisible → refetch */ }
+  let v = null
+  const isHex6 = (x) => /^[0-9A-F]{6}$/i.test(x || '')
+  for (const r of regVariants(reg)) {
+    try {   // hexdb.io : texte brut ("44A3FB" ou "n/a")
+      const t = (await (await fetch(`https://hexdb.io/reg-hex?reg=${encodeURIComponent(r)}`)).text()).trim()
+      if (isHex6(t)) { v = { hex: t.toUpperCase(), source: 'hexdb.io', reg: r }; break }
+    } catch { /* réseau → source suivante */ }
+    try {   // adsbdb.com : JSON {response:{aircraft:{mode_s}}}
+      const j = await (await fetch(`https://api.adsbdb.com/v0/aircraft/${encodeURIComponent(r)}`)).json()
+      const ms = j?.response?.aircraft?.mode_s
+      if (isHex6(ms)) { v = { hex: ms.toUpperCase(), source: 'adsbdb.com', reg: r }; break }
+    } catch { /* réseau → variante suivante */ }
+  }
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v })) } catch { /* quota */ }
   return v
 }

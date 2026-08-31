@@ -57,7 +57,7 @@ const iconForBeacon = (bt) => BEACON_ICON[(bt || '').toUpperCase()] || 'aircraft
 const popupPhotoHtml = (v) => (v && v.url) ? `
   <div style="margin:-4px -4px 6px;">
     <img src="${v.url}" alt="" style="display:block;width:100%;max-height:150px;object-fit:cover;border-radius:4px;"/>
-    ${v.credit ? `<a href="${v.link || '#'}" target="_blank" rel="noreferrer" style="font-family:monospace;font-size:9px;color:#888;text-decoration:none;">© ${v.credit} · planespotters.net</a>` : ''}
+    ${v.credit ? `<a href="${v.link || '#'}" target="_blank" rel="noreferrer" style="font-family:monospace;font-size:9px;color:#888;text-decoration:none;">© ${v.credit} · ${v.site || 'planespotters.net'}</a>` : ''}
   </div>` : ''
 
 const BASEMAPS = [
@@ -249,7 +249,7 @@ export default function AerotraceMap({ flyTo = null }) {
           if (d.icao24)   m.set(d.icao24.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
           if (d.callSign) roles.set(d.callSign.toUpperCase(), d.ownership === 'owner' ? 'owner' : 'club')
           if (d.photoUrl) {   // (photo popup) fiche club → prioritaire sur planespotters
-            const ph = { url: d.photoUrl, credit: d.photoCredit || '', link: d.photoLink || '' }
+            const ph = { url: d.photoUrl, credit: d.photoCredit || '', link: d.photoLink || '', site: d.photoSource || '' }
             if (d.icao24)   fleetPhotoRef.current.set(d.icao24.toUpperCase(), ph)
             if (d.callSign) fleetPhotoRef.current.set(d.callSign.toUpperCase(), ph)
           }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { fetchWebPhoto } from '../lib/webphoto'
+import { fetchWebPhoto, fetchHexForReg } from '../lib/webphoto'
 import {
   collection, getDocs, addDoc, updateDoc, setDoc, deleteDoc,
   doc, serverTimestamp, query, orderBy, where,
@@ -369,7 +369,7 @@ function AircraftPhotoField({ form, setForm }) {
     const v = await fetchWebPhoto({ hex: form.icao24, reg: form.callSign })
     setFetching(false)
     if (!v) return setErr('No web photo found (try after filling ICAO24 / call sign)')
-    setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: 'planespotters' }))
+    setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: v.site || 'planespotters.net' }))
   }
 
   const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '', photoCredit: '', photoLink: '', photoSource: '' }))
@@ -407,10 +407,10 @@ function AircraftPhotoField({ form, setForm }) {
             }}>
             {fetching ? 'SEARCHING…' : 'AUTO (WEB)'}
           </button>
-          {form.photoSource === 'planespotters' && form.photoUrl && (
-            <a href={form.photoLink || 'https://www.planespotters.net'} target="_blank" rel="noreferrer"
+          {form.photoSource && form.photoUrl && (
+            <a href={form.photoLink || '#'} target="_blank" rel="noreferrer"
               style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textDecoration: 'none' }}>
-              © {form.photoCredit || '?'} · planespotters.net
+              © {form.photoCredit || '?'} · {form.photoSource}
             </a>
           )}
           {form.photoUrl && !uploading && (
@@ -431,6 +431,40 @@ function AircraftPhotoField({ form, setForm }) {
 }
 
 // ─── Aircraft form panel ──────────────────────────────────────────────────────
+function HexLookupField({ form, setForm }) {
+  const [state, setState] = useState('')   // '' | 'searching' | 'found:<src>' | 'notfound'
+  const find = async () => {
+    if (!form.callSign) return setState('notfound')
+    setState('searching')
+    const v = await fetchHexForReg(form.callSign)
+    if (v?.hex) { setForm(p => ({ ...p, icao24: v.hex.toLowerCase() })); setState(`found:${v.source} (${v.reg})`) }
+    else setState('notfound')
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Input value={form.icao24}
+          onChange={v => setForm(p => ({ ...p, icao24: v.toLowerCase() }))}
+          placeholder="4401ab" maxLength={6} />
+        <button type="button" onClick={find} disabled={state === 'searching'}
+          title="Cherche le hex Mode S depuis l'immat (hexdb.io / adsbdb.com)"
+          style={{ padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: 'transparent',
+                   border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.text, whiteSpace: 'nowrap' }}>
+          {state === 'searching' ? '…' : 'FIND (WEB)'}
+        </button>
+      </div>
+      {state.startsWith('found:') && (
+        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.green, marginTop: 3 }}>✓ {state.slice(6)}</div>
+      )}
+      {state === 'notfound' && (
+        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.amber, marginTop: 3 }}>
+          Introuvable en base publique — relever sur FR24 (détail cible) et saisir à la main
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, pilots = [] }) {
   return (
     <div style={{
@@ -458,9 +492,10 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, 
         </div>
         <div>
           <Label>ICAO24 (hex)</Label>
-          <Input value={form.icao24}
-            onChange={v => setForm(p => ({ ...p, icao24: v.toLowerCase() }))}
-            placeholder="4401ab" maxLength={6} />
+          {/* (2026-08-31, demande Christophe) FIND (WEB) : immat → hex Mode S via hexdb.io/adsbdb.com
+              (variantes avec tiret : OO-I44…). Couverture partielle — si introuvable, saisie
+              manuelle (FR24 reste la meilleure source pour les ULM belges OO-I4x / français F-J). */}
+          <HexLookupField form={form} setForm={setForm} />
         </div>
 
         <div style={{ gridColumn: '1/-1' }}>
@@ -621,8 +656,8 @@ function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
   }, [ac.photoUrl, ac.icao24, ac.callSign])
   const photoUrl = ac.photoUrl || webPhoto?.url
   const photoTitle = ac.photoUrl
-    ? (ac.photoSource === 'planespotters' ? `© ${ac.photoCredit || '?'} · planespotters.net` : '')
-    : (webPhoto ? `© ${webPhoto.credit || '?'} · planespotters.net` : '')
+    ? (ac.photoSource ? `© ${ac.photoCredit || '?'} · ${ac.photoSource}` : '')
+    : (webPhoto ? `© ${webPhoto.credit || '?'} · ${webPhoto.site || 'planespotters.net'}` : '')
   const isOwner = ac.ownership === 'owner'
   const archived = !!ac.archived
   const owner = isOwner ? pilots.find(p => p.id === ac.ownerPilotId) : null

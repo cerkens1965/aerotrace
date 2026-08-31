@@ -437,6 +437,27 @@ exports.safeskyTraffic = onRequest(
   }
 )
 
+// ─── (2026-08-31) Proxy photo airport-data.com — PAS de CORS chez eux → rewrite Hosting
+// /api/acphoto?r=OO-I44 → { photo: {url, credit, link} | null }. Couverture ULM belges
+// excellente (OO-I44/I43/H63/I35/H14 vérifiés), complète planespotters côté dashboard.
+// Cache CDN 24 h (Cache-Control) : une immat est stable, pas besoin de re-fetch.
+exports.acPhoto = onRequest({ region: 'europe-west1', cors: true }, async (req, res) => {
+  const r = String(req.query.r || '').trim().toUpperCase()
+  if (!/^[A-Z0-9-]{3,10}$/.test(r)) return res.status(400).json({ error: 'bad reg' })
+  try {
+    const { default: fetch } = await import('node-fetch')
+    const resp = await fetch(`https://airport-data.com/api/ac_thumb.json?r=${encodeURIComponent(r)}&n=1`,
+      { headers: { 'User-Agent': 'AeroTrace-Dashboard/1.0 (aerotrace-74217.web.app)' } })
+    const j = await resp.json().catch(() => null)
+    const d = j && j.status === 200 && Array.isArray(j.data) ? j.data[0] : null
+    res.set('Cache-Control', 'public, max-age=86400')
+    res.json({ photo: d ? { url: d.image || '', credit: d.photographer || '', link: d.link || '' } : null })
+  } catch (e) {
+    console.error('acPhoto error:', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Statut « En vol » de la flotte via FlyADSL /v1/beacons/search ─────────────
 // Le flux uav-api /v1/uav ne contient QUE les sources radio (ADS-B/Mode-S/FLARM) —
 // jamais les membres RÉSEAU (app SafeSky, balises ADS-L AeroTrace). FlyADSL expose
