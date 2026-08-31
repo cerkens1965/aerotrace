@@ -215,9 +215,13 @@ export default function FleetPage() {
     const acMatch = aircraft.find(a => ((a.callSign || a.registration || '').toUpperCase() === regForMatch))
     setCfgEdit({
       boxId,
-      reg:  cfg.reg  ?? dev.callSign ?? '',
-      type: cfg.type ?? '',
-      hex:  (cfg.hex || acMatch?.icao24 || dev.icao24 || '').toUpperCase(),
+      // (2026-08-31 soir, « on encode à deux endroits, pas bon ») fromSheet : une fiche aéronef
+      // existe → l'identité est GÉRÉE PAR LA FICHE (Admin) + sync auto (CF syncAircraftIdentity).
+      // Le modal la montre en lecture seule ; on n'édite ici que le WiFi club.
+      fromSheet: !!acMatch,
+      reg:  (acMatch ? (acMatch.callSign || acMatch.registration) : (cfg.reg ?? dev.callSign)) ?? '',
+      type: (acMatch ? (acMatch.typeDesig || '') : (cfg.type ?? '')),
+      hex:  ((acMatch ? acMatch.icao24 : (cfg.hex || dev.icao24)) || '').toUpperCase(),
       wifiSsid: cfg.wifiSsid ?? '',
       wifiPass: cfg.wifiPass ?? '',
       reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '' },
@@ -465,23 +469,38 @@ export default function FleetPage() {
                 (boot / Report to fleet) → ré-inscription SafeSky automatique.
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>IMMATRICULATION / CALLSIGN *</span>
-                  <input value={cfgEdit.reg} autoFocus onChange={e => setCfgEdit(c => ({ ...c, reg: e.target.value }))}
-                    placeholder="OOI43" style={inputStyle} />
-                </label>
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>TYPE OACI</span>
-                    <input value={cfgEdit.type} onChange={e => setCfgEdit(c => ({ ...c, type: e.target.value }))}
-                      placeholder="FK9 / VL3…" style={inputStyle} />
-                  </label>
-                  <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>HEX (si transpondeur)</span>
-                    <input value={cfgEdit.hex} onChange={e => setCfgEdit(c => ({ ...c, hex: e.target.value }))}
-                      placeholder="(vide si pas d'ADS-B)" style={inputStyle} />
-                  </label>
-                </div>
+                {cfgEdit.fromSheet ? (
+                  /* Fiche aéronef trouvée → UNE SEULE source : identité en lecture seule ici. */
+                  <div style={{ padding: '10px 12px', borderRadius: 8, background: C.bg, border: `1px solid ${C.border}` }}>
+                    <div style={{ fontSize: 10, color: C.mid, fontWeight: 700, letterSpacing: '0.05em' }}>
+                      IDENTITÉ — gérée par la fiche aéronef (Admin → Aircraft), sync auto vers le boîtier
+                    </div>
+                    <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, marginTop: 6 }}>
+                      {cfgEdit.reg}
+                      <span style={{ color: C.mid, fontWeight: 400 }}> · {cfgEdit.type || 'type ?'} · {cfgEdit.hex || 'hex ∅'}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>IMMATRICULATION / CALLSIGN * <span style={{ color: C.low, fontWeight: 400 }}>(pas de fiche aéronef — saisie directe)</span></span>
+                      <input value={cfgEdit.reg} autoFocus onChange={e => setCfgEdit(c => ({ ...c, reg: e.target.value }))}
+                        placeholder="OOI43" style={inputStyle} />
+                    </label>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>TYPE OACI</span>
+                        <input value={cfgEdit.type} onChange={e => setCfgEdit(c => ({ ...c, type: e.target.value }))}
+                          placeholder="FK9 / VL3…" style={inputStyle} />
+                      </label>
+                      <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>HEX (si transpondeur)</span>
+                        <input value={cfgEdit.hex} onChange={e => setCfgEdit(c => ({ ...c, hex: e.target.value }))}
+                          placeholder="(vide si pas d'ADS-B)" style={inputStyle} />
+                      </label>
+                    </div>
+                  </>
+                )}
 
                 {/* (P2) WiFi club poussé au boîtier */}
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>

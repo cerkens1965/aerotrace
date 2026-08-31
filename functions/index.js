@@ -443,35 +443,53 @@ exports.safeskyTraffic = onRequest(
 // correspond (rapporté dans /devices) → plus AUCUNE double saisie Fleet ✎. Écrit via l'admin
 // SDK (bypass règles). Garde-fous : ne réagit qu'aux champs d'identité (pas aux photos), ne
 // réécrit que si différent, ne TOUCHE PAS au WiFi (doc auth /deviceConfig).
+async function syncAircraftToBox(after, tag) {
+  const cs  = String(after.callSign || after.registration || '').trim().toUpperCase()
+  if (!cs) return []
+  const hex  = String(after.icao24 || '').trim().toUpperCase()
+  const type = String(after.typeDesig || '').trim().toUpperCase()
+  const db = getFirestore()
+  const devs = await db.collection('devices').where('callSign', '==', cs).get()
+  const done = []
+  for (const d of devs.docs) {
+    const boxId = d.data().boxId || d.id
+    const ref = db.doc(`deviceConfigPublic/${boxId}`)
+    const cur = (await ref.get()).data() || {}
+    if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type) continue
+    await ref.set({
+      boxId, reg: cs, type, hex,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: `auto-sync fiche aéronef (${tag})`,
+    }, { merge: true })
+    console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type}`)
+    done.push(`${cs}→${boxId}:${hex || '∅'}`)
+  }
+  return done
+}
+
 exports.syncAircraftIdentity = onDocumentWritten(
   { document: 'aircraft/{acId}', region: 'europe-west1' },
   async (event) => {
     const before = event.data?.before?.data() || null
     const after  = event.data?.after?.data()  || null
     if (!after) return                                       // suppression → rien
-    const cs  = String(after.callSign || after.registration || '').trim().toUpperCase()
-    if (!cs) return
-    const hex  = String(after.icao24 || '').trim().toUpperCase()
-    const type = String(after.typeDesig || '').trim().toUpperCase()
     const same = (k) => String(before?.[k] ?? '') === String(after[k] ?? '')
     if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig')) return
-    const db = getFirestore()
-    const devs = await db.collection('devices').where('callSign', '==', cs).get()
-    if (devs.empty) { console.log(`[syncAircraft] ${cs}: aucun boîtier`); return }
-    for (const d of devs.docs) {
-      const boxId = d.data().boxId || d.id
-      const ref = db.doc(`deviceConfigPublic/${boxId}`)
-      const cur = (await ref.get()).data() || {}
-      if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type) continue
-      await ref.set({
-        boxId, reg: cs, type, hex,
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: `auto-sync fiche aéronef (${event.params.acId})`,
-      }, { merge: true })
-      console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type}`)
-    }
+    await syncAircraftToBox(after, event.params.acId)
   }
 )
+
+// Backfill ONE-SHOT (idempotent, bénin — ne fait que rejouer la sync sur l'existant) :
+// GET /backfillIdentity → applique syncAircraftToBox à TOUTES les fiches. Utilisé le 31/08
+// pour rattraper les boîtiers dont la fiche avait déjà le hex AVANT la mise en place du trigger.
+exports.backfillIdentity = onRequest({ region: 'europe-west1' }, async (req, res) => {
+  try {
+    const snap = await getFirestore().collection('aircraft').get()
+    const out = []
+    for (const doc of snap.docs) out.push(...await syncAircraftToBox(doc.data(), `backfill/${doc.id}`))
+    res.json({ synced: out })
+  } catch (e) { console.error('backfill error:', e); res.status(500).json({ error: e.message }) }
+})
 
 // ─── (2026-08-31) Proxy photo airport-data.com — PAS de CORS chez eux → rewrite Hosting
 // /api/acphoto?r=OO-I44 → { photo: {url, credit, link} | null }. Couverture ULM belges
