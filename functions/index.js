@@ -458,6 +458,32 @@ exports.acPhoto = onRequest({ region: 'europe-west1', cors: true }, async (req, 
   }
 })
 
+// ─── (2026-08-31) Proxy hex LIVE adsb.lol — indicatif radio → hex Mode S, marche UNIQUEMENT
+// pendant que l'avion émet (le transpondeur broadcast son Flight ID, ex "FJVUD" → hex 38C37C ;
+// c'est ainsi que FR24 fait le lien). adsb.lol n'a pas de CORS → rewrite /api/hexlive?q=FJVUD.
+// Essaie callsign PUIS registration. Réponse: { hex, callsign } | { hex: null }.
+exports.hexLive = onRequest({ region: 'europe-west1', cors: true }, async (req, res) => {
+  const q = String(req.query.q || '').trim().toUpperCase()
+  if (!/^[A-Z0-9-]{3,10}$/.test(q)) return res.status(400).json({ error: 'bad query' })
+  try {
+    const { default: fetch } = await import('node-fetch')
+    for (const path of [`callsign/${encodeURIComponent(q)}`, `reg/${encodeURIComponent(q)}`]) {
+      const j = await (await fetch(`https://api.adsb.lol/v2/${path}`,
+        { headers: { 'User-Agent': 'AeroTrace-Dashboard/1.0 (aerotrace-74217.web.app)' } })).json().catch(() => null)
+      const ac = j && Array.isArray(j.ac) ? j.ac[0] : null
+      if (ac && /^[0-9a-f]{6}$/i.test(ac.hex || '')) {
+        res.set('Cache-Control', 'public, max-age=60')
+        return res.json({ hex: ac.hex.toUpperCase(), callsign: (ac.flight || '').trim() })
+      }
+    }
+    res.set('Cache-Control', 'public, max-age=60')
+    res.json({ hex: null })
+  } catch (e) {
+    console.error('hexLive error:', e)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Statut « En vol » de la flotte via FlyADSL /v1/beacons/search ─────────────
 // Le flux uav-api /v1/uav ne contient QUE les sources radio (ADS-B/Mode-S/FLARM) —
 // jamais les membres RÉSEAU (app SafeSky, balises ADS-L AeroTrace). FlyADSL expose

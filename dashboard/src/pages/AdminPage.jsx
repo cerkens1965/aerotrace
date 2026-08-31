@@ -458,7 +458,7 @@ function HexLookupField({ form, setForm }) {
       )}
       {state === 'notfound' && (
         <div style={{ fontFamily: C.mono, fontSize: 9, color: C.amber, marginTop: 3 }}>
-          Introuvable en base publique — relever sur FR24 (détail cible) et saisir à la main
+          Introuvable — registres KO pour les F-J ; la source LIVE ne répond que si l'avion VOLE (réessaie en vol), sinon FR24 à la main
         </div>
       )}
     </div>

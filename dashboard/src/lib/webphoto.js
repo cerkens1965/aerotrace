@@ -60,12 +60,13 @@ export async function fetchWebPhoto({ hex, reg }) {
 // Les deux sont gratuites et CORS ouvert (vérifié). Couverture partielle : les OO-Hxx/OO-I35 y
 // sont, les OO-I4x et indicatifs français F-Jxxx non (→ saisie manuelle via FR24). Les valeurs
 // trouvées ont été validées identiques aux relevés FR24 de Christophe (44A3FB/44A3CA/44A7DF).
+const RH_NEG_MS = 10 * 60 * 1000   // pas trouvé : 10 min seulement (la source LIVE peut répondre au prochain vol)
 export async function fetchHexForReg(reg) {
   if (!reg) return null
   const key = `reghex:${reg.trim().toLowerCase()}`
   try {
     const c = JSON.parse(localStorage.getItem(key) || 'null')
-    if (c && Date.now() - c.at < PS_CACHE_MS) return c.v
+    if (c && Date.now() - c.at < (c.v ? PS_CACHE_MS : RH_NEG_MS)) return c.v
   } catch { /* cache illisible → refetch */ }
   let v = null
   const isHex6 = (x) => /^[0-9A-F]{6}$/i.test(x || '')
@@ -79,6 +80,18 @@ export async function fetchHexForReg(reg) {
       const ms = j?.response?.aircraft?.mode_s
       if (isHex6(ms)) { v = { hex: ms.toUpperCase(), source: 'adsbdb.com', reg: r }; break }
     } catch { /* réseau → variante suivante */ }
+  }
+  // (2026-08-31, idée Christophe « base-toi sur l'indicatif radio ») 3e source : LIVE adsb.lol via
+  // notre proxy /api/hexlive — le transpondeur émet son Flight ID (« FJVUD ») quand il vole → seul
+  // moyen pour les indicatifs F-J absents des registres. Forme BRUTE d'abord (l'ident n'a pas de
+  // tiret), puis variantes. Ne répond que si l'avion émet à cet instant.
+  if (!v) {
+    for (const r of [reg.trim().toUpperCase(), ...regVariants(reg).slice(1)]) {
+      try {
+        const j = await (await fetch(`/api/hexlive?q=${encodeURIComponent(r)}`)).json()
+        if (j?.hex) { v = { hex: j.hex, source: 'adsb.lol (LIVE — avion en émission)', reg: r }; break }
+      } catch { /* proxy KO → variante suivante */ }
+    }
   }
   try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v })) } catch { /* quota */ }
   return v
