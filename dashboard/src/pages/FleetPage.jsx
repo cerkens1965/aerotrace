@@ -208,11 +208,16 @@ export default function FleetPage() {
     const boxId = dev.boxId || dev.id
     let cfg = {}
     try { const s = await getDoc(doc(db, 'deviceConfig', boxId)); if (s.exists()) cfg = s.data() } catch (e) { console.error(e) }
+    // (2026-08-31, retour Christophe « il n'a rien poussé, ni code ») HEX pré-rempli en cascade :
+    // config désirée si non vide → fiche AÉRONEF (aircraft.icao24, saisie FR24) → état rapporté.
+    // Avant, cfg.hex='' (doc de juillet) masquait le hex de la fiche → champ vide, double saisie.
+    const regForMatch = (cfg.reg ?? dev.callSign ?? '').toUpperCase()
+    const acMatch = aircraft.find(a => ((a.callSign || a.registration || '').toUpperCase() === regForMatch))
     setCfgEdit({
       boxId,
       reg:  cfg.reg  ?? dev.callSign ?? '',
       type: cfg.type ?? '',
-      hex:  cfg.hex  ?? (dev.icao24 || ''),
+      hex:  (cfg.hex || acMatch?.icao24 || dev.icao24 || '').toUpperCase(),
       wifiSsid: cfg.wifiSsid ?? '',
       wifiPass: cfg.wifiPass ?? '',
       reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '' },
