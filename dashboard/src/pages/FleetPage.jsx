@@ -271,34 +271,38 @@ export default function FleetPage() {
           touche du WiFi (upload post-vol / fin d'OTA).
         </p>
 
-        {/* (2026-08-31, demande Christophe) Bandeau VERSIONS : les référentiels au-dessus du tableau.
-            PROD (vert) = version publiée sur le tag OTA (firmware/<tag>/version.txt) — celle que la
-            flotte télécharge. BANC (gris) = build le plus récent VU dans le parc (flash USB dev),
-            affiché seulement s'il dépasse la prod = pas encore publié. Légende des pastilles incluse. */}
-        <div style={{ marginTop: 10, padding: '10px 16px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 18 }}>
+        {/* (2026-08-31, demande Christophe, v2) « Il indique 189 or c'est la 190 » : la DERNIÈRE version
+            (le build le plus récent VU dans le parc, banc compris) s'affiche EN PREMIER et en gras — c'est
+            elle qu'on cherche. La version PUBLIÉE par tag OTA (celle que la flotte télécharge) vient ensuite,
+            étiquetée explicitement. Si dernière > publiée → mention ambre « non publiée ». */}
+        <div style={{ marginTop: 10, padding: '10px 16px', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 18, rowGap: 8 }}>
           <div style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.06em', color: C.mid }}>VERSIONS</div>
-          {[['ATC', ATC_TAGS.filter(t => published[t] != null || t !== 's3dev'), fleetMaxFw, (t) => published[t]],
-            ['ATV', ['ws241'], fleetMaxAtv, (t) => published[`atv_${t}`]]].map(([fam, tags, fmax, pubOf]) => (
-            <div key={fam} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 11, fontWeight: 800 }}>{fam}</span>
-              {tags.map(t => {
-                const pub = pubOf(t)
-                return (
-                  <span key={t} style={{ fontFamily: C.mono, fontSize: 11 }}>
-                    <span style={{ color: C.low }}>{t} </span>
-                    <span title={`publié sur le tag OTA ${t} — la flotte télécharge cette version`}
-                          style={{ color: C.green, fontWeight: 800 }}>v{pub ?? '?'}</span>
-                  </span>
-                )
-              })}
-              {typeof fmax === 'number' && fmax > Math.max(...tags.map(t => pubOf(t) ?? 0)) && (
-                <span title="build le plus récent vu dans le parc (flash USB de banc) — PAS ENCORE PUBLIÉ sur les tags OTA : la flotte ne le télécharge pas"
-                      style={{ fontFamily: C.mono, fontSize: 10, color: C.low, border: `1px dashed ${C.low}66`, borderRadius: 4, padding: '1px 6px' }}>
-                  banc v{fmax} (dev, non publié)
-                </span>
-              )}
-            </div>
-          ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.05em', color: C.mid }}>DERNIÈRE</span>
+            {[['ATC', fleetMaxFw, Math.max(...ATC_TAGS.map(t => published[t] ?? 0))],
+              ['ATV', fleetMaxAtv, published['atv_ws241'] ?? 0]].map(([fam, last, pub]) => (
+              <span key={fam} style={{ fontFamily: C.mono, fontSize: 12 }}>
+                <span style={{ fontWeight: 800 }}>{fam} </span>
+                <span title="build le plus récent vu dans le parc (banc compris)" style={{ fontWeight: 800, color: C.text }}>v{last || '?'}</span>
+                {last > pub && (
+                  <span title="pas encore publiée sur les tags OTA — la flotte ne la télécharge pas (build banc/dev)"
+                        style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, color: C.amber, border: `1px solid ${C.amber}55`, background: `${C.amber}14`, borderRadius: 4, padding: '1px 5px' }}>non publiée</span>
+                )}
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span title="version.txt des tags OTA sur Firebase Storage — c'est CE que les boîtiers/écrans téléchargent"
+                  style={{ fontSize: 10, fontFamily: C.mono, fontWeight: 700, letterSpacing: '0.05em', color: C.mid }}>PUBLIÉE · OTA FLOTTE</span>
+            {ATC_TAGS.map(t => (
+              <span key={t} style={{ fontFamily: C.mono, fontSize: 11, color: C.mid }}>
+                {t} <span style={{ color: C.green, fontWeight: 800 }}>v{published[t] ?? '?'}</span>
+              </span>
+            ))}
+            <span style={{ fontFamily: C.mono, fontSize: 11, color: C.mid }}>
+              ws241 <span style={{ color: C.green, fontWeight: 800 }}>v{published['atv_ws241'] ?? '?'}</span>
+            </span>
+          </div>
           <div style={{ marginLeft: 'auto', fontSize: 10, fontFamily: C.mono, color: C.low, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <span><span style={{ color: C.green, fontWeight: 900 }}>✓</span> = à jour (vs publié)</span>
             <span><span style={{ color: C.amber, fontWeight: 700 }}>→ vN</span> = retard (MAJ dispo)</span>
