@@ -7,6 +7,7 @@ import {
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
+import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 
 // ─── Design tokens — WHITE theme ─────────────────────────────────────────────
 const C = {
@@ -31,19 +32,7 @@ const C = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ROLES    = ['user', 'instructor', 'admin']
 const LICENCES = ['PPL', 'ULM', 'LAPL', 'CPL', 'ATPL', 'IR', 'ME', 'Night']
-const TYPE_DESIG = [
-  { value: 'PA28',  label: 'PA28  — Piper Cherokee' },
-  { value: 'C172',  label: 'C172  — Cessna 172' },
-  { value: 'C152',  label: 'C152  — Cessna 152' },
-  { value: 'DR400', label: 'DR400 — Robin DR400' },
-  { value: 'TB10',  label: 'TB10  — Socata Tobago' },
-  { value: 'TB20',  label: 'TB20  — Socata Trinidad' },
-  { value: 'DA40',  label: 'DA40  — Diamond DA40' },
-  { value: 'DA20',  label: 'DA20  — Diamond DA20' },
-  { value: 'SR22',  label: 'SR22  — Cirrus SR22' },
-  { value: 'ULM',   label: 'ULM   — Ultraléger motorisé' },
-  { value: 'OTHER', label: 'OTHER — Autre' },
-]
+// (2026-09-16) TYPE_DESIG figé retiré → base OACI Doc 8643 dans src/data/aircraftTypes.js (combobox + saisie libre)
 
 const EMPTY_PILOT = {
   firstName: '', lastName: '', email: '',
@@ -96,6 +85,37 @@ const Select = ({ value, onChange, options }) => (
     ))}
   </select>
 )
+
+// (2026-09-16) Type designator OACI : combobox (datalist) sur la base Doc 8643 + saisie LIBRE d'un code
+// hors liste (5 car. max, majuscules). Affiche le modèle reconnu sous le champ, ou « code libre ».
+const TypeDesigInput = ({ value, onChange }) => {
+  const known = findAircraftType(value)
+  return (
+    <div>
+      <input
+        list="ac-type-desig-list" value={value}
+        onChange={e => onChange(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
+        placeholder="FK9, VL3, P28A, DR40…" maxLength={5} spellCheck={false}
+        style={{
+          width: '100%', boxSizing: 'border-box',
+          background: C.bg, border: `1px solid ${C.border}`,
+          color: C.text, fontFamily: C.mono, fontSize: 12,
+          padding: '8px 10px', borderRadius: 6, outline: 'none',
+        }}
+      />
+      <datalist id="ac-type-desig-list">
+        {AIRCRAFT_TYPES.map(t => (
+          <option key={t.code} value={t.code}>{`${t.name} · ${CAT_LABEL[t.cat] || t.cat}`}</option>
+        ))}
+      </datalist>
+      <div style={{ fontFamily: C.mono, fontSize: 10, color: C.low, marginTop: 4, minHeight: 12 }}>
+        {value
+          ? (known ? `${known.name} · ${CAT_LABEL[known.cat] || known.cat}` : 'Code libre — vérifier sur ICAO Doc 8643')
+          : 'Désignateur OACI Doc 8643 (liste + saisie libre)'}
+      </div>
+    </div>
+  )
+}
 
 // ─── Trigram generator ────────────────────────────────────────────────────────
 function generateTrigram(firstName, lastName, existing = []) {
@@ -484,10 +504,9 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, 
         </div>
         <div>
           <Label>TYPE DESIGNATOR (ICAO)</Label>
-          <Select
+          <TypeDesigInput
             value={form.typeDesig}
             onChange={v => setForm(p => ({ ...p, typeDesig: v }))}
-            options={[{ value: '', label: 'Select type…' }, ...TYPE_DESIG.map(t => ({ value: t.value, label: t.label }))]}
           />
         </div>
         <div>
