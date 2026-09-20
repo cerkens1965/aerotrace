@@ -224,6 +224,7 @@ export default function FleetPage() {
       hex:  ((acMatch ? acMatch.icao24 : (cfg.hex || dev.icao24)) || '').toUpperCase(),
       wifiSsid: cfg.wifiSsid ?? '',
       wifiPass: cfg.wifiPass ?? '',
+      otaTag: cfg.otaTag ?? '',        // (2026-09-20) canal OTA du boîtier : '' inchangé · 's3' flotte · 's3dev' dev (ATC ≥210)
       reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '' },
       hasConfig: !!(cfg.reg || cfg.wifiSsid),
     })
@@ -245,9 +246,15 @@ export default function FleetPage() {
           boxId: cfgEdit.boxId, reg, type, hex, updatedAt: serverTimestamp(), updatedBy: email,
         }, { merge: true })
       }
+      // (2026-09-20) Canal OTA par boîtier → doc PUBLIC (le boîtier ≥210 le lit au config-pull, NVS, puis son écran suit).
+      if (cfgEdit.otaTag) {
+        await setDoc(doc(db, 'deviceConfigPublic', cfgEdit.boxId), {
+          boxId: cfgEdit.boxId, otaTag: cfgEdit.otaTag, updatedAt: serverTimestamp(), updatedBy: email,
+        }, { merge: true })
+      }
       // Doc AUTH complet (WiFi + trace/affichage). Le boîtier lit le WiFi ici (best-effort, auth).
       await setDoc(doc(db, 'deviceConfig', cfgEdit.boxId), {
-        boxId: cfgEdit.boxId, reg, type, hex,
+        boxId: cfgEdit.boxId, reg, type, hex, otaTag: cfgEdit.otaTag || '',
         wifiSsid, wifiPass: cfgEdit.wifiPass || '',
         updatedAt: serverTimestamp(), updatedBy: email,
       }, { merge: true })
@@ -502,6 +509,15 @@ export default function FleetPage() {
                   </>
                 )}
 
+                {/* (2026-09-20) Canal OTA du boîtier (ATC ≥210) : flotte (s3) ou dev (s3dev) ; son écran suit (ws241 / ws241dev). */}
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: C.mid, fontWeight: 700 }}>OTA channel</span>
+                  <select value={cfgEdit.otaTag} onChange={e => setCfgEdit(c => ({ ...c, otaTag: e.target.value }))} style={inputStyle}>
+                    <option value="">(unchanged)</option>
+                    <option value="s3">Fleet (s3)</option>
+                    <option value="s3dev">Dev (s3dev)</option>
+                  </select>
+                </label>
                 {/* (P2) WiFi club poussé au boîtier */}
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <span style={{ fontSize: 10, color: C.mid, fontWeight: 700, letterSpacing: '0.05em' }}>WIFI CLUB (optionnel) — devient le réseau primaire du boîtier</span>

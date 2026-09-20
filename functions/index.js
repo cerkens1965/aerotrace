@@ -449,19 +449,26 @@ async function syncAircraftToBox(after, tag) {
   const hex  = String(after.icao24 || '').trim().toUpperCase()
   const type = String(after.typeDesig || '').trim().toUpperCase()
   const db = getFirestore()
+  // (2026-09-20) PILOTE PAR DÉFAUT : avion en propriété privée (ownership 'owner') → trigramme du pilote
+  // propriétaire poussé au boîtier (« owner ») → affiché par l'écran comme pilote par défaut (AirKi View v274).
+  let owner = ''
+  if (after.ownership === 'owner' && after.ownerPilotId) {
+    try { const ps = await db.doc(`pilots/${after.ownerPilotId}`).get()
+          owner = String(ps.data()?.trigram || '').trim().toUpperCase().slice(0, 3) } catch (e) { console.warn('[syncAircraft] owner lookup', e) }
+  }
   const devs = await db.collection('devices').where('callSign', '==', cs).get()
   const done = []
   for (const d of devs.docs) {
     const boxId = d.data().boxId || d.id
     const ref = db.doc(`deviceConfigPublic/${boxId}`)
     const cur = (await ref.get()).data() || {}
-    if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type) continue
+    if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type && (cur.owner || '') === owner) continue
     await ref.set({
-      boxId, reg: cs, type, hex,
+      boxId, reg: cs, type, hex, owner,
       updatedAt: FieldValue.serverTimestamp(),
       updatedBy: `auto-sync fiche aéronef (${tag})`,
     }, { merge: true })
-    console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type}`)
+    console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type} owner=${owner || '∅'}`)
     done.push(`${cs}→${boxId}:${hex || '∅'}`)
   }
   return done
@@ -474,7 +481,7 @@ exports.syncAircraftIdentity = onDocumentWritten(
     const after  = event.data?.after?.data()  || null
     if (!after) return                                       // suppression → rien
     const same = (k) => String(before?.[k] ?? '') === String(after[k] ?? '')
-    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig')) return
+    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig') && same('ownership') && same('ownerPilotId')) return
     await syncAircraftToBox(after, event.params.acId)
   }
 )

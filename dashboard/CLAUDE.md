@@ -139,3 +139,105 @@ The project lives on iCloud Drive:
 Spaces and `~` in the path mean shell commands need quoting. The user historically uses a "Claude generates → user uploads → `cp` into terminal" workflow for the most safety-critical files (notably `ReplayMap.jsx`). When asked to edit those files, prefer producing the full file content for review rather than partial in-place edits unless the user has explicitly opted into direct editing for the session.
 
 Known-good baseline commit for the replay flow: `facef2e`.
+
+<!-- Ajouté le 2026-09-19 depuis 01 - Documentation/CLAUDE-append.md (design handoff copié dans 01 - Documentation/design_handoff_airki/). Décision prise en autonomie : panneaux sombres = encre #141414 des guidelines (l'ancien bleu-nuit #0A0E1E est abandonné) — à confirmer par Christophe. -->
+
+
+## Design system — AirKi
+
+Read this before writing any UI. The full spec is `design_handoff_airki/README.md`; the
+authoritative visual reference is `design_handoff_airki/AirKi Brand Guidelines.dc.html`
+(open it in a browser).
+
+The bundled HTML files are DESIGN REFERENCES, not production code. Their markup is
+inline-styled single-file prototypes. Read them for values and layout, then build real
+components in this codebase's own framework and patterns.
+
+### Product
+AirKi: connected flight recorder for light aviation and ultralight aircraft.
+- AirKi Core (designator AKT) — embedded unit, ESP32-S3 + SIM7600 LTE/GNSS, 60 mm sealed box,
+  4 Hz recording in Garmin G3X-compatible format, SafeSky beacon, traffic in, WiFi ground transfer, OTA.
+- AirKi View (designator AKV) — cockpit display, Waveshare ESP32-S3 AMOLED touch 2.41", 600x450 landscape, BLE to the unit.
+- AirKi Dashboard — Firebase web app: live fleet map, Loop (flight replay), logbook with instructor
+  validation, aircraft/pilot management, fleet health. Multi-club; roles admin / instructor / pilot.
+
+### Non-negotiable brand rules
+1. The name is always written **AirKi** — capital A, capital K, lowercase i.
+   NEVER AIRKI, AirKI, AIRKi, Air-Ki. In German "KI" reads as artificial intelligence.
+   Never apply `text-transform: uppercase` to any element that can contain the brand name
+   (nav, eyebrows, buttons, table headers, tooltips, page titles, meta tags).
+2. No gradients, anywhere.
+3. No navy + sky blue.
+4. Amber `#F5A623` is never a text colour and never colours the wordmark.
+5. Fonts are Instrument Sans (verbal) and Geist Mono (all figures and technical labels).
+   Never substitute Inter, Roboto, Poppins, Montserrat, Futura.
+6. All figures — altitudes, speeds, times, Hobbs, serials, registrations, table numerics —
+   are Geist Mono, tabular.
+7. Text on dark panels is white or `#9A9A94`. No muted/alpha type on colour.
+8. No shadows. Borders are always 1 px.
+9. AKT / AKV are technical designators: labels, serials, firmware, fleet tables.
+   Customer-facing copy says AirKi Core and AirKi View.
+10. Loop is text only, Semibold, ink — never with the monogram, never coloured.
+
+### Tokens
+
+```css
+:root {
+  --ink:        #141414; /* text, marks, dark panels — never pure black */
+  --paper:      #F4F2ED; /* app background — warm, never clinical white */
+  --card:       #FFFFFF;
+  --graphite:   #4A4A46; /* secondary text */
+  --etch:       #8D9096; /* muted text on ink, laser etching */
+  --rule:       #DDD9D2; /* borders on paper */
+  --rule-dark:  #2C2C2C; /* borders on ink */
+  --muted-dark: #9A9A94; /* labels/units on ink */
+  --amber:      #F5A623; /* single accent; also caution status */
+  --ok:         #22C55E; /* status only */
+  --info:       #60A5FA; /* status only */
+}
+```
+
+Usage proportions: ink 46 %, paper 34 %, graphite 8 %, etch 6 %, amber 6 %.
+
+Type scale (Instrument Sans): display 700, 32-56px, -0.035em · heading 600, 18-28px, -0.02em ·
+body 400, 14-17px, lh 1.5 · caption/UI 500, 11-13px.
+Data (Geist Mono): value 500, 28-72px, -0.04em · unit label 500, 10px, uppercase, 0.08em, etch/muted grey.
+
+Spacing: 4 6 8 10 12 14 16 18 22 24 28 32 40 48 72 96.
+Radius: 3-4 (chips, buttons) · 6 (cards, panels) · 12-16 (enclosure renders) · 999 (pill).
+
+### Logo component
+One SVG path on a 100x100 viewBox, `fill-rule="evenodd"`. The second subpath is the counter.
+
+```
+M10 92 L38 8 L62 8 L90 92 L70 92 L63.3 74 L36.7 74 L30 92 Z M50 32 L40 62 L60 62 Z
+```
+
+Two treatments, and only these two:
+- **two-colour** — the evenodd path in ink (or white in reverse), plus a separate amber path
+  `M50 32 L40 62 L60 62 Z` filling the counter.
+- **one-colour** — the evenodd path alone, counter open. Required for etching, embroidery,
+  amber grounds, below 6 mm, and any monochrome use.
+
+Build it as `<AirKiMark variant="duo" | "mono" color={...} size={...} />`. Minimum 16 px on screen.
+Wordmark: Instrument Sans Bold, letter-spacing -0.04em. Lockup gap = half the A's apex width;
+baseline "Not alone in the sky" at 19.5 % of wordmark size, Medium; clear space = 1 apex width.
+Drop the baseline below 60 px.
+
+### Screens already designed
+See README.md for full measurements.
+- **Dashboard / Live** — 180 px sidebar (lockup, nav Live/Loop/Logbook/Fleet/Admin, club + ICAO
+  footer) + content: title row with "Open Loop" primary, three ink metric cards
+  (`{registration} · {metric unit}` label, Geist Mono 30px value, coloured status dot), and a
+  flight table (FLIGHT / PILOT / BLOCK; `ICAO → ICAO`, pilot name, `HH:MM`).
+- **AirKi View home** — 600x450 ink panel, two-colour monogram, "AirKi View", GPS/LTE/TRAFFIC
+  status dots, UTC bottom-left, registration bottom-right. Nothing below 13 px on the real panel.
+- **Product page / Core** — nav bar, two-column hero, eyebrow + 36 px headline + body +
+  "Book a demo" primary and "Technical sheet" link, unit render on the right. No prices anywhere.
+
+### What is NOT designed — ask before inventing
+Empty, loading and error states. The View traffic radar, SD flight list, pilot code entry and
+locked club mode (the radar exists in firmware — restyle it, don't redesign it). Icon set: none
+chosen; pick one open, non-rounded, 1.5 px-stroke family — no rounded geometric sets. Pricing.
+Dashboard panel colour: the guidelines use ink #141414; an earlier product brief said #0A0E1E —
+confirm with the user before using blue-black.

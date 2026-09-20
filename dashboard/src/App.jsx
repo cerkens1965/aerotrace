@@ -5,7 +5,7 @@ import { httpsCallable } from 'firebase/functions'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, functions, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
-import Header from './components/layout/Header'
+import Sidebar from './components/layout/Sidebar'
 import LivePage from './pages/LivePage'
 import EnVolPage from './pages/EnVolPage'
 import ReplayPage from './pages/ReplayPage'
@@ -23,17 +23,15 @@ function LoadingScreen() {
     <div style={{
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: '#050814',
-      fontFamily: 'monospace', gap: 16,
+      height: '100vh', background: 'var(--ink)',
+      fontFamily: 'var(--font-sans)', gap: 16,
     }}>
       <div style={{
         width: 32, height: 32, border: '2px solid rgba(245,166,35,0.2)',
         borderTop: '2px solid #F5A623', borderRadius: '50%',
         animation: 'spin 0.8s linear infinite',
       }} />
-      <span style={{ fontSize: 11, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.3)' }}>
-        AEROTRACE
-      </span>
+      <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF' }}>AirKi</span>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
@@ -136,12 +134,12 @@ function AppLayout({ user, role, userClubId }) {
   return (
     <div style={{
       width: '100vw', height: '100vh',
-      display: 'flex', flexDirection: 'column',
-      overflow: 'hidden', background: '#050814',
+      display: 'flex', flexDirection: 'row',
+      overflow: 'hidden', background: 'var(--paper)',
     }}>
-      <Header user={user} role={role} />
+      <Sidebar user={user} role={role} />
 
-      <main style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <main style={{ flex: 1, minWidth: 0, overflow: 'hidden', position: 'relative' }}>
         <Routes>
           <Route path="/"         element={<Navigate to="/live" replace />} />
           <Route path="/live"     element={<LivePage />} />
@@ -212,13 +210,11 @@ function AccessPendingScreen({ user }) {
     <div style={{
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: '#050814',
-      fontFamily: 'monospace', color: '#fff',
+      height: '100vh', background: 'var(--ink)',
+      fontFamily: 'var(--font-sans)', color: '#fff',
       padding: 40, textAlign: 'center',
     }}>
-      <div style={{ fontSize: 9, letterSpacing: '0.3em', color: 'rgba(245,166,35,0.7)', marginBottom: 16 }}>
-        AEROTRACE
-      </div>
+      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
       <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
         Access pending
       </h1>
@@ -232,7 +228,7 @@ function AccessPendingScreen({ user }) {
           marginTop: 32, padding: '10px 22px', borderRadius: 6,
           background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
           color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
-          fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em',
+          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
         }}
         onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
@@ -254,16 +250,11 @@ function NoClubAssignedScreen({ role }) {
     <div style={{
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: '#050814',
-      fontFamily: 'monospace', color: '#fff',
+      height: '100vh', background: 'var(--ink)',
+      fontFamily: 'var(--font-sans)', color: '#fff',
       padding: 40, textAlign: 'center',
     }}>
-      <div style={{
-        fontSize: 9, letterSpacing: '0.3em',
-        color: 'rgba(245,166,35,0.7)', marginBottom: 16,
-      }}>
-        AEROTRACE
-      </div>
+      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
       <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
         No club assigned to your account
       </h1>
@@ -280,7 +271,7 @@ function NoClubAssignedScreen({ role }) {
           marginTop: 32, padding: '10px 22px', borderRadius: 6,
           background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
           color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
-          fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em',
+          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
         }}
         onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
