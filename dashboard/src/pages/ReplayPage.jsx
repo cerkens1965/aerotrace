@@ -253,7 +253,7 @@ export default function ReplayPage() {
       try {
         const snap = await getDoc(doc(db, 'flights', flightId))
         if (cancelled) return
-        if (!snap.exists() || snap.data().archived === true) { setResult({ flightId, status: 'notfound' }); return }
+        if (!snap.exists()) { setResult({ flightId, status: 'notfound' }); return }   // (21/09) un vol ARCHIVÉ reste lisible (l'archive sert à garder la trace)
         const fl = { id: snap.id, ...snap.data() }
         loadCSV(fl)
         if (fl.pilotId) {
@@ -310,6 +310,11 @@ export default function ReplayPage() {
         <h1 style={{ ...headingStyle(18, T.ink), margin: 0 }}>Loop</h1>
         <FlightIdentity flight={shown} pilotName={pilotName} />
       </div>
+      {shown?.archived && (
+        <Banner tone="info" title="Archived flight" style={{ margin: '0 16px 8px' }}>
+          Kept for reading: this flight is hidden from the logbook lists and totals. Restore or purge it in Logbook → Archived.
+        </Banner>
+      )}
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
@@ -327,7 +332,7 @@ export default function ReplayPage() {
               {status === 'notfound' && (
                 <Banner tone="info" title="Flight not found" style={{ width: '100%', maxWidth: 480 }}
                   action={<Button size="sm" icon="back" onClick={backToLogbook}>Back to logbook</Button>}>
-                  It may have been removed from the logbook.
+                  It has been purged from the logbook, with its recording.
                 </Banner>
               )}
               {status === 'error' && (

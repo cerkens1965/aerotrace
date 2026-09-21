@@ -15,7 +15,7 @@
 // capitales écrits dans la chaîne (aucun text-transform), pas de rouge, ambre jamais en texte.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { collection, getDocs, query, where, doc, updateDoc, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { collection, getDocs, query, where, doc, updateDoc, addDoc, deleteDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
 import { ref, uploadBytesResumable } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV } from '../utils/csvParser'
@@ -682,6 +682,7 @@ export default function LogbookPage({ role }) {
   const [pilots,       setPilots]       = useState([])
   const [aircraft,     setAircraft]     = useState([])
   const [rawFlights,   setRawFlights]   = useState([])
+  const [archivedFlights, setArchivedFlights] = useState([])   // (21/09) vols archivés (onglet Archived, admin)
   const [refsLoading,    setRefsLoading]    = useState(true)
   const [flightsLoading, setFlightsLoading] = useState(true)
   const [assignFlight, setAssignFlight] = useState(null)
@@ -740,7 +741,9 @@ export default function LogbookPage({ role }) {
     const unsub = onSnapshot(
       query(collection(db, 'flights'), where('clubId', '==', clubId)),
       snap => {
-        setRawFlights(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(f => f.archived !== true))
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        setRawFlights(all.filter(f => f.archived !== true))
+        setArchivedFlights(sortByDateDesc(all.filter(f => f.archived === true)))   // (21/09) onglet Archived (admin)
         setFlightsLoading(false)
       },
       err => {
@@ -792,6 +795,28 @@ export default function LogbookPage({ role }) {
     [navigate, activeTab],
   )
   const handleAssign = useCallback(f => setAssignFlight(f), [])
+
+  // ── (21/09) VOLS ARCHIVÉS : lisibles dans Loop ; Restore les remet dans le carnet ; PURGE = suppression
+  // définitive du vol ET de ses traces (CSV du vol + journal LTE, effacés par la fonction cloud onFlightDeleted,
+  // qui garde un fichier encore utilisé par un autre vol). Confirmation explicite par bannière avant toute purge.
+  const [purgeAsk, setPurgeAsk]     = useState(null)   // { ids:[], label } — confirmation en attente
+  const [purgeState, setPurgeState] = useState(null)   // { tone, text } — résultat
+  const [purging, setPurging]       = useState(false)
+  const restoreFlight = useCallback(async (id) => {
+    try { await updateDoc(doc(db, 'flights', id), { archived: false, restoredAt: serverTimestamp(), restoredBy: auth.currentUser?.email || null }) }
+    catch (e) { setPurgeState({ tone: 'caution', text: 'Restore refused: ' + e.message }) }
+  }, [])
+  const doPurge = async () => {
+    if (!purgeAsk) return
+    setPurging(true); let done = 0; const failed = []
+    for (const id of purgeAsk.ids) {
+      try { await deleteDoc(doc(db, 'flights', id)); done++ } catch (e) { failed.push(e.message) }
+    }
+    setPurging(false); setPurgeAsk(null)
+    setPurgeState(failed.length
+      ? { tone: 'caution', text: `${done} flight${done === 1 ? '' : 's'} purged, ${failed.length} refused: ${failed[0]}` }
+      : { tone: 'ok', text: `${done} flight${done === 1 ? '' : 's'} purged with ${done === 1 ? 'its' : 'their'} recordings.` })
+  }
 
   // Suppression DOUCE (admin) — jamais de deleteDoc : archived=true + traçabilité.
   // Le CSV Storage est conservé ; onSnapshot retire la ligne des listes.
@@ -859,6 +884,7 @@ export default function LogbookPage({ role }) {
     { key: 'instructors', label: 'Instructors', count: instructors.length },
     { key: 'aircraft',    label: 'Aircraft',    count: aircraft.length },
     { key: 'matrix',      label: 'All flights', count: pendingCount > 0 ? `${pendingCount} to assign` : undefined },
+    ...(canDelete ? [{ key: 'archived', label: 'Archived', count: archivedFlights.length || undefined }] : []),
   ]
 
   const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
@@ -945,6 +971,53 @@ export default function LogbookPage({ role }) {
             )}
             {!isPilot && activeTab === 'matrix' && (
               <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
+            )}
+            {canDelete && activeTab === 'archived' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <Banner tone="info" title="Archived flights stay readable">
+                  They are hidden from the lists and totals but their recordings are kept, so they can still be opened in Loop.
+                  Restore puts a flight back in the logbook. Purge deletes the flight and its recordings for good.
+                </Banner>
+                {purgeState && (
+                  <Banner tone={purgeState.tone} action={<Button size="sm" variant="ghost" onClick={() => setPurgeState(null)}>Dismiss</Button>}>{purgeState.text}</Banner>
+                )}
+                {purgeAsk && (
+                  <Banner tone="caution" title={`Purge ${purgeAsk.label}?`}
+                    action={<div style={{ display: 'flex', gap: 8 }}>
+                      <Button size="sm" onClick={() => setPurgeAsk(null)} disabled={purging}>Cancel</Button>
+                      <Button size="sm" variant="primary" onClick={doPurge} disabled={purging}>{purging ? 'Purging…' : 'Delete permanently'}</Button>
+                    </div>}>
+                    The flight record and its recordings (flight track CSV and LTE log) will be deleted permanently.
+                    They cannot be replayed or recovered afterwards. To keep them readable, leave the flight archived.
+                  </Banner>
+                )}
+                {archivedFlights.length > 0 && !purgeAsk && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button variant="danger" onClick={() => { setPurgeState(null); setPurgeAsk({ ids: archivedFlights.map(f => f.id), label: `all ${archivedFlights.length} archived flight${archivedFlights.length === 1 ? '' : 's'}` }) }}>
+                      Purge all archived ({archivedFlights.length})
+                    </Button>
+                  </div>
+                )}
+                <DataTable
+                  rows={archivedFlights}
+                  empty={<EmptyState text="No archived flights." />}
+                  columns={[
+                    COL_DATE,
+                    colAircraft(acLabel),
+                    { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
+                    COL_DURATION,
+                    { key: 'arch', label: 'ARCHIVED', mono: true, render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDate(f.archivedAt)}{f.archivedBy ? ` · ${f.archivedBy}` : ''}</span> },
+                    { key: 'actions', label: '', align: 'right', render: f => (
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <Button size="sm" icon="play" onClick={() => handleReplay(f.id)}>Open Loop</Button>
+                        <Button size="sm" icon="refresh" onClick={() => restoreFlight(f.id)}>Restore</Button>
+                        <Button size="sm" variant="danger" icon="close"
+                          onClick={() => { setPurgeState(null); setPurgeAsk({ ids: [f.id], label: `${acLabel(f.aircraftIdent) || 'this flight'} · ${formatDate(f.startTs)}` }) }}>Purge</Button>
+                      </div>
+                    ) },
+                  ]}
+                />
+              </div>
             )}
           </>
         )}

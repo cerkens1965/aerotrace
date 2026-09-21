@@ -406,7 +406,21 @@ exports.onFlightDeleted = onDocumentDeleted(
       data.csvLteStoragePath || `flights_lte/${fid}.csv`,
     ]
     const bucket = getStorage().bucket(STORAGE_BUCKET)
+    // (2026-09-21) GARDE-FOU — incident 19/09 : deux fiches partageaient le même flight_id ; supprimer le doublon
+    // a effacé la trace de l'AUTRE vol (perte du CSV EBBY→EDRA du 18/09). On n'efface un fichier QUE si plus
+    // aucune fiche /flights ne le référence (même chemin, ou même flight_id pour les chemins par défaut).
+    const db = getFirestore()
+    const stillUsed = async (path) => {
+      const q = [
+        db.collection('flights').where('csvStoragePath', '==', path).limit(1).get(),
+        db.collection('flights').where('csvLteStoragePath', '==', path).limit(1).get(),
+      ]
+      if (data.flight_id) q.push(db.collection('flights').where('flight_id', '==', data.flight_id).limit(1).get())
+      const snaps = await Promise.all(q)
+      return snaps.some(sn => !sn.empty)
+    }
     for (const p of paths) {
+      if (await stillUsed(p)) { console.warn(`onFlightDeleted ${event.params.flightId}: ${p} KEPT — still referenced by another flight`); continue }
       try {
         await bucket.file(p).delete()
         console.log(`onFlightDeleted ${event.params.flightId}: removed ${p}`)
