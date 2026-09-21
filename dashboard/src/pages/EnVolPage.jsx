@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { collection, getDocs, query, where } from 'firebase/firestore'
+import { db } from '../firebase/config'
 import useFleet from '../hooks/useFleet'
 import { useClub } from '../contexts/ClubContext'
 import {
@@ -41,6 +44,8 @@ function liveFigures(ac) {
   }
 }
 const ident = (ac) => ac.callSign || ac.registration || '−−−'
+// (21/09) Propriétaire affiché seulement pour un avion privé (ownership 'owner') ; avion club → rien.
+const ownerOf = (ac, owners) => (ac.ownership === 'owner' && ac.ownerPilotId) ? (owners[ac.ownerPilotId] || null) : null
 
 function Figure({ label, value }) {
   return (
@@ -51,7 +56,7 @@ function Figure({ label, value }) {
   )
 }
 
-function FlyingCard({ ac, onLocate }) {
+function FlyingCard({ ac, owner, onLocate }) {
   const st = STATUS[ac.status] ?? STATUS.IN_FLIGHT
   const f = liveFigures(ac)
   const dur = fmtDuration(ac.flightStart ?? null)
@@ -64,7 +69,7 @@ function FlyingCard({ ac, onLocate }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{ident(ac)}</div>
           <div style={{ ...monoStyle(11, T.mutedDark), marginTop: 3 }}>
-            {(ac.typeDesig || ac.type || '−−−')} · {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}
+            {ac.typeDesig || ac.type || '−−−'}{owner ? <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}> · {owner}</span> : null}
           </div>
         </div>
         {dur && <span style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{dur}</span>}
@@ -89,7 +94,7 @@ function FlyingCard({ ac, onLocate }) {
   )
 }
 
-function ParkedCard({ ac, muted }) {
+function ParkedCard({ ac, owner, muted }) {
   return (
     <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '12px 14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -99,9 +104,11 @@ function ParkedCard({ ac, muted }) {
           {(ac.typeDesig || ac.type || '−−−')}{ac.pilotName ? ` · ${ac.pilotName}` : ''}
         </div>
       </div>
-      <span style={{ ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border, flexShrink: 0 }}>
-        {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}
-      </span>
+      {owner && (
+        <span title="Owner" style={{ fontFamily: T.sans, fontSize: 13, color: T.ink, flexShrink: 0, maxWidth: '50%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {owner}
+        </span>
+      )}
     </div>
   )
 }
@@ -129,6 +136,13 @@ export default function EnVolPage() {
   const { fleet, loading, error } = useFleet(clubId)
   const navigate = useNavigate()
   const handleLocate = (lat, lon) => navigate('/live', { state: { flyTo: { lat, lon, zoom: 13 } } })
+  const [owners, setOwners] = useState({})   // pilotId → « Prénom Nom » (propriétaires d'avions privés)
+  useEffect(() => {
+    if (!clubId) return
+    getDocs(query(collection(db, 'pilots'), where('clubId', '==', clubId)))
+      .then(snap => { const m = {}; snap.docs.forEach(d => { const p = d.data(); m[d.id] = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.trigram || '' }); setOwners(m) })
+      .catch(err => console.warn('[InFlight] owners:', err?.message || err))
+  }, [clubId])
 
   const byName = (a, b) => ident(a).localeCompare(ident(b))
   const inFlight = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST')
@@ -157,13 +171,13 @@ export default function EnVolPage() {
         ) : !error && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22, alignItems: 'start' }}>
             <Column title="IN FLIGHT" tone="ok" items={inFlight} empty="No aircraft in flight.">
-              {inFlight.map(ac => <FlyingCard key={ac.id} ac={ac} onLocate={handleLocate} />)}
+              {inFlight.map(ac => <FlyingCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} onLocate={handleLocate} />)}
             </Column>
             <Column title="ON GROUND" tone="off" items={grounded} empty="No aircraft on the ground.">
-              {grounded.map(ac => <ParkedCard key={ac.id} ac={ac} />)}
+              {grounded.map(ac => <ParkedCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} />)}
             </Column>
             <Column title="UNKNOWN" tone="caution" items={unknown} empty="Every aircraft is reporting.">
-              {unknown.map(ac => <ParkedCard key={ac.id} ac={ac} muted />)}
+              {unknown.map(ac => <ParkedCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} muted />)}
             </Column>
           </div>
         )}
