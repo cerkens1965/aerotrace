@@ -38,21 +38,22 @@ export default function LoginPage() {
       height: '100vh', background: 'var(--ink)',   // (21/09) encre AirKi — plus de bleu nuit (règle « pas de navy »)
       color: '#FFFFFF', fontFamily: 'var(--font-sans)',
     }}>
-      <div style={{ marginBottom: '2rem' }}>
-        {/* lockup 64 px avec baseline « Not alone in the sky » (affichée à partir de 60 px, règle de marque) */}
+      {/* (21/09) bloc unique : le bouton prend EXACTEMENT la largeur du lockup (même axe gauche/droite), groupe
+          remonté de 6 vh pour un centrage optique (un bloc parfaitement centré paraît trop bas). */}
+      <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', gap: 44, marginBottom: '6vh' }}>
         <AirKiLockup size={64} color="#FFFFFF" baseline />
+        <button
+          onClick={handleLogin}
+          disabled={busy}
+          style={{
+            height: 48, padding: '0 22px', fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-sans)',
+            background: '#FFFFFF', color: 'var(--ink)', opacity: busy ? 0.7 : 1,   // primaire sur encre = blanc / texte encre
+            border: 'none', borderRadius: 4, cursor: busy ? 'default' : 'pointer',
+          }}
+        >
+          {busy ? 'Signing in…' : 'Continue with Google'}
+        </button>
       </div>
-      <button
-        onClick={handleLogin}
-        disabled={busy}
-        style={{
-          padding: '11px 22px', fontSize: 14, fontWeight: 500, fontFamily: 'var(--font-sans)',
-          background: '#FFFFFF', color: 'var(--ink)', opacity: busy ? 0.7 : 1,   // primaire sur encre = blanc / texte encre
-          border: 'none', borderRadius: 4, cursor: busy ? 'default' : 'pointer',
-        }}
-      >
-        {busy ? 'Signing in…' : 'Continue with Google'}
-      </button>
       {error && (
         <div style={{ color: '#FFFFFF', fontSize: 12, marginTop: 18, maxWidth: 360, textAlign: 'center', lineHeight: 1.5 }}>
           {error}
