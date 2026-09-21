@@ -1,9 +1,8 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useFleet from '../hooks/useFleet'
 import { useClub } from '../contexts/ClubContext'
 import {
-  T, labelStyle, monoStyle, MetricCard, Tabs, StatusDot, Button, Icon, Banner, EmptyState, Skeleton,
+  T, labelStyle, monoStyle, StatusDot, Button, Banner, Skeleton,
 } from '../components/ui'
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -16,10 +15,7 @@ const STATUS = {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// Donnée absente = « −−− » (convention DS). Vitesse affichée en kt, comme la donnée source.
-const fmtAlt = ft  => ft  != null ? `${Math.round(ft)} ft` : '−−−'
-const fmtSpd = kt  => kt  != null ? `${Math.round(kt)} kt` : '−−−'
-const fmtHdg = deg => deg != null ? `${String(Math.round(deg)).padStart(3, '0')}°`  : '−−−'
+// Donnée absente = « −−− » (convention DS). Vitesse en kt, comme la donnée source.
 
 function fmtDuration(startTs) {
   if (!startTs) return null
@@ -30,211 +26,147 @@ function fmtDuration(startTs) {
   return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`
 }
 
-// ─── StatBar ─────────────────────────────────────────────────────────────────
-function StatBar({ fleet }) {
-  const inFlight = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST').length
-  const grounded = fleet.filter(a => a.status === 'GROUNDED').length
+// ─── (21/09) Mise en page en 3 COLONNES (demande Christophe) : In flight · On ground · Unknown ──────────
+// In flight = cartes ENCRE (chiffres live toujours visibles, comme les cartes métriques du DS) ;
+// On ground / Unknown = cartes blanches compactes. LTE lost reste dans « In flight » (avion probablement
+// toujours en l'air), avec un point ambre. Aucune couleur hors statut ; chiffres en Geist Mono.
 
+function liveFigures(ac) {
+  const live = ac.liveData, fdr = ac.fdrData
+  return {
+    altFt:  live?.altitude ?? (fdr?.alt != null ? fdr.alt * 3.28084 : null),   // SafeSky en ft ; FDR en m
+    spdKt:  live?.speed    ?? fdr?.spd ?? null,
+    hdgDeg: live?.heading  ?? fdr?.hdg ?? null,
+    source: ac.status === 'LTE_LOST' ? 'FDR only' : live ? 'SafeSky' : fdr ? 'FDR' : '−−−',
+  }
+}
+const ident = (ac) => ac.callSign || ac.registration || '−−−'
+
+function Figure({ label, value }) {
   return (
-    <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, maxWidth: 820 }}>
-        <MetricCard label="IN FLIGHT" value={inFlight} status={{ tone: inFlight > 0 ? 'ok' : 'off', text: 'LIVE · 5S' }} />
-        <MetricCard label="ON GROUND" value={grounded} />
-        <MetricCard label="AIRCRAFT"  value={fleet.length} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={labelStyle(T.mutedDark)}>{label}</span>
+      <span style={{ ...monoStyle(22, T.white), fontWeight: 500, letterSpacing: '-0.03em', lineHeight: 1 }}>{value}</span>
+    </div>
+  )
+}
+
+function FlyingCard({ ac, onLocate }) {
+  const st = STATUS[ac.status] ?? STATUS.IN_FLIGHT
+  const f = liveFigures(ac)
+  const dur = fmtDuration(ac.flightStart ?? null)
+  const [alt, altU] = f.altFt  != null ? [String(Math.round(f.altFt)), 'FT'] : ['−−−', 'FT']
+  const [spd, spdU] = f.spdKt  != null ? [String(Math.round(f.spdKt)), 'KT'] : ['−−−', 'KT']
+  const hdg = f.hdgDeg != null ? String(Math.round(f.hdgDeg)).padStart(3, '0') : '−−−'
+  return (
+    <div style={{ background: T.ink, color: T.white, borderRadius: T.radius.md, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{ident(ac)}</div>
+          <div style={{ ...monoStyle(11, T.mutedDark), marginTop: 3 }}>
+            {(ac.typeDesig || ac.type || '−−−')} · {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}
+          </div>
+        </div>
+        {dur && <span style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{dur}</span>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <Figure label={`ALT ${altU}`} value={alt} />
+        <Figure label={`GS ${spdU}`}  value={spd} />
+        <Figure label="HDG"           value={hdg} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderTop: `1px solid ${T.ruleDark}`, paddingTop: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+          <StatusDot tone={st.tone} text={st.label} onInk />
+          <span style={{ fontFamily: T.sans, fontSize: 13, color: T.white, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {ac.pilotName || 'Pilot unknown'} <span style={{ ...monoStyle(11, T.mutedDark) }}>· {f.source}</span>
+          </span>
+        </div>
+        {ac.liveData?.lat != null && (
+          <Button size="sm" icon="map" onInk onClick={() => onLocate(ac.liveData.lat, ac.liveData.lon)} title="Show on live map">Map</Button>
+        )}
       </div>
     </div>
   )
 }
 
-// ─── Aircraft card ────────────────────────────────────────────────────────────
-function AircraftCard({ ac, expanded, onToggle, onLocate }) {
-  const st  = STATUS[ac.status] ?? STATUS.UNKNOWN
-  const dur = fmtDuration(ac.flightStart ?? null)
-
-  // SafeSky d'abord, fallback FDR. SafeSky est en ft/kt/deg ; FDR alt est en mètres.
-  const live = ac.liveData
-  const fdr  = ac.fdrData
-  const altFt  = live?.altitude ?? (fdr?.alt != null ? fdr.alt * 3.28084 : null)
-  const spdKt  = live?.speed    ?? fdr?.spd ?? null
-  const hdgDeg = live?.heading  ?? fdr?.hdg ?? null
-  const sourceLabel = ac.status === 'LTE_LOST' ? 'FDR only'
-    : live ? 'SafeSky'
-    : fdr  ? 'FDR'
-    : '−−−'
-
+function ParkedCard({ ac, muted }) {
   return (
-    <div style={{
-      background: T.card, border: T.border, borderRadius: T.radius.md, overflow: 'hidden',
-    }}>
-
-      {/* Header row — clickable */}
-      <div onClick={onToggle} style={{
-        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-        padding: '14px 18px', cursor: 'pointer',
-      }}>
-        {/* Registration + type */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ ...monoStyle(15, T.ink), fontWeight: 500 }}>
-              {ac.callSign || ac.registration}
-            </span>
-            <span style={{
-              ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border,
-            }}>{ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}</span>
-          </div>
-          <div style={{ ...monoStyle(11, T.etch), marginTop: 3 }}>
-            {ac.typeDesig || ac.type || '−−−'}
-          </div>
+    <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '12px 14px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ ...monoStyle(15, muted ? T.graphite : T.ink), fontWeight: 500 }}>{ident(ac)}</div>
+        <div style={{ ...monoStyle(11, T.etch), marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {(ac.typeDesig || ac.type || '−−−')}{ac.pilotName ? ` · ${ac.pilotName}` : ''}
         </div>
-
-        {/* Duration */}
-        {dur && (
-          <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>
-            {dur}
-          </span>
-        )}
-
-        {/* Locate button */}
-        {ac.liveData?.lat != null && (
-          <Button
-            size="sm" icon="map"
-            onClick={e => { e.stopPropagation(); onLocate(ac.liveData.lat, ac.liveData.lon) }}
-            title="Show on live map"
-          >
-            Show on map
-          </Button>
-        )}
-
-        {/* Status */}
-        <StatusDot tone={st.tone} text={st.label} style={{ minWidth: 88 }} />
-
-        {/* Chevron */}
-        <Icon name="chevron-right" size={16} color={T.etch}
-          style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
       </div>
-
-      {/* Expanded detail grid */}
-      {expanded && (
-        <div style={{
-          borderTop: T.border,
-          padding: '16px 18px',
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 14,
-          background: T.paper,
-        }}>
-          {[
-            { label: 'ALTITUDE', value: fmtAlt(altFt),        mono: true },
-            { label: 'SPEED',    value: fmtSpd(spdKt),        mono: true },
-            { label: 'HEADING',  value: fmtHdg(hdgDeg),       mono: true },
-            { label: 'PILOT',    value: ac.pilotName ?? '−−−' },
-            { label: 'SOURCE',   value: sourceLabel },
-            { label: 'ICAO24',   value: ac.icao24 ?? '−−−',   mono: true },
-          ].map(({ label, value, mono }) => (
-            <div key={label}>
-              <div style={{ ...labelStyle(T.etch), marginBottom: 4 }}>
-                {label}
-              </div>
-              <div style={mono
-                ? { ...monoStyle(13, T.ink), fontWeight: 500 }
-                : { fontFamily: T.sans, fontSize: 13, fontWeight: 500, color: T.ink }}>
-                {value}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <span style={{ ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border, flexShrink: 0 }}>
+        {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}
+      </span>
     </div>
+  )
+}
+
+function Column({ title, tone, items, empty, children }) {
+  return (
+    <section aria-label={title} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+      <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', paddingBottom: 10, borderBottom: T.border }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={labelStyle(T.etch)}>{title}</span>
+          <StatusDot tone={items.length ? tone : 'off'} text={items.length ? 'LIVE' : 'NONE'} />
+        </div>
+        <span style={{ ...monoStyle(40, items.length ? T.ink : T.etch), fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1 }}>{items.length}</span>
+      </header>
+      {items.length === 0
+        ? <div style={{ fontFamily: T.sans, fontSize: 13, color: T.graphite, padding: '14px 2px' }}>{empty}</div>
+        : children}
+    </section>
   )
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-export default function EnVolPage({ role }) {
+export default function EnVolPage() {
   const { clubId } = useClub()
   const { fleet, loading, error } = useFleet(clubId)
   const navigate = useNavigate()
+  const handleLocate = (lat, lon) => navigate('/live', { state: { flyTo: { lat, lon, zoom: 13 } } })
 
-  const [expanded, setExpanded] = useState(null)
-  const [filter,   setFilter]   = useState('ALL')
-
-  const handleLocate = (lat, lon) => {
-    navigate('/live', { state: { flyTo: { lat, lon, zoom: 13 } } })
-  }
-
+  const byName = (a, b) => ident(a).localeCompare(ident(b))
   const inFlight = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST')
-  const grounded = fleet.filter(a => a.status === 'GROUNDED')
-  const unknown  = fleet.filter(a => a.status === 'UNKNOWN')
-
-  const filtered = filter === 'ALL'       ? fleet
-    : filter === 'IN_FLIGHT' ? inFlight
-    : filter === 'GROUNDED'  ? grounded
-    : unknown
-
-  const sorted = [...filtered].sort((a, b) => {
-    const order = { IN_FLIGHT: 0, LTE_LOST: 1, GROUNDED: 2, UNKNOWN: 3 }
-    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
-    return (a.callSign || a.registration || '').localeCompare(b.callSign || b.registration || '')
-  })
+    .sort((a, b) => (a.status === b.status ? byName(a, b) : a.status === 'IN_FLIGHT' ? -1 : 1))
+  const grounded = fleet.filter(a => a.status === 'GROUNDED').sort(byName)
+  const unknown  = fleet.filter(a => a.status === 'UNKNOWN').sort(byName)
 
   return (
-    <div style={{
-      width: '100%', height: '100%', background: T.paper,
-      display: 'flex', flexDirection: 'column',
-      fontFamily: T.sans, color: T.ink, overflow: 'hidden',
-    }}>
+    <div style={{ width: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
+      <div style={{ padding: '28px 24px 40px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <h1 style={{ margin: 0, fontFamily: T.sans, fontWeight: 600, fontSize: 28, letterSpacing: '-0.02em' }}>In flight</h1>
+          <span style={{ ...monoStyle(12, T.etch) }}>{fleet.length} AIRCRAFT · REFRESH 5 S</span>
+        </div>
 
-      {/* Stat bar */}
-      {!loading && !error && <StatBar fleet={fleet} />}
+        {error && <Banner tone="caution" title="Fleet unavailable">{error.message}</Banner>}
 
-      {/* Filter toolbar */}
-      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
-        <Tabs
-          ariaLabel="Filter aircraft"
-          value={filter}
-          onChange={setFilter}
-          tabs={[
-            { key: 'ALL',       label: 'All',       count: fleet.length },
-            { key: 'IN_FLIGHT', label: 'In flight', count: inFlight.length },
-            { key: 'GROUNDED',  label: 'Grounded',  count: grounded.length },
-            ...(unknown.length > 0 ? [{ key: 'UNKNOWN', label: 'Unknown', count: unknown.length }] : []),
-          ]}
-        />
-      </div>
-
-      {/* Fleet list */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-
-        {loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }} aria-label="Loading fleet">
+        {loading ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22 }} aria-label="Loading fleet">
             {[0, 1, 2].map(i => (
-              <div key={i} style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '16px 18px',
-                display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Skeleton width={120} height={14} />
-                <Skeleton width={70} height={10} />
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <Skeleton width={90} height={10} /><Skeleton height={120} radius={6} /><Skeleton height={56} radius={6} />
               </div>
             ))}
           </div>
+        ) : !error && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22, alignItems: 'start' }}>
+            <Column title="IN FLIGHT" tone="ok" items={inFlight} empty="No aircraft in flight.">
+              {inFlight.map(ac => <FlyingCard key={ac.id} ac={ac} onLocate={handleLocate} />)}
+            </Column>
+            <Column title="ON GROUND" tone="off" items={grounded} empty="No aircraft on the ground.">
+              {grounded.map(ac => <ParkedCard key={ac.id} ac={ac} />)}
+            </Column>
+            <Column title="UNKNOWN" tone="caution" items={unknown} empty="Every aircraft is reporting.">
+              {unknown.map(ac => <ParkedCard key={ac.id} ac={ac} muted />)}
+            </Column>
+          </div>
         )}
-
-        {error && (
-          <Banner tone="caution" title="Fleet unavailable" style={{ maxWidth: 820 }}>
-            {error.message}
-          </Banner>
-        )}
-
-        {!loading && !error && sorted.length === 0 && (
-          <EmptyState text="No aircraft found for this club." style={{ maxWidth: 820 }} />
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
-          {sorted.map(ac => (
-            <AircraftCard
-              key={ac.id}
-              ac={ac}
-              expanded={expanded === ac.id}
-              onToggle={() => setExpanded(p => p === ac.id ? null : ac.id)}
-              onLocate={handleLocate}
-            />
-          ))}
-        </div>
       </div>
     </div>
   )
