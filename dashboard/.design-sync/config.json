@@ -1,0 +1,54 @@
+{
+  "projectId": "9c2df9a6-1c38-4466-b6a1-f1e6119e58c9",
+  "shape": "package",
+  "pkg": "dashboard",
+  "globalName": "AirKi",
+  "entry": "./src/components/ui/index.js",
+  "srcDir": "src/components/ui",
+  "cssEntry": "src/styles/airki-tokens.css",
+  "componentSrcMap": {
+    "Button": "src/components/ui/Button.jsx",
+    "MetricCard": "src/components/ui/MetricCard.jsx",
+    "StatusDot": "src/components/ui/StatusDot.jsx",
+    "DataTable": "src/components/ui/DataTable.jsx",
+    "Tabs": "src/components/ui/Tabs.jsx",
+    "Drawer": "src/components/ui/Drawer.jsx",
+    "EmptyState": "src/components/ui/EmptyState.jsx",
+    "Banner": "src/components/ui/Banner.jsx",
+    "Skeleton": "src/components/ui/Skeleton.jsx",
+    "Icon": "src/components/ui/Icon.jsx",
+    "AirKiMark": "src/components/ui/AirKiMark.jsx",
+    "AirKiLockup": "src/components/ui/AirKiMark.jsx",
+    "SixPack": null
+  },
+  "dtsPropsFor": {
+    "Button": "variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md'; onInk?: boolean; confirm?: string; icon?: IconName | React.ReactNode; iconRight?: IconName | React.ReactNode; disabled?: boolean; type?: 'button' | 'submit' | 'reset'; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; children?: React.ReactNode; style?: React.CSSProperties; title?: string",
+    "MetricCard": "label: string; value?: React.ReactNode; unit?: string; status?: { tone: 'ok' | 'caution' | 'info' | 'off'; text?: string }; style?: React.CSSProperties",
+    "StatusDot": "tone?: 'ok' | 'caution' | 'info' | 'off'; text?: React.ReactNode; onInk?: boolean; size?: number; style?: React.CSSProperties",
+    "DataTable": "columns: Array<{ key: string; label?: string; align?: 'left' | 'right' | 'center'; mono?: boolean; width?: number | string; render?: (row: any) => React.ReactNode }>; rows: any[]; rowKey?: string | ((row: any, index: number) => string); onRowClick?: (row: any) => void; empty?: React.ReactNode; loading?: boolean; style?: React.CSSProperties",
+    "Tabs": "tabs: Array<{ key: string; label: string; count?: number | string }>; value: string; onChange: (key: string) => void; onInk?: boolean; ariaLabel?: string; style?: React.CSSProperties",
+    "Drawer": "open: boolean; onClose: () => void; title: React.ReactNode; subtitle?: React.ReactNode; footer?: React.ReactNode; children?: React.ReactNode; closeOnOverlay?: boolean",
+    "EmptyState": "text?: React.ReactNode; children?: React.ReactNode; action?: React.ReactNode; actionLabel?: string; onAction?: () => void; style?: React.CSSProperties",
+    "Banner": "tone?: 'info' | 'caution' | 'ok'; title?: React.ReactNode; children?: React.ReactNode; onRetry?: () => void; retryLabel?: string; action?: React.ReactNode; style?: React.CSSProperties",
+    "Skeleton": "width?: number | string; height?: number; radius?: number; tone?: 'rule' | 'paper'; style?: React.CSSProperties",
+    "Icon": "name: 'map' | 'list' | 'plane' | 'play' | 'back' | 'chevron-right' | 'close' | 'upload' | 'download' | 'edit' | 'archive' | 'check' | 'warning' | 'refresh' | 'user' | 'settings' | 'search' | 'filter' | 'external' | 'wifi'; size?: 16 | 20 | 24 | number; title?: string; color?: string; style?: React.CSSProperties",
+    "AirKiMark": "variant?: 'duo' | 'mono'; color?: string; size?: number; title?: string; style?: React.CSSProperties",
+    "AirKiLockup": "size?: number; color?: string; baseline?: boolean; variant?: 'duo' | 'mono'"
+  },
+  "overrides": {
+    "Drawer": {
+      "cardMode": "single",
+      "viewport": "960x540"
+    },
+    "DataTable": {
+      "cardMode": "column"
+    },
+    "MetricCard": {
+      "cardMode": "column"
+    },
+    "Skeleton": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}

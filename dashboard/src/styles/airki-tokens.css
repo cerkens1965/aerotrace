@@ -1,0 +1,20 @@
+/* AirKi — jetons et polices, source UNIQUE partagée par le dashboard (importé par src/index.css)
+   et par la synchro Claude Design (.design-sync/config.json → cssEntry). Ne pas dupliquer ailleurs. */
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Geist+Mono:wght@400;500;600&display=swap");
+
+/* ── Design system AirKi (2026-09) — jetons. Voir CLAUDE.md « Design system — AirKi ». ── */
+:root {
+  --ink:        #141414; /* texte, marques, panneaux sombres — jamais du noir pur */
+  --paper:      #F4F2ED; /* fond d'application — chaud, jamais blanc clinique */
+  --card:       #FFFFFF;
+  --graphite:   #4A4A46; /* texte secondaire */
+  --etch:       #8D9096; /* texte atténué sur encre, gravure */
+  --rule:       #DDD9D2; /* bordures sur papier */
+  --rule-dark:  #2C2C2C; /* bordures sur encre */
+  --muted-dark: #9A9A94; /* libellés/unités sur encre */
+  --amber:      #F5A623; /* accent unique ; aussi statut « attention » — jamais une couleur de texte */
+  --ok:         #22C55E; /* statut seulement */
+  --info:       #60A5FA; /* statut seulement */
+  --font-sans:  "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono:  "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
