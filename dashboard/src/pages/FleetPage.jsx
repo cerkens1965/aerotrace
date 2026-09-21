@@ -544,9 +544,26 @@ export default function FleetPage() {
                 </div>
               </div>
               <div style={{ fontSize: 10.5, color: C.low, marginTop: 10 }}>
-                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}{cfgEdit.reported.wifiKnown ? ` · connus : ${cfgEdit.reported.wifiKnown}` : ''}
+                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}
                 {cfgEdit.hasConfig && <span style={{ color: C.amber }}> · une config est déjà en attente</span>}
               </div>
+              {/* (2026-09-21) Réseaux WiFi connus du boîtier (rapport ATC ≥213, noms seuls) : une ligne par réseau, origine + réseau actif */}
+              {cfgEdit.reported.wifiKnown && (
+                <div style={{ marginTop: 10, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 10, color: C.mid, fontWeight: 700, marginBottom: 6 }}>RÉSEAUX WIFI CONNUS DU BOÎTIER</div>
+                  {cfgEdit.reported.wifiKnown.split(',').map(x => x.trim()).filter(Boolean).map((x, i) => {
+                    const pilot = x.endsWith('*'); const name = pilot ? x.slice(0, -1) : x
+                    const active = name.toLowerCase() === (cfgEdit.reported.wifiSsid || '').toLowerCase()
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontFamily: C.mono, fontSize: 11, padding: '3px 0', color: active ? C.text : C.mid }}>
+                        <span>{i + 1}. {name}{active ? ' · connecté' : ''}</span>
+                        <span style={{ color: pilot ? C.text : C.low }}>{pilot ? 'saisi par le pilote · protégé' : 'poussé par le dashboard'}</span>
+                      </div>
+                    )
+                  })}
+                  <div style={{ fontSize: 10, color: C.low, marginTop: 6 }}>Ordre = priorité du boîtier. Un réseau du dashboard est éjecté avant un réseau du pilote si la liste (6) déborde.</div>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
                 <button onClick={() => setCfgEdit(null)} disabled={cfgSaving}
                   style={{ padding: '8px 16px', borderRadius: 8, background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, cursor: 'pointer', fontFamily: C.mono, fontSize: 11 }}>Annuler</button>
