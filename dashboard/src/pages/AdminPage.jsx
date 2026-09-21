@@ -8,6 +8,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'fi
 import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
 import { useClub } from '../contexts/ClubContext'
+import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
@@ -560,29 +561,7 @@ function InviteCodeButton({ pilot }) {
   )
 }
 
-function AircraftThumb({ ac }) {
-  // (2026-08-31) pas de photo enregistrée → tentative web auto (planespotters, cache 7 j).
-  // Affichage seul : rien n'est écrit en base (l'admin fige via « Find on the web » + Save dans la fiche).
-  const [webPhoto, setWebPhoto] = useState(null)
-  useEffect(() => {
-    if (ac.photoUrl || (!ac.icao24 && !ac.callSign)) return undefined
-    let on = true
-    fetchWebPhoto({ hex: ac.icao24, reg: ac.callSign }).then(v => { if (on && v?.url) setWebPhoto(v) })
-    return () => { on = false }
-  }, [ac.photoUrl, ac.icao24, ac.callSign])
-  const photoUrl = ac.photoUrl || webPhoto?.url
-  const photoTitle = ac.photoUrl
-    ? (ac.photoSource ? `© ${ac.photoCredit || '?'} · ${ac.photoSource}` : '')
-    : (webPhoto ? `© ${webPhoto.credit || '?'} · ${webPhoto.site || 'planespotters.net'}` : '')
-  const box = { width: 56, height: 36, borderRadius: T.radius.sm, flexShrink: 0, border: T.border, display: 'block' }
-  return photoUrl ? (
-    <img src={photoUrl} alt="" title={photoTitle} style={{ ...box, objectFit: 'cover', filter: ac.archived ? 'grayscale(1)' : undefined }} />
-  ) : (
-    <div style={{ ...box, background: T.paper, display: 'flex', alignItems: 'center', justifyContent: 'center', ...monoStyle(10, T.etch) }}>
-      {ac.typeDesig || '—'}
-    </div>
-  )
-}
+function AircraftThumb({ ac }) { return <AircraftPhoto ac={ac} width={56} height={36} /> }   // (21/09) composant partagé
 
 // Liste d'actions de fin de ligne.
 const Actions = ({ children }) => (

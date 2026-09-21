@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../firebase/config'
+import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import useFleet from '../hooks/useFleet'
 import { useClub } from '../contexts/ClubContext'
 import {
@@ -65,12 +66,15 @@ function FlyingCard({ ac, owner, onLocate }) {
   const hdg = f.hdgDeg != null ? String(Math.round(f.hdgDeg)).padStart(3, '0') : '−−−'
   return (
     <div style={{ background: T.ink, color: T.white, borderRadius: T.radius.md, padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        <AircraftPhoto ac={ac} width={64} height={48} onInk />
         <div style={{ minWidth: 0 }}>
           <div style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{ident(ac)}</div>
           <div style={{ ...monoStyle(11, T.mutedDark), marginTop: 3 }}>
             {ac.typeDesig || ac.type || '−−−'} · {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}{owner ? <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}> · {owner}</span> : null}
           </div>
+        </div>
         </div>
         {dur && <span style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{dur}</span>}
       </div>
@@ -98,11 +102,14 @@ function ParkedCard({ ac, owner, muted }) {
   return (
     <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '12px 14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+      <AircraftPhoto ac={ac} width={56} height={42} />
       <div style={{ minWidth: 0 }}>
         <div style={{ ...monoStyle(15, muted ? T.graphite : T.ink), fontWeight: 500 }}>{ident(ac)}</div>
         <div style={{ ...monoStyle(11, T.etch), marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {(ac.typeDesig || ac.type || '−−−')}{ac.pilotName ? ` · ${ac.pilotName}` : ''}
         </div>
+      </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, maxWidth: '60%', minWidth: 0 }}>
         {owner && (
@@ -116,13 +123,13 @@ function ParkedCard({ ac, owner, muted }) {
   )
 }
 
-function Column({ title, tone, items, empty, children }) {
+function Column({ title, tone, live, items, empty, children }) {
   return (
     <section aria-label={title} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
       <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', paddingBottom: 10, borderBottom: T.border }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={labelStyle(T.etch)}>{title}</span>
-          <StatusDot tone={items.length ? tone : 'off'} text={items.length ? 'LIVE' : 'NONE'} />
+          <StatusDot tone={items.length ? tone : 'off'} text={items.length ? live : 'NONE'} />
         </div>
         <span style={{ ...monoStyle(40, items.length ? T.ink : T.etch), fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1 }}>{items.length}</span>
       </header>
@@ -173,13 +180,13 @@ export default function EnVolPage() {
           </div>
         ) : !error && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 22, alignItems: 'start' }}>
-            <Column title="IN FLIGHT" tone="ok" items={inFlight} empty="No aircraft in flight.">
+            <Column title="IN FLIGHT" tone="ok" live="LIVE" items={inFlight} empty="No aircraft in flight.">
               {inFlight.map(ac => <FlyingCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} onLocate={handleLocate} />)}
             </Column>
-            <Column title="ON GROUND" tone="off" items={grounded} empty="No aircraft on the ground.">
+            <Column title="ON GROUND" tone="off" live="PARKED" items={grounded} empty="No aircraft on the ground.">
               {grounded.map(ac => <ParkedCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} />)}
             </Column>
-            <Column title="UNKNOWN" tone="caution" items={unknown} empty="Every aircraft is reporting.">
+            <Column title="UNKNOWN" tone="caution" live="NO RECENT SIGNAL" items={unknown} empty="Every aircraft is reporting.">
               {unknown.map(ac => <ParkedCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} muted />)}
             </Column>
           </div>
