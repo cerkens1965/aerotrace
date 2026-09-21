@@ -44,7 +44,7 @@ function liveFigures(ac) {
   }
 }
 const ident = (ac) => ac.callSign || ac.registration || '−−−'
-// (21/09) Avion privé (ownership 'owner') → nom du propriétaire ; avion club → étiquette CLUB.
+// (21/09) Étiquettes CLUB / OWNER conservées ; pour un avion privé, le nom du propriétaire s'ajoute.
 const ownerOf = (ac, owners) => (ac.ownership === 'owner' && ac.ownerPilotId) ? (owners[ac.ownerPilotId] || null) : null
 
 function Figure({ label, value }) {
@@ -69,7 +69,7 @@ function FlyingCard({ ac, owner, onLocate }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{ident(ac)}</div>
           <div style={{ ...monoStyle(11, T.mutedDark), marginTop: 3 }}>
-            {ac.typeDesig || ac.type || '−−−'} · {owner ? <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}>{owner}</span> : 'CLUB'}
+            {ac.typeDesig || ac.type || '−−−'} · {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}{owner ? <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}> · {owner}</span> : null}
           </div>
         </div>
         {dur && <span style={{ ...monoStyle(18, T.white), fontWeight: 500 }}>{dur}</span>}
@@ -104,13 +104,14 @@ function ParkedCard({ ac, owner, muted }) {
           {(ac.typeDesig || ac.type || '−−−')}{ac.pilotName ? ` · ${ac.pilotName}` : ''}
         </div>
       </div>
-      {owner ? (
-        <span title="Owner" style={{ fontFamily: T.sans, fontSize: 13, color: T.ink, flexShrink: 0, maxWidth: '50%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {owner}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, maxWidth: '60%', minWidth: 0 }}>
+        {owner && (
+          <span title="Owner" style={{ fontFamily: T.sans, fontSize: 13, color: T.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{owner}</span>
+        )}
+        <span style={{ ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border, flexShrink: 0 }}>
+          {ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}
         </span>
-      ) : (
-        <span style={{ ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border, flexShrink: 0 }}>CLUB</span>
-      )}
+      </div>
     </div>
   )
 }
