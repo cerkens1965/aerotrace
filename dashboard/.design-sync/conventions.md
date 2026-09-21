@@ -9,6 +9,7 @@ No provider or theme wrapper. Link `styles.css` once: it defines the colour toke
 ## Brand rules (non-negotiable)
 
 - The name is always written **AirKi** — never AIRKI, never `text-transform: uppercase` on anything that can contain it.
+- The logo is `<AirKiLockup size={…} />` only: the big A monogram IS the first letter, followed by a smaller "irKi" on the same baseline. Never place `AirKiMark` next to the text "AirKi" (it reads "A AirKi"). `size` = height of the A in px (sidebar 22, login 76).
 - No gradients, no shadows. Borders are 1 px. Radius 4 (buttons, chips), 6 (cards, tables), 999 (dots).
 - Amber `#F5A623` is an accent and a "transient / caution" status only — **never a text colour**, never a button fill.
 - Status colours: green `#22C55E` confirms, amber is transient, grey `#8D9096` is off. **No red anywhere**, including errors and destructive actions.
