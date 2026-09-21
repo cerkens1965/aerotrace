@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
 import { httpsCallable } from 'firebase/functions'
+import RedeemInvite from './components/auth/RedeemInvite'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, functions, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
@@ -200,7 +201,7 @@ function AppLayout({ user, role, userClubId }) {
             </RequireRole>
           } />
 
-          {/* REPLAY — tous les rôles */}
+          {/* LOOP (lecteur d'un vol) — tous les rôles. /replay seul = état vide renvoyant au Logbook */}
           <Route path="/replay"   element={<ReplayPage role={role} />} />
           <Route path="/replay/:flightId" element={<ReplayPage role={role} />} />
 
@@ -210,9 +211,10 @@ function AppLayout({ user, role, userClubId }) {
             </RequireRole>
           } />
 
-          {/* LOGBOOK — instructeur + admin (+ super_admin) */}
+          {/* LOGBOOK — tous les rôles connectés. Le pilote (user) n'y voit que « My flights » :
+              la restriction est faite dans LogbookPage d'après le rôle passé en prop. */}
           <Route path="/logbook" element={
-            <RequireRole user={user} role={role} allowed={['instructor', 'admin', 'super_admin']}>
+            <RequireRole user={user} role={role} allowed={['user', 'instructor', 'admin', 'super_admin']}>
               <LogbookPage role={role} />
             </RequireRole>
           } />
@@ -258,9 +260,12 @@ function AccessPendingScreen({ user }) {
         Access pending
       </h1>
       <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 12, maxWidth: 440, lineHeight: 1.6 }}>
-        You are signed in as <strong style={{ color: '#F5A623' }}>{user?.email}</strong>, but this
-        account has not been granted access yet. Ask an administrator to invite your email,
-        then sign in again.
+        You are signed in as <strong style={{ color: '#FFFFFF' }}>{user?.email || 'this account'}</strong>, but this
+        account has not been granted access yet. Enter the invitation code given by your club,
+        or ask an administrator to invite your e-mail.
+      </div>
+      <div style={{ marginTop: 24, width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <RedeemInvite dark onDone={() => window.location.reload()} />
       </div>
       <button onClick={handleSignOut}
         style={{

@@ -598,6 +598,89 @@ exports.fleetBeacons = onRequest(
 //  - email présent dans invites/                  → provisionné + invite marquée acceptée.
 //  - sinon                                        → authorized:false → écran « accès en attente ».
 // AUCUN rôle/club n'est jamais écrit par le client → pas d'escalade de privilège possible.
+// ─── (2026-09-21) CODES D'INVITATION PILOTE ─────────────────────────────────
+// L'e-mail n'est pas une clé fiable (adresse Google ≠ adresse de la fiche, relais Apple « masquer mon e-mail »).
+// L'admin génère un code à usage unique POUR UNE FICHE PILOTE ; le pilote se connecte avec n'importe quel compte,
+// saisit le code → son compte est rattaché au club ET relié à sa fiche (users/{uid}.pilotId, pilots/{id}.uid).
+// Collection inviteCodes/{code} : AUCUNE règle Firestore → illisible/inscriptible par les navigateurs, admin SDK seul.
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'   // sans 0/O/1/I : lisible à l'oral et à l'écran
+const INVITE_TTL_MS = 14 * 24 * 3600 * 1000
+function newInviteCode() {
+  const b = require('crypto').randomBytes(8); let c = ''
+  for (let i = 0; i < 8; i++) c += INVITE_ALPHABET[b[i] % INVITE_ALPHABET.length]
+  return `${c.slice(0, 4)}-${c.slice(4)}`
+}
+const normInviteCode = (x) => {
+  const c = String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : ''
+}
+
+// Admin (ou super_admin) → code pour une fiche pilote de SON club. Les codes non utilisés précédents sont révoqués.
+exports.createPilotInvite = onCall({ region: 'europe-west1' }, async (req) => {
+  const uid = req.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+  const db = getFirestore()
+  const me = (await db.doc(`users/${uid}`).get()).data() || {}
+  if (me.role !== 'admin' && me.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only')
+  const pilotId = String(req.data?.pilotId || '')
+  const pSnap = pilotId ? await db.doc(`pilots/${pilotId}`).get() : null
+  if (!pSnap || !pSnap.exists || pSnap.data().archived === true) throw new HttpsError('not-found', 'Pilot not found')
+  const p = pSnap.data()
+  if (me.role !== 'super_admin' && p.clubId !== me.clubId) throw new HttpsError('permission-denied', 'Pilot is not in your club')
+  const old = await db.collection('inviteCodes').where('pilotId', '==', pilotId).where('usedBy', '==', null).get()
+  const batch = db.batch()
+  old.docs.forEach((d) => batch.set(d.ref, { revoked: true, revokedAt: FieldValue.serverTimestamp() }, { merge: true }))
+  let code = newInviteCode()
+  for (let i = 0; i < 5 && (await db.doc(`inviteCodes/${code}`).get()).exists; i++) code = newInviteCode()
+  const expiresAt = Date.now() + INVITE_TTL_MS
+  batch.set(db.doc(`inviteCodes/${code}`), {
+    clubId: p.clubId || '', pilotId, trigram: p.trigram || '',
+    role: p.isInstructor === true ? 'instructor' : 'user',
+    createdBy: me.email || uid, createdAt: FieldValue.serverTimestamp(), expiresAt,
+    usedBy: null, revoked: false,
+  })
+  await batch.commit()
+  console.log(`createPilotInvite ${code} → pilot ${pilotId} (${p.trigram || '?'}) club=${p.clubId} by ${me.email || uid}`)
+  return { code, expiresAt }
+})
+
+// Pilote connecté (tout fournisseur) → saisit le code. Transaction : un code ne sert qu'une fois.
+// Ne rétrograde jamais un admin/super_admin existant ; relie compte ↔ fiche dans les deux sens.
+exports.redeemInvite = onCall({ region: 'europe-west1' }, async (req) => {
+  const uid = req.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+  const code = normInviteCode(req.data?.code)
+  if (!code) throw new HttpsError('invalid-argument', 'The code has 8 characters, for example ABCD-2345.')
+  const db = getFirestore()
+  const email = (req.auth?.token?.email || '').toLowerCase()
+  const out = await db.runTransaction(async (tx) => {
+    const cRef = db.doc(`inviteCodes/${code}`)
+    const c = await tx.get(cRef)
+    if (!c.exists) throw new HttpsError('not-found', 'This code does not exist. Check it with your club admin.')
+    const d = c.data()
+    if (d.revoked) throw new HttpsError('failed-precondition', 'This code has been replaced by a newer one. Ask your club admin.')
+    if (d.usedBy && d.usedBy !== uid) throw new HttpsError('already-exists', 'This code has already been used.')
+    if (Number(d.expiresAt) < Date.now()) throw new HttpsError('deadline-exceeded', 'This code has expired. Ask your club admin for a new one.')
+    const uRef = db.doc(`users/${uid}`), pRef = db.doc(`pilots/${d.pilotId}`)
+    const [uSnap, pSnap] = await Promise.all([tx.get(uRef), tx.get(pRef)])
+    if (!pSnap.exists) throw new HttpsError('not-found', 'The pilot profile no longer exists.')
+    const cur = uSnap.exists ? uSnap.data() : {}
+    const keepRole = cur.role === 'admin' || cur.role === 'super_admin'
+    const role = keepRole ? cur.role : (d.role || 'user')
+    const clubId = cur.role === 'super_admin' ? (cur.clubId || d.clubId) : d.clubId
+    tx.set(uRef, {
+      email: email || cur.email || null,
+      displayName: req.auth.token.name || cur.displayName || null,
+      role, clubId, pilotId: d.pilotId, linkedBy: 'invite-code', linkedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
+    tx.set(pRef, { uid, accountEmail: email || null, linkedAt: FieldValue.serverTimestamp() }, { merge: true })
+    tx.set(cRef, { usedBy: uid, usedEmail: email || null, usedAt: FieldValue.serverTimestamp() }, { merge: true })
+    return { authorized: true, role, clubId, pilotId: d.pilotId, trigram: d.trigram || '' }
+  })
+  console.log(`redeemInvite ${code} → uid ${uid} (${email || 'no email'}) pilot ${out.pilotId} role=${out.role}`)
+  return out
+})
+
 exports.claimAccess = onCall({ region: 'europe-west1' }, async (req) => {
   const uid = req.auth?.uid
   const email = (req.auth?.token?.email || '').toLowerCase()

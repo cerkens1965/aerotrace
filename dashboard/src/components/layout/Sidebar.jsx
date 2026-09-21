@@ -1,6 +1,7 @@
 // Sidebar — coquille AirKi (design system 2026-09) : barre latérale 180 px sur encre.
 //   Haut   : lockup (monogramme deux couleurs + « AirKi »).
-//   Milieu : navigation Live / In flight / Loop / Logbook / Fleet / Admin / Dev selon le rôle.
+//   Milieu : navigation Live / In flight / Logbook / Fleet / Admin / Dev selon le rôle.
+//            Loop n'est plus une entrée : c'est le lecteur d'un vol, ouvert depuis le Logbook.
 //   Bas    : club + ICAO, rôle, utilisateur, version, déconnexion.
 // Règles : la marque s'écrit toujours « AirKi » (jamais en capitales) ; pas de dégradé, pas d'ombre,
 // bordures 1 px ; texte sur encre = blanc ou #9A9A94 ; chiffres et libellés techniques en Geist Mono.
@@ -15,20 +16,25 @@ const ROLE_LABELS = { super_admin: 'Super admin', admin: 'Admin', instructor: 'I
 
 // Navigation visible selon rôle. Les libellés sont des mots, jamais des capitales (règle de marque).
 function getNav(role) {
-  const nav = [
-    { path: '/live',   label: 'Live' },
-    { path: '/replay', label: 'Loop' },     // Loop = texte seul, Semibold — jamais coloré, jamais avec le monogramme
-  ]
+  // Pilote (user) : Live + Logbook. Loop (/replay) n'est plus dans le menu — lecteur d'un vol,
+  // ouvert depuis le Logbook ; l'entrée Logbook reste active pendant la lecture (voir isActive).
+  const nav = [{ path: '/live', label: 'Live' }]
   if (role === 'instructor' || role === 'admin' || role === 'super_admin') {
-    nav.splice(1, 0, { path: '/in-flight', label: 'In flight' })
-    nav.push({ path: '/logbook', label: 'Logbook' })
+    nav.push({ path: '/in-flight', label: 'In flight' })
   }
+  nav.push({ path: '/logbook', label: 'Logbook' })
   if (role === 'admin' || role === 'super_admin') {
     nav.push({ path: '/fleet', label: 'Fleet' })
     nav.push({ path: '/admin', label: 'Admin' })
     nav.push({ path: '/dev',   label: 'Dev' })
   }
   return nav
+}
+
+// Loop (/replay…) dépend du Logbook : l'entrée Logbook reste surlignée pendant la lecture.
+function isActive(path, pathname) {
+  if (pathname === path || pathname.startsWith(path + '/')) return true
+  return path === '/logbook' && (pathname === '/replay' || pathname.startsWith('/replay/'))
 }
 
 const S = {
@@ -78,7 +84,7 @@ export default function Sidebar({ user, role }) {
 
       <nav style={S.nav} aria-label="Sections">
         {nav.map(item => {
-          const active = location.pathname === item.path || location.pathname.startsWith(item.path + '/')
+          const active = isActive(item.path, location.pathname)
           return (
             <button key={item.path} onClick={() => navigate(item.path)} style={S.item(active)} aria-current={active ? 'page' : undefined}>
               {item.label}

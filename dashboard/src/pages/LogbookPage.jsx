@@ -1,5 +1,8 @@
 // src/pages/LogbookPage.jsx
-// Logbook relationnel — 4 onglets
+// Logbook relationnel — LA liste de vols (Loop n'est plus que le lecteur d'un vol).
+//   My flights   → vols du compte connecté, relié à sa fiche /pilots par e-mail
+//                  (findMyPilot : uid posé par le code d'invitation, sinon e-mail). Seul onglet d'un pilote (rôle 'user') ;
+//                  premier onglet des instructeurs/admins s'ils ont une fiche.
 //   Pilots       → logbook par pilote/étudiant (heures, vols, instructeurs)
 //   Instructors  → logbook par instructeur (heures instruites, élèves, présence)
 //   Aircraft     → logbook par aéronef (heures, pilotes, utilisation)
@@ -13,12 +16,13 @@ import { collection, getDocs, query, where, doc, updateDoc, addDoc, onSnapshot, 
 import { ref, uploadBytesResumable } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV } from '../utils/csvParser'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
+import RedeemInvite from '../components/auth/RedeemInvite'
 import {
   formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
-  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment,
+  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment, findMyPilot,
 } from '../utils/logbookUtils'
 
 // Rôles autorisés à importer un CSV depuis le Logbook.
@@ -275,12 +279,12 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    {!f._pending
-                      ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                        </span>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
+                    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
+                      {!f._pending
+                        ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
+                        : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -367,12 +371,12 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    {!f._pending
-                      ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                        </span>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
+                    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
+                      {!f._pending
+                        ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
+                        : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -531,11 +535,9 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
                 <td style={TD}><ValidBadge validated={!f._pending} /></td>
                 <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                   <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
                     {!f._pending
-                      ? <>
-                          <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                        </>
+                      ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
                       : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
                     {canDelete && (
                       confirmDelId === f.id
@@ -545,6 +547,72 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
                                   style={DEL_BTN}>Delete</button>
                     )}
                   </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── MyFlights ────────────────────────────────────────────────────────────────
+// Vols du compte connecté (fiche /pilots reliée par e-mail) : comme pilote (pilotId), et
+// comme instructeur (instructorId) si la fiche est instructeur. Lecture seule : aucune
+// action d'attribution/suppression ici, seulement « Open Loop ».
+function MyFlights({ me, flights, pilots, acLabel, onReplay }) {
+  const total = sumDuration(flights)
+  const last  = flights[0]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+        <StatCard label="FLIGHTS"     value={flights.length} />
+        <StatCard label="HOURS"       value={formatDuration(total)} accent />
+        <StatCard label="LAST FLIGHT" value={last ? formatDate(last.startTs) : '—'} />
+      </div>
+
+      <div style={{ ...CARD_STYLE, border: '1px solid rgba(10,14,30,0.12)', overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
+          <thead style={{ borderBottom: '1px solid rgba(10,14,30,0.10)' }}>
+            <tr>
+              <th style={TH}>DATE</th>
+              <th style={TH}>AIRCRAFT</th>
+              <th style={TH}>ROUTE</th>
+              <th style={TH}>PILOT</th>
+              <th style={TH}>INSTRUCTOR</th>
+              <th style={TH}>DURATION</th>
+              <th style={TH}>TYPE</th>
+              <th style={TH}>ALT MAX</th>
+              <th style={TH}>G MAX</th>
+              <th style={TH}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {flights.length === 0 && (
+              <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>No flights recorded yet</td></tr>
+            )}
+            {flights.map((f, i) => (
+              <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.07)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
+                <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel(f.aircraftIdent)}</td>
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                  {(f.depIcao || f.arrIcao)
+                    ? <><Airfield icao={f.depIcao} />
+                        <span style={{ color: 'rgba(10,14,30,0.35)' }}> → </span>
+                        <Airfield icao={f.arrIcao} /></>
+                    : <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>}
+                </td>
+                <td style={{ ...TD, fontWeight: f.pilotId === me.id ? 700 : 400 }}>{getPilotName(pilots, f.pilotId)}</td>
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontWeight: f.instructorId === me.id ? 700 : 400 }}>
+                  {f.instructorId ? `${getPilotName(pilots, f.instructorId)} ${f.instructorOnboard ? '🪑' : '📡'}` : '—'}
+                </td>
+                <td style={TD}>{formatDuration(f.duration)}</td>
+                <td style={TD}><TypeBadge type={f.flightType} /></td>
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
+                <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
+                <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
+                  <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
                 </td>
               </tr>
             ))}
@@ -666,7 +734,11 @@ export default function LogbookPage({ role }) {
   const { clubId, club } = useClub()
   const canDelete = role === 'admin' || role === 'super_admin'
   const canImport = IMPORT_ROLES.includes(role)
-  const [tab,          setTab]          = useState('pilots')
+  const isPilot   = role === 'user'   // libellé « Pilot » : ne voit que « My flights »
+  const location  = useLocation()
+  // Onglet par défaut : pilote → My flights ; instructeur/admin → All flights.
+  // Retour de Loop : location.state.tab rouvre l'onglet d'où le vol a été ouvert.
+  const [tab,          setTab]          = useState(() => location.state?.tab || (isPilot ? 'mine' : 'matrix'))
   const [pilots,       setPilots]       = useState([])
   const [aircraft,     setAircraft]     = useState([])
   const [rawFlights,   setRawFlights]   = useState([])
@@ -747,6 +819,25 @@ export default function LogbookPage({ role }) {
     [rawFlights, aircraft],
   )
 
+  // Fiche /pilots du compte connecté (uid via code d'invitation, sinon e-mail) → « My flights ».
+  const myUid   = auth.currentUser?.uid || ''
+  const myEmail = auth.currentUser?.email || ''
+  const me = useMemo(() => findMyPilot(pilots, { uid: myUid, email: myEmail }), [pilots, myUid, myEmail])
+  const myFlights = useMemo(() => {
+    if (!me) return []
+    return sortByDateDesc(flights.filter(f =>
+      f.pilotId === me.id || (me.isInstructor === true && f.instructorId === me.id)))
+  }, [flights, me])
+
+  // Onglet effectivement affiché : le pilote est cantonné à « My flights » ; un onglet
+  // « My flights » sans fiche reliée (ou une clé inconnue venue de l'historique) retombe
+  // sur All flights une fois les données chargées.
+  const TAB_KEYS = ['mine', 'pilots', 'instructors', 'aircraft', 'matrix']
+  const activeTab = isPilot ? 'mine'
+    : !TAB_KEYS.includes(tab) ? 'matrix'
+    : (tab === 'mine' && !me && !refsLoading) ? 'matrix'
+    : tab
+
   // ── Sort state ─ un état par onglet (Instructors indépendant de Pilots) ──────
   const [sortPilots,      setSortPilots]      = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
   const [sortInstructors, setSortInstructors] = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
@@ -755,7 +846,11 @@ export default function LogbookPage({ role }) {
   // La modale a déjà écrit en base ; onSnapshot rafraîchit la liste. Rien à faire ici.
   const handleAssigned = useCallback(() => {}, [])
 
-  const handleReplay = useCallback(id => navigate(`/replay/${id}`), [navigate])
+  // Loop = lecteur d'un vol. On mémorise l'onglet pour que « Back to logbook » le rouvre.
+  const handleReplay = useCallback(
+    id => navigate(`/replay/${id}`, { state: { from: '/logbook', tab: activeTab } }),
+    [navigate, activeTab],
+  )
   const handleAssign = useCallback(f => setAssignFlight(f), [])
 
   // Suppression DOUCE (admin) — jamais de deleteDoc : archived=true + traçabilité.
@@ -837,7 +932,10 @@ export default function LogbookPage({ role }) {
   const PILOT_SORTS    = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
   const AIRCRAFT_SORTS = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
 
-  const TABS = [
+  const TABS = isPilot ? [
+    { key: 'mine',        label: `My flights (${myFlights.length})` },
+  ] : [
+    ...(me ? [{ key: 'mine', label: `My flights (${myFlights.length})` }] : []),
     { key: 'pilots',      label: `👤 Pilots (${regularPilots.length})` },
     { key: 'instructors', label: `🎓 Instructors (${instructors.length})` },
     { key: 'aircraft',    label: `✈ Aircraft (${aircraft.length})` },
@@ -867,7 +965,7 @@ export default function LogbookPage({ role }) {
           </div>
         )}
 
-        {!loading && !loadError && pilots.length === 0 && flights.length === 0 && (
+        {!isPilot && !loading && !loadError && pilots.length === 0 && flights.length === 0 && (
           <div style={{
             background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)',
             borderRadius: 8, padding: '12px 16px', marginBottom: 20,
@@ -877,7 +975,7 @@ export default function LogbookPage({ role }) {
           </div>
         )}
 
-        {!loading && (
+        {!isPilot && !loading && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 24 }}>
             <StatCard label="PILOTS"              value={regularPilots.length} />
             <StatCard label="INSTRUCTORS"         value={instructors.length} />
@@ -889,13 +987,28 @@ export default function LogbookPage({ role }) {
 
         {canImport && <CsvImportCard clubId={clubId} />}
 
+        {isPilot && !loading && !loadError && !me && (
+          <div style={{
+            background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)',
+            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
+            color: '#0a0e1e', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
+          }}>
+            <div style={{ marginBottom: 12 }}>
+              Your account is not linked to a pilot profile yet. Ask your club admin for an
+              invitation code, then enter it here.
+            </div>
+            <RedeemInvite onDone={() => window.location.reload()} />
+          </div>
+        )}
+
+        {!(isPilot && !loading && !me) && (
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, border: '1px solid rgba(10,14,30,0.12)', borderRadius: 8, overflow: 'hidden', width: 'fit-content' }}>
           {TABS.map((t, i) => (
             <button key={t.key} onClick={() => setTab(t.key)} style={{
-              background: tab === t.key ? 'rgba(10,14,30,0.07)' : 'transparent',
+              background: activeTab === t.key ? 'rgba(10,14,30,0.07)' : 'transparent',
               border: 'none',
               borderRight: i < TABS.length - 1 ? '1px solid rgba(10,14,30,0.10)' : 'none',
-              color: tab === t.key ? '#0a0e1e' : 'rgba(10,14,30,0.5)',
+              color: activeTab === t.key ? '#0a0e1e' : 'rgba(10,14,30,0.5)',
               fontFamily: 'monospace', fontSize: 12, padding: '10px 18px', cursor: 'pointer',
               letterSpacing: 0.5, transition: 'all 0.15s', whiteSpace: 'nowrap',
             }}>
@@ -903,6 +1016,7 @@ export default function LogbookPage({ role }) {
             </button>
           ))}
         </div>
+        )}
 
         {loading ? (
           <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 80, fontSize: 13 }}>
@@ -910,7 +1024,10 @@ export default function LogbookPage({ role }) {
           </div>
         ) : (
           <>
-            {tab === 'pilots' && (
+            {activeTab === 'mine' && me && (
+              <MyFlights me={me} flights={myFlights} pilots={pilots} acLabel={acLabel} onReplay={handleReplay} />
+            )}
+            {!isPilot && activeTab === 'pilots' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -919,7 +1036,7 @@ export default function LogbookPage({ role }) {
                 </div>
               </div>
             )}
-            {tab === 'instructors' && (
+            {!isPilot && activeTab === 'instructors' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortInstructors} onChange={setSortInstructors} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -928,7 +1045,7 @@ export default function LogbookPage({ role }) {
                 </div>
               </div>
             )}
-            {tab === 'aircraft' && (
+            {!isPilot && activeTab === 'aircraft' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortAircraft} onChange={setSortAircraft} options={AIRCRAFT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -937,7 +1054,7 @@ export default function LogbookPage({ role }) {
                 </div>
               </div>
             )}
-            {tab === 'matrix' && (
+            {!isPilot && activeTab === 'matrix' && (
               <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
             )}
           </>

@@ -5,7 +5,8 @@ import {
   doc, serverTimestamp, query, orderBy, where,
 } from 'firebase/firestore'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
-import { db, storage, auth } from '../firebase/config'
+import { db, storage, auth, functions } from '../firebase/config'
+import { httpsCallable } from 'firebase/functions'
 import { useClub } from '../contexts/ClubContext'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 
@@ -571,6 +572,39 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, 
 }
 
 // ─── Row components ───────────────────────────────────────────────────────────
+// (2026-09-21) Code d'invitation pour relier le compte d'un pilote à sa fiche (fonction cloud createPilotInvite).
+// Usage unique, 14 jours ; un nouveau code révoque le précédent. Le code n'est affiché qu'ici, jamais stocké côté client.
+function InviteCodeButton({ pilot }) {
+  const [busy, setBusy] = useState(false)
+  const [res, setRes]   = useState(null)   // { code, expiresAt } | { error }
+  const gen = async () => {
+    if (busy) return
+    if (pilot.uid && !window.confirm(`${pilot.firstName || ''} ${pilot.lastName || ''} is already linked to an account. Create a new code to link another account?`)) return
+    setBusy(true); setRes(null)
+    try { const { data } = await httpsCallable(functions, 'createPilotInvite')({ pilotId: pilot.id }); setRes(data) }
+    catch (e) { setRes({ error: e?.message || 'Could not create the code.' }) }
+    finally { setBusy(false) }
+  }
+  const exp = res?.expiresAt ? new Date(res.expiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {res?.code && (
+        <span title={`Valid until ${exp}. Single use.`} style={{ fontFamily: C.mono, fontSize: 12, letterSpacing: '0.1em', color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 8px', userSelect: 'all' }}>
+          {res.code}
+        </span>
+      )}
+      {res?.code && (
+        <button onClick={() => navigator.clipboard?.writeText(res.code)} style={{ padding: '5px 10px', borderRadius: 5, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.mid }}>COPY</button>
+      )}
+      {res?.error && <span style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{res.error}</span>}
+      <button onClick={gen} disabled={busy} title="Create a single-use code the pilot enters after signing in (Google, Apple…)" style={{
+        padding: '5px 12px', borderRadius: 5, cursor: busy ? 'default' : 'pointer',
+        background: 'transparent', border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.mid,
+      }}>{busy ? '…' : (res?.code ? 'NEW CODE' : 'INVITE CODE')}</button>
+    </div>
+  )
+}
+
 function PilotRow({ pilot, onEdit, onDelete }) {
   const licCol = pilot.licence === 'pilot' ? C.green : C.blue
   return (
@@ -646,8 +680,14 @@ function PilotRow({ pilot, onEdit, onDelete }) {
         </span>
       )}
 
+      {/* (2026-09-21) compte relié ? */}
+      <span title={pilot.uid ? `Linked account: ${pilot.accountEmail || 'yes'}` : 'No dashboard account linked yet'} style={{ fontFamily: C.mono, fontSize: 9, color: pilot.uid ? C.text : C.low, flexShrink: 0 }}>
+        {pilot.uid ? '● LINKED' : '○ NOT LINKED'}
+      </span>
+
       {/* Actions */}
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+        <InviteCodeButton pilot={pilot} />
         <button onClick={() => onEdit(pilot)} style={{
           padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
           background: 'transparent', border: `1px solid ${C.border}`,

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { collection, getDoc, doc, onSnapshot, query, where } from 'firebase/firestore'
-import { useClub } from '../contexts/ClubContext'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { getDoc, doc } from 'firebase/firestore'
 import { ref, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
 import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
 import SixPack from '../components/ui/SixPack'
 import ReplayMap from '../components/map/ReplayMap'
 import FlightCharts from '../components/replay/FlightCharts'
+import { formatDateTime, formatDuration } from '../utils/logbookUtils'
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -49,46 +49,6 @@ function fmtUTC(ts) {
   const mm = String(d.getUTCMinutes()).padStart(2, '0')
   const ss = String(d.getUTCSeconds()).padStart(2, '0')
   return `${hh}:${mm}:${ss}Z`
-}
-
-function fmtDate(ts) {
-  return new Date(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
-}
-
-// ─── Flight list item ─────────────────────────────────────────────────────────
-function FlightItem({ flight, selected, onSelect }) {
-  return (
-    <div onClick={() => onSelect(flight)} style={{
-      padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-      border: `1px solid ${selected ? C.amber20 : C.border}`,
-      background: selected ? C.amber10 : 'rgba(255,255,255,0.02)',
-      transition: 'all 0.15s', marginBottom: 4,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 700, color: C.text }}>
-          {flight.aircraftIdent}
-        </span>
-        <span style={{ fontFamily: C.mono, fontSize: 9, color: C.amber }}>
-          {fmtTime(flight.duration * 1000)}
-        </span>
-      </div>
-      <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, marginBottom: 4 }}>
-        {fmtDate(flight.startTs)}
-      </div>
-      <div style={{ display: 'flex', gap: 12 }}>
-        {[
-          { l: 'ALT', v: `${flight.maxAlt}ft` },
-          { l: 'SPD', v: `${Math.round(flight.maxSpd * 1.852)}km/h` },
-          { l: 'G',   v: `${flight.maxG}g` },
-        ].map(s => (
-          <div key={s.l}>
-            <span style={{ fontFamily: C.mono, fontSize: 7, color: C.mid }}>{s.l} </span>
-            <span style={{ fontFamily: C.mono, fontSize: 9, color: C.text }}>{s.v}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
 }
 
 // ─── Timeline scrubber ────────────────────────────────────────────────────────
@@ -215,24 +175,62 @@ function DataStrip({ frame }) {
   )
 }
 
+// ─── Flight identity (barre du haut) ─────────────────────────────────────────
+// Immat · date · pilote (si fiche lisible) · durée. Le pilote est lu à part : un échec
+// (fiche supprimée, droits) n'empêche pas la lecture du vol.
+function FlightIdentity({ flight, pilotName }) {
+  if (!flight) return null
+  const items = [
+    flight.aircraftIdent || '—',
+    formatDateTime(flight.startTs),
+    pilotName,
+    flight.duration ? formatDuration(flight.duration) : null,
+  ].filter(Boolean)
+  return (
+    <span style={{ fontFamily: C.mono, fontSize: 11, color: C.mid, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      {items.join(' · ')}
+    </span>
+  )
+}
+
+// Bouton neutre du lecteur (retour Logbook, états vides).
+const NAV_BTN = {
+  padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+  background: 'transparent', border: `1px solid ${C.border}`,
+  color: C.text, fontFamily: C.mono, fontSize: 10, whiteSpace: 'nowrap',
+}
+
 // ─── Main REPLAY page ─────────────────────────────────────────────────────────
-// Loop = relecture seule. L'import CSV et l'attribution pilote/avion vivent dans le Logbook.
-export default function ReplayPage({ role }) {
+// Loop = lecteur d'UN vol, désigné uniquement par l'URL /replay/:flightId. La liste des
+// vols, l'import CSV et l'attribution vivent dans le Logbook.
+export default function ReplayPage() {
   const { flightId }  = useParams()
   const navigate      = useNavigate()
-  const canLogbook    = role === 'instructor' || role === 'admin' || role === 'super_admin'
-  const { clubId }    = useClub()
-  const [flights,      setFlights]      = useState([])
+  const location      = useLocation()
   const [selected,     setSelected]     = useState(null)
+  const [pilot,        setPilot]        = useState({ flightId: null, name: null })
+  // Résultat du chargement, rattaché au flightId concerné : le statut affiché en est
+  // DÉRIVÉ (pas de reset synchrone dans l'effet). 'ready' | 'notfound' | 'error'.
+  const [result,       setResult]       = useState({ flightId: null, status: null })
   const [parsed,       setParsed]       = useState(null)
   const [currentTs,    setCurrentTs]    = useState(0)
   const [playing,      setPlaying]      = useState(false)
   const [speed,        setSpeed]        = useState(1)
-  const [sideOpen,     setSideOpen]     = useState(true)
   const [is3D,         setIs3D]         = useState(false)
   const animRef     = useRef(null)
   const lastTimeRef = useRef(null)
-  const csvAbortRef = useRef(null)   // annule le fetch CSV précédent si l'user change de vol
+  const csvAbortRef = useRef(null)   // annule le fetch CSV précédent si le vol change
+
+  // Retour au Logbook, sur l'onglet d'où le vol a été ouvert.
+  const backToLogbook = () =>
+    navigate(location.state?.from || '/logbook', { state: { tab: location.state?.tab } })
+
+  const status = !flightId ? 'none'
+    : result.flightId === flightId ? result.status
+    : 'loading'
+  const view      = status === 'ready' ? parsed : null            // jamais le vol précédent
+  const shown     = selected?.id === flightId ? selected : null
+  const pilotName = pilot.flightId === flightId ? pilot.name : null
 
   const loadCSV = useCallback(async (fl) => {
     csvAbortRef.current?.abort()
@@ -246,9 +244,9 @@ export default function ReplayPage({ role }) {
     let url = fl.csvUrl
     if (!url && fl.csvStoragePath) {
       try { url = await getDownloadURL(ref(storage, fl.csvStoragePath)) }
-      catch (e) { console.error('CSV URL from storage path:', e); return }
+      catch (e) { console.error('CSV URL from storage path:', e); setResult({ flightId: fl.id, status: 'error' }); return }
     }
-    if (!url) return
+    if (!url) { setResult({ flightId: fl.id, status: 'error' }); return }
     try {
       const res  = await fetch(url, { signal })
       const text = await res.text()
@@ -256,37 +254,40 @@ export default function ReplayPage({ role }) {
       setParsed(p)
       setCurrentTs(p.frames[0].ts)
       setPlaying(false)
+      setResult({ flightId: fl.id, status: 'ready' })
     } catch (e) {
-      if (e.name !== 'AbortError') console.error('Load CSV:', e)
+      if (e.name !== 'AbortError') { console.error('Load CSV:', e); setResult({ flightId: fl.id, status: 'error' }) }
     }
   }, [])
 
-  // ── Charger les vols du club courant ─────────────────────────────────────
-  // Note : firmware ESP32 écrit `club_id` (snake_case), dashboard écrit
-  // `clubId` (camelCase). On filtre sur `clubId` ici ; les vols legacy
-  // sans ce champ ne s'afficheront pas tant qu'ils ne sont pas backfillés.
-  // orderBy retiré (tri client-side) pour ne pas dépendre d'index composite.
-  useEffect(() => {
-    if (!clubId) { setFlights([]); return }
-    const q = query(collection(db, 'flights'), where('clubId', '==', clubId))
-    return onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(f => f.archived !== true)   // soft-delete : archivés masqués
-      docs.sort((a, b) => (b.startTs || 0) - (a.startTs || 0))
-      setFlights(docs)
-    })
-  }, [clubId])
-
-  // ── Auto-load depuis URL /replay/:flightId (vient du Logbook) ─────────────
+  // ── Chargement du vol depuis l'URL /replay/:flightId ──────────────────────
+  // Introuvable ou archivé (soft delete) → « Flight not found ».
   useEffect(() => {
     if (!flightId) return
+    let cancelled = false
     async function autoLoad() {
       try {
         const snap = await getDoc(doc(db, 'flights', flightId))
-        if (!snap.exists()) return
-        loadCSV({ id: snap.id, ...snap.data() })
-      } catch (e) { console.error('Auto-load flight:', e) }
+        if (cancelled) return
+        if (!snap.exists() || snap.data().archived === true) { setResult({ flightId, status: 'notfound' }); return }
+        const fl = { id: snap.id, ...snap.data() }
+        loadCSV(fl)
+        if (fl.pilotId) {
+          getDoc(doc(db, 'pilots', fl.pilotId))
+            .then(p => {
+              if (cancelled || !p.exists()) return
+              const d = p.data()
+              setPilot({ flightId, name: [d.firstName, d.lastName].filter(Boolean).join(' ') || null })
+            })
+            .catch(e => console.warn('Pilot name:', e))
+        }
+      } catch (e) {
+        console.error('Auto-load flight:', e)
+        if (!cancelled) setResult({ flightId, status: 'error' })
+      }
     }
     autoLoad()
+    return () => { cancelled = true; csvAbortRef.current?.abort() }
   }, [flightId, loadCSV])
 
   // Playback loop
@@ -313,74 +314,45 @@ export default function ReplayPage({ role }) {
   const handlePlayPause = () => { lastTimeRef.current = null; setPlaying(p => !p) }
   const handleSeek = (ts) => { lastTimeRef.current = null; setCurrentTs(ts); setPlaying(false) }
 
-  const currentFrame = parsed ? getFrameAtTime(parsed.frames, currentTs) : null
+  const currentFrame = view ? getFrameAtTime(view.frames, currentTs) : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bg, overflow: 'hidden' }}>
 
       {/* Titre de page — « Loop » : texte seul, Semibold, encre (règle de marque 10) */}
-      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0 }}>
+      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+        {flightId && <button onClick={backToLogbook} style={NAV_BTN}>← Back to logbook</button>}
         <h1 style={{ margin: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>Loop</h1>
+        <FlightIdentity flight={shown} pilotName={pilotName} />
       </div>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
-        {/* ── Sidebar ── */}
-        <div style={{
-          width: sideOpen ? 220 : 36, flexShrink: 0, transition: 'width 0.2s',
-          borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column',
-          background: C.panel, overflow: 'hidden',
-        }}>
-          {/* Toggle */}
-          <div onClick={() => setSideOpen(p => !p)} style={{
-            padding: '8px 10px', cursor: 'pointer', display: 'flex',
-            alignItems: 'center', gap: 8, borderBottom: `1px solid ${C.border}`,
-          }}>
-            <span style={{ fontSize: 10, color: C.amber, transform: sideOpen ? 'none' : 'rotate(180deg)', transition: 'transform 0.2s' }}>◀</span>
-            {sideOpen && <span style={{ fontFamily: C.mono, fontSize: 9, color: C.text, letterSpacing: '0.1em' }}>FLIGHTS</span>}
-          </div>
-
-          {sideOpen && (
-            <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-              {/* Import / attribution : dans le Logbook */}
-              {canLogbook && (
-                <button onClick={() => navigate('/logbook', { state: selected ? { flightId: selected.id } : null })} style={{
-                  width: '100%', padding: '6px 10px', marginBottom: 10,
-                  background: C.amber10, border: `1px solid ${C.amber20}`,
-                  borderRadius: 6, color: C.amber, fontFamily: C.mono,
-                  fontSize: 9, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.08em',
-                }}>
-                  Open in logbook
-                </button>
-              )}
-
-              {/* Flight list */}
-              {flights.length === 0 && (
-                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textAlign: 'center', padding: 16 }}>
-                  No flights yet.{canLogbook && <><br/>Import flights from the logbook.</>}
-                </div>
-              )}
-              {flights.map(f => (
-                <FlightItem key={f.id} flight={f} selected={selected?.id === f.id}
-                  onSelect={loadCSV}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* ── Main content ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          {!parsed ? (
-            /* Empty state */
+          {!view ? (
+            /* États vides : pas de vol dans l'URL / introuvable / illisible / chargement */
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexDirection: 'column', gap: 16 }}>
-              <div style={{ fontSize: 32 }}>▶</div>
-              <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>SELECT A FLIGHT TO REPLAY</div>
-              <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>
-                Garmin G3X format supported
-              </div>
+              {status === 'none' && <>
+                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>Choose a flight in the logbook</div>
+                <button onClick={() => navigate('/logbook')} style={NAV_BTN}>Open logbook</button>
+              </>}
+              {status === 'notfound' && <>
+                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>Flight not found</div>
+                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>It may have been removed from the logbook.</div>
+                <button onClick={backToLogbook} style={NAV_BTN}>Back to logbook</button>
+              </>}
+              {status === 'error' && <>
+                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>This flight could not be loaded</div>
+                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>The recording file is missing or unreadable.</div>
+                <button onClick={backToLogbook} style={NAV_BTN}>Back to logbook</button>
+              </>}
+              {(status === 'loading' || status === 'ready') && (
+                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.mid }}>Loading flight…</div>
+              )}
             </div>
           ) : (
             <>
@@ -388,7 +360,7 @@ export default function ReplayPage({ role }) {
               <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
                 {/* MapLibre map */}
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <ReplayMap frames={parsed.frames} currentFrame={currentFrame} is3D={is3D} isPlaying={playing} speed={speed} />
+                  <ReplayMap frames={view.frames} currentFrame={currentFrame} is3D={is3D} isPlaying={playing} speed={speed} />
 
                   {/* ── Bouton 2D / 3D ── */}
                   <button
@@ -427,13 +399,13 @@ export default function ReplayPage({ role }) {
               <DataStrip frame={currentFrame} />
 
               {/* Flight charts */}
-              <FlightCharts frames={parsed.frames} currentTs={currentTs} height={130} onSeek={handleSeek} />
+              <FlightCharts frames={view.frames} currentTs={currentTs} height={130} onSeek={handleSeek} />
             </>
           )}
 
           {/* Timeline */}
           <Timeline
-            frames={parsed?.frames}
+            frames={view?.frames}
             currentTs={currentTs}
             onSeek={handleSeek}
             playing={playing}

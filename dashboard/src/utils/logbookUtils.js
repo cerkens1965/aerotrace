@@ -190,3 +190,27 @@ export function flightTypeBadge(type) {
 export function sumDuration(flights) {
   return flights.reduce((s, f) => s + (f.duration || 0), 0)
 }
+
+/**
+ * Relie un compte connecté à sa fiche /pilots : fiche du club dont `email` correspond
+ * à l'e-mail du compte (insensible à la casse, espaces ignorés). null si aucune.
+ * Fiches archivées ignorées. Si plusieurs fiches partagent l'e-mail, la première gagne.
+ */
+export function findPilotForEmail(pilots, email) {
+  const key = (email || '').trim().toLowerCase()
+  if (!key) return null
+  return (pilots || []).find(p => p.archived !== true && (p.email || '').trim().toLowerCase() === key) || null
+}
+
+/**
+ * Fiche /pilots du compte connecté. D'ABORD par uid (liaison posée par le code
+ * d'invitation : pilots/{id}.uid = uid du compte), PUIS par e-mail en repli
+ * (findPilotForEmail). null si aucune. Fiches archivées ignorées.
+ */
+export function findMyPilot(pilots, user) {
+  if (!user) return null
+  const byUid = user.uid
+    ? (pilots || []).find(p => p.archived !== true && p.uid === user.uid)
+    : null
+  return byUid || findPilotForEmail(pilots, user.email)
+}
