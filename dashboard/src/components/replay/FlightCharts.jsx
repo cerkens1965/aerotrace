@@ -1,24 +1,25 @@
 import { useRef, useEffect, useMemo, useState } from 'react'
 import { subsampleFrames } from '../../utils/csvParser'
+import { T } from '../ui'
 
+// (22/09) Charte AirKi : carte blanche, bord 1 px, texte encre ; la couleur n'est portée que par la courbe et la pastille
+// (jamais par le texte, jamais de rouge ni d'orange). Série de couleurs limitée aux jetons + deux gris chauds.
 const C = {
-  bg:     '#f0f2f8',
-  border: 'rgba(0,0,0,0.08)',
-  text:   '#0a0e1e',
-  mono:   'monospace',
-  amber:  '#F5A623',
-  panel:  'rgba(255,255,255,0.97)',
+  border: T.rule,
+  text:   T.ink,
+  mono:   T.mono,
+  panel:  T.card,
 }
 
 const PARAMS = [
-  { key: 'alt',    label: 'ALT',   unit: 'ft',  color: '#60a5fa', defaultOn: true  },
-  { key: 'spd',    label: 'GS',    unit: 'km/h', mul: 1.852, color: '#22c55e', defaultOn: true  },
-  { key: 'vspd',   label: 'VSI',   unit: 'fpm', color: '#a78bfa', defaultOn: false },
-  { key: 'normAc', label: 'G',     unit: 'g',   color: '#f97316', defaultOn: false },
-  { key: 'rpm',    label: 'RPM',   unit: '',    color: '#F5A623', defaultOn: false },
-  { key: 'pitch',  label: 'PITCH', unit: '°',   color: '#34d399', defaultOn: false },
-  { key: 'roll',   label: 'ROLL',  unit: '°',   color: '#f87171', defaultOn: false },
-  { key: 'oat',    label: 'OAT',   unit: '°C',  color: '#67e8f9', defaultOn: false },
+  { key: 'alt',    label: 'ALT',   unit: 'ft',  color: T.info,     defaultOn: true  },
+  { key: 'spd',    label: 'GS',    unit: 'kt',  color: T.ok,       defaultOn: true  },   // (22/09) kt, comme partout (avant km/h)
+  { key: 'vspd',   label: 'VSI',   unit: 'fpm', color: T.ink,      defaultOn: false },
+  { key: 'normAc', label: 'G',     unit: 'g',   color: T.amber,    defaultOn: false },
+  { key: 'rpm',    label: 'RPM',   unit: '',    color: T.graphite, defaultOn: false },
+  { key: 'pitch',  label: 'PITCH', unit: '°',   color: T.etch,     defaultOn: false },
+  { key: 'roll',   label: 'ROLL',  unit: '°',   color: '#B9B4AA',  defaultOn: false },
+  { key: 'oat',    label: 'OAT',   unit: '°C',  color: '#6FA8DC',  defaultOn: false },
 ]
 
 export default function FlightCharts({ frames, currentTs, height = 130, onSeek }) {
@@ -81,7 +82,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
         ctx.arc(px(cur.ts), py(cur[param.key] * (param.mul || 1)), 4, 0, Math.PI * 2)
         ctx.fillStyle = param.color
         ctx.fill()
-        ctx.strokeStyle = '#000000'
+        ctx.strokeStyle = T.ink
         ctx.lineWidth = 1
         ctx.stroke()
       }
@@ -143,18 +144,16 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
           const val = curFrame && curFrame[p.key] != null ? curFrame[p.key] * (p.mul || 1) : null
           const displayVal = val != null ? (Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val)) : '—'
           return (
-            <button key={p.key} onClick={() => toggle(p.key)} style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
-              border: `1px solid ${on ? p.color : C.border}`,
-              background: on ? `${p.color}15` : 'transparent',
-              transition: 'all 0.15s',
+            <button key={p.key} type="button" className="ak-focus" aria-pressed={on} onClick={() => toggle(p.key)} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '3px 8px', borderRadius: T.radius.sm, cursor: 'pointer',
+              border: `1px solid ${on ? T.ink : C.border}`, background: T.card,
             }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : 'rgba(0,0,0,0.2)'}` }} />
-              <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: on ? p.color : 'rgba(0,0,0,0.4)', letterSpacing: '0.06em' }}>{p.label}</span>
+              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: T.radius.pill, background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : T.etch}` }} />
+              <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, color: on ? T.ink : T.etch, letterSpacing: '0.08em' }}>{p.label}</span>
               {on && curFrame && (
-                <span style={{ fontFamily: C.mono, fontSize: 9, color: C.text }}>
-                  {displayVal}<span style={{ fontSize: 7, color: p.color }}>{p.unit}</span>
+                <span style={{ fontFamily: C.mono, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: C.text }}>
+                  {displayVal}<span style={{ fontSize: 10, color: T.graphite, marginLeft: 2 }}>{p.unit}</span>
                 </span>
               )}
             </button>
@@ -168,7 +167,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
         width={1200}
         height={height}
         onMouseDown={handleMouseDown}
-        style={{ width: '100%', height: height, display: 'block', borderRadius: 6, cursor: 'ew-resize' }}
+        style={{ width: '100%', height: height, display: 'block', borderRadius: T.radius.md, cursor: 'ew-resize' }}
       />
     </div>
   )

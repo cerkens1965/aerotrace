@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { subsampleFrames } from '../../utils/csvParser'
+import { T, labelStyle, monoStyle, Icon } from '../ui'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY  = import.meta.env.VITE_OPENAIP_KEY
@@ -31,9 +32,9 @@ const DARK_MAPS = new Set(['dataviz-dark', 'satellite'])
 
 const LAYERS = [
   { id: 'ctr',      label: 'CTR',      color: '#dc3232', rgb: '220,50,50',  hasSlider: true  },
-  { id: 'tma',      label: 'TMA/CTA',  color: '#1e64dc', rgb: '30,100,220', hasSlider: true  },
-  { id: 'danger',   label: 'DANGER',   color: '#ff8c00', rgb: '255,140,0',  hasSlider: true  },
-  { id: 'airports', label: 'AIRPORTS', color: '#4a7ab5', rgb: '74,122,181', hasSlider: false },
+  { id: 'tma',      label: 'TMA / CTA',  color: '#1e64dc', rgb: '30,100,220', hasSlider: true  },
+  { id: 'danger',   label: 'Danger areas', color: '#ff8c00', rgb: '255,140,0',  hasSlider: true  },
+  { id: 'airports', label: 'Airports', color: '#4a7ab5', rgb: '74,122,181', hasSlider: false },
 ]
 const LAYER_IDS = {
   ctr:      ['airspace-ctr-fill',    'airspace-ctr-line'   ],
@@ -47,18 +48,20 @@ const FILL_COLORS = {
   danger: o => `rgba(255,140,0,${o})`,
 }
 const AIRPORT_TYPES = [
-  { id: 'fixed', label: 'ADEP / ULM / MIL' },
-  { id: 'heli',  label: 'HÉLIPAD'           },
-  { id: 'sea',   label: 'HYDRAVION'         },
+  { id: 'fixed', label: 'Aerodromes · ULM · military' },
+  { id: 'heli',  label: 'Helipads'                    },
+  { id: 'sea',   label: 'Seaplane bases'              },
 ]
 
+// (22/09) mêmes couleurs de phase que la frise de la page Loop (charte AirKi : jamais de rouge).
 const PHASE_COLORS = {
   GROUND:   '#ffffff',
-  CRUISE:   '#22c55e',
-  MANEUVER: '#f97316',
-  APPROACH: '#F5A623',
-  CRITICAL: '#ef4444',
+  CRUISE:   T.ok,
+  MANEUVER: T.info,
+  APPROACH: T.amber,
+  CRITICAL: T.ink,
 }
+const PHASE_LABELS = { CRUISE: 'Cruise', MANEUVER: 'Manoeuvre', APPROACH: 'Approach', CRITICAL: 'Critical' }
 
 // ─── HELPERS GÉOGRAPHIQUES ───────────────────────────────────────────────────
 
@@ -178,39 +181,35 @@ function createAircraftMarker(isDark = false) {
 
 // ─── UI HELPERS ──────────────────────────────────────────────────────────────
 
+// (22/09) Habillage AirKi, identique au panneau LAYERS de Live : encre, bord 1 px #2C2C2C, rayon 6, aucune ombre.
 const panelStyle = {
-  background: 'rgba(5,8,20,0.85)',
-  borderRadius: 10,
-  border: '0.5px solid rgba(255,255,255,0.08)',
-  overflow: 'hidden',
+  background: T.ink, borderRadius: 6, border: `1px solid ${T.ruleDark}`, overflow: 'hidden', width: 212,
 }
 const titleStyle = {
   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-  padding: '7px 10px', cursor: 'pointer', userSelect: 'none',
+  padding: '10px 12px', cursor: 'pointer', userSelect: 'none',
 }
-const titleText = {
-  fontSize: 10, fontWeight: 700, fontFamily: 'monospace',
-  letterSpacing: '0.15em', color: '#ffffff',
-}
+const titleText = labelStyle(T.mutedDark)
 const Tri = ({ open }) => (
-  <span style={{
-    fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block',
-    transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s',
-  }}>▶</span>
+  <span style={{ display: 'flex', color: T.etch, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={16} /></span>
 )
 
-function SliderRow({ label, value, min = 0, max = 30, step = 1, color, onChange }) {
+// Curseur : piste 4 px #2C2C2C, remplissage couleur, poignée blanche 12 px (déclaré au niveau module).
+function SliderRow({ value, min = 0, max = 30, step = 1, color, onChange, label }) {
   const pct = ((value - min) / (max - min)) * 100
   return (
-    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
-      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
-      <div style={{ position: 'absolute', width: `${pct}%`, height: 1, background: color, borderRadius: 1 }} />
-      <div style={{ position: 'absolute', left: `calc(${pct}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
-      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))}
-        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, WebkitAppearance: 'none' }} />
+    <div style={{ position: 'relative', height: 12, display: 'flex', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, height: 4, background: T.ruleDark, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 4, background: color, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: 999, background: T.white, pointerEvents: 'none' }} />
+      <input type="range" min={min} max={max} step={step} value={value} aria-label={label} className="ak-focus" onChange={e => onChange(Number(e.target.value))}
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 12, margin: 0 }} />
     </div>
   )
 }
+const rowText = (on) => ({ fontFamily: T.sans, fontSize: 12, color: on ? T.white : T.mutedDark, cursor: 'pointer', userSelect: 'none' })
+const swatch = (on, color, rgb, op) => ({ width: 10, height: 10, borderRadius: 2, flexShrink: 0,
+  border: `1.5px solid ${on ? color : T.etch}`, background: on ? `rgba(${rgb},${Math.max(0.15, (op ?? 0) / 30)})` : 'transparent' })
 
 /**
  * Pre-cache les tuiles DEM et satellite en survolant silencieusement la route.
@@ -620,35 +619,38 @@ export default function ReplayMap({
             <Tri open={panelOpen.layers} />
           </div>
           {panelOpen.layers && (
-            <div style={{ padding: '0 8px 8px' }}>
+            <div style={{ padding: 12, borderTop: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {LAYERS.filter(l => l.id !== 'airports').map(layer => {
                 const on = visible[layer.id]
                 return (
-                  <div key={layer.id} style={{ marginBottom: 6, borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.1)'}`, padding: '4px 6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: layer.hasSlider && on ? 4 : 0 }}>
-                      <span onClick={() => toggleLayer(layer.id)} style={{ fontSize: 9, fontFamily: 'monospace', color: on ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer', userSelect: 'none' }}>
-                        {layer.label}
+                  <div key={layer.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div onClick={() => toggleLayer(layer.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span aria-hidden="true" style={swatch(on, layer.color, layer.rgb, opacity[layer.id])} />
+                        <span style={rowText(on)}>{layer.label}</span>
                       </span>
-                      {layer.hasSlider && on && <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>{opacity[layer.id]}%</span>}
+                      {layer.hasSlider && on && <span style={monoStyle(11, T.mutedDark)}>{opacity[layer.id]}%</span>}
                     </div>
                     {layer.hasSlider && on && (
-                      <SliderRow value={opacity[layer.id]} max={30} color={layer.color} onChange={v => handleOpacity(layer.id, v)} />
+                      <SliderRow value={opacity[layer.id]} max={30} color={layer.color} label={`${layer.label} shading`} onChange={v => handleOpacity(layer.id, v)} />
                     )}
                   </div>
                 )
               })}
-              {/* Airports */}
-              <div style={{ borderLeft: `2px solid ${visible.airports ? '#4a7ab5' : 'rgba(255,255,255,0.1)'}`, paddingLeft: 6 }}>
-                <span onClick={() => toggleLayer('airports')} style={{ fontSize: 9, fontWeight: 700, fontFamily: 'monospace', color: visible.airports ? '#fff' : 'rgba(255,255,255,0.4)', cursor: 'pointer', display: 'block', marginBottom: 4 }}>
-                  AIRPORTS
-                </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div onClick={() => toggleLayer('airports')} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <span aria-hidden="true" style={swatch(visible.airports, '#4a7ab5', '74,122,181', 30)} />
+                  <span style={rowText(visible.airports)}>Airports</span>
+                </div>
                 {visible.airports && AIRPORT_TYPES.map(t => {
                   const checked = activeAirports.includes(t.id)
                   return (
-                    <div key={t.id} onClick={() => toggleAirportType(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, cursor: 'pointer' }}>
-                      <div style={{ width: 10, height: 10, border: `1px solid ${checked ? '#4a7ab5' : 'rgba(255,255,255,0.3)'}`, borderRadius: 2, background: checked ? '#4a7ab5' : 'transparent', flexShrink: 0 }} />
-                      <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#fff' }}>{t.label}</span>
-                    </div>
+                    <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 18, cursor: 'pointer', userSelect: 'none' }}>
+                      <input type="checkbox" className="ak-focus" checked={checked} onChange={() => toggleAirportType(t.id)}
+                        style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 10, height: 10, borderRadius: 2, cursor: 'pointer',
+                                 border: `1.5px solid ${checked ? T.white : T.etch}`, background: checked ? T.white : 'transparent' }} />
+                      <span style={{ ...rowText(checked), fontSize: 11 }}>{t.label}</span>
+                    </label>
                   )
                 })}
               </div>
@@ -663,16 +665,17 @@ export default function ReplayMap({
             <Tri open={panelOpen.map} />
           </div>
           {panelOpen.map && (
-            <div style={{ padding: '0 8px 8px' }}>
-              {BASEMAPS.map(bm => (
-                <div key={bm.id} onClick={() => changeBasemap(bm.id)} style={{
-                  padding: '4px 6px', cursor: 'pointer', borderRadius: 4, marginBottom: 2,
-                  background:  activeBasemap === bm.id ? 'rgba(245,166,35,0.1)' : 'transparent',
-                  borderLeft: `2px solid ${activeBasemap === bm.id ? '#F5A623' : 'transparent'}`,
-                }}>
-                  <span style={{ fontFamily: 'monospace', fontSize: 9, fontWeight: 500, color: '#fff' }}>{bm.label}</span>
-                </div>
-              ))}
+            <div role="radiogroup" aria-label="Map type" style={{ padding: 12, borderTop: `1px solid ${T.ruleDark}`, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {BASEMAPS.map(bm => {
+                const on = activeBasemap === bm.id
+                return (
+                  <button key={bm.id} type="button" role="radio" aria-checked={on} className="ak-focus" onClick={() => changeBasemap(bm.id)}
+                    style={{ all: 'unset', cursor: 'pointer', padding: '3px 8px', borderRadius: 4, fontFamily: T.sans, fontSize: 11,
+                             border: `1px solid ${on ? T.white : T.ruleDark}`, color: on ? T.white : T.mutedDark }}>
+                    {bm.label}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -689,56 +692,53 @@ export default function ReplayMap({
             hdgBufRef.current = []; smoothAgl.current = null
             prevBrg.current   = null; prevZoom.current = null
             brgEmaRef.current = null
-          }} style={{
-            background:    cockpitMode ? '#F5A623' : 'rgba(5,8,20,0.85)',
-            color:         cockpitMode ? '#050814' : '#fff',
-            border:        `1px solid ${cockpitMode ? '#F5A623' : 'rgba(255,255,255,0.15)'}`,
-            borderRadius:  6, padding: '5px 12px',
-            fontFamily:    'monospace', fontSize: 10, fontWeight: 700,
-            letterSpacing: '0.1em', cursor: 'pointer', userSelect: 'none',
+          }} className="ak-focus" aria-pressed={cockpitMode} title={cockpitMode ? 'Camera follows the aircraft' : 'Free camera'} style={{
+            background:    cockpitMode ? T.white : T.ink,
+            color:         cockpitMode ? T.ink : T.white,
+            border:        `1px solid ${cockpitMode ? T.white : T.ruleDark}`,
+            borderRadius:  4, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6,
+            fontFamily:    T.mono, fontSize: 11, fontWeight: 500,
+            letterSpacing: '0.08em', cursor: 'pointer', userSelect: 'none',
           }}>
-            {cockpitMode ? '✈ COCKPIT' : '🗺 FREE'}
+            <Icon name={cockpitMode ? 'plane' : 'map'} size={16} />{cockpitMode ? 'COCKPIT' : 'FREE'}
           </button>
         )}
 
         {/* Sliders cockpit */}
         {is3D && cockpitMode && (
-          <div style={{ background: 'rgba(5,8,20,0.82)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10, width: 160 }}>
-
-            {/* Slider zoom visuel : 0 = échelle terrain = altitude AGL réelle */}
+          <div style={{ background: T.ink, border: `1px solid ${T.ruleDark}`, borderRadius: 6, padding: 12, display: 'flex', flexDirection: 'column', gap: 14, width: 180 }}>
+            {/* Zoom visuel : 0 = échelle terrain = altitude AGL réelle */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>VIEW</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#F5A623' }}>{zoomOffset > 0 ? '+' : ''}{zoomOffset.toFixed(2)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={labelStyle(T.mutedDark)}>VIEW</span>
+                <span style={monoStyle(11, T.white)}>{zoomOffset > 0 ? '+' : ''}{zoomOffset.toFixed(2)}</span>
               </div>
-              <SliderRow value={zoomOffset} min={-2} max={3} step={0.25} color="#F5A623" onChange={v => { setZoomOffset(v); prevZoom.current = null }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>WIDE</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>CLOSE</span>
+              <SliderRow value={zoomOffset} min={-2} max={3} step={0.25} color={T.etch} label="Camera distance" onChange={v => { setZoomOffset(v); prevZoom.current = null }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                <span style={labelStyle(T.etch)}>WIDE</span><span style={labelStyle(T.etch)}>CLOSE</span>
               </div>
             </div>
-
-            {/* Slider angle pitch */}
+            {/* Angle de la caméra */}
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#ffffff' }}>ANGLE</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 8, color: '#22c55e' }}>{cockpitPitch}°</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={labelStyle(T.mutedDark)}>ANGLE</span>
+                <span style={monoStyle(11, T.white)}>{cockpitPitch}°</span>
               </div>
-              <SliderRow value={cockpitPitch} min={60} max={85} step={1} color="#22c55e" onChange={v => setCockpitPitch(v)} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>OBLIQUE</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 7, color: 'rgba(255,255,255,0.65)' }}>HORIZON</span>
+              <SliderRow value={cockpitPitch} min={60} max={85} step={1} color={T.etch} label="Camera angle" onChange={v => setCockpitPitch(v)} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                <span style={labelStyle(T.etch)}>OBLIQUE</span><span style={labelStyle(T.etch)}>HORIZON</span>
               </div>
             </div>
           </div>
         )}
 
         {/* Légende phases */}
-        <div style={{ background: 'rgba(5,8,20,0.85)', borderRadius: 8, padding: '8px 10px', border: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ background: T.ink, borderRadius: 6, padding: '10px 12px', border: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <span style={labelStyle(T.mutedDark)}>FLIGHT PHASE</span>
           {Object.entries(PHASE_COLORS).filter(([p]) => p !== 'GROUND').map(([phase, color]) => (
-            <div key={phase} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 16, height: 3, background: color, borderRadius: 1 }} />
-              <span style={{ fontFamily: 'monospace', fontSize: 7, color: '#fff' }}>{phase}</span>
+            <div key={phase} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 16, height: 3, background: color, outline: color === T.ink ? `1px solid ${T.etch}` : 'none' }} />
+              <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}>{PHASE_LABELS[phase]}</span>
             </div>
           ))}
         </div>

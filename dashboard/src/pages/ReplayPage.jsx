@@ -135,16 +135,18 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
 // ─── Data strip ───────────────────────────────────────────────────────────────
 function DataStrip({ frame }) {
   if (!frame) return null
+  // (22/09) unités dans les libellés (convention Live / In flight), valeurs seules en mono ; vitesse en kt.
+  const n = (v, f = (x) => String(Math.round(x))) => (v == null || Number.isNaN(v) ? '−−−' : f(v))
   const items = [
-    { l: 'GS',    v: `${Math.round(frame.spd * 1.852)}km/h` },
-    { l: 'ALT',   v: `${Math.round(frame.alt)}ft` },
-    { l: 'AGL',   v: `${Math.round(frame.agl)}ft` },
-    { l: 'VSI',   v: `${frame.vspd > 0 ? '+' : ''}${Math.round(frame.vspd)}fpm` },
-    { l: 'HDG',   v: `${Math.round(frame.hdg)}°` },
-    { l: 'G',     v: `${frame.normAc.toFixed(2)}g`, alert: Math.abs(frame.normAc) > 2 },
-    { l: 'RPM',   v: Math.round(frame.rpm) },
-    { l: 'OAT',   v: `${Math.round(frame.oat)}°C` },
-    { l: 'PHASE', v: frame.phase, color: PHASE_COLORS[frame.phase] },
+    { l: 'GS KT',   v: n(frame.spd) },
+    { l: 'ALT FT',  v: n(frame.alt) },
+    { l: 'AGL FT',  v: n(frame.agl) },
+    { l: 'VSI FPM', v: n(frame.vspd, x => `${x > 0 ? '+' : ''}${Math.round(x)}`) },
+    { l: 'HDG',     v: n(frame.hdg, x => String(Math.round(x) % 360).padStart(3, '0')) },
+    { l: 'G',       v: n(frame.normAc, x => x.toFixed(2)), alert: Math.abs(frame.normAc) > 2 },
+    { l: 'RPM',     v: n(frame.rpm) },
+    { l: 'OAT °C',  v: n(frame.oat) },
+    { l: 'PHASE',   v: frame.phase, color: PHASE_COLORS[frame.phase] },
   ]
   // Couleur (alerte G, phase) portée par un point 6 px, le texte reste encre.
   return (

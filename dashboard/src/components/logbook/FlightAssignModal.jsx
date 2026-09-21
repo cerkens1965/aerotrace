@@ -85,7 +85,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
     formatDateTime(flight.startTs),
     formatDuration(flight.duration),
     flight.maxAlt ? `${Math.round(flight.maxAlt)} ft max` : null,
-    flight.maxSpd ? `${Math.round(flight.maxSpd * 1.852)} km/h max` : null,
+    flight.maxSpd ? `${Math.round(flight.maxSpd)} kt max` : null,
   ].filter(Boolean).join(' · ')
 
   const footer = (
