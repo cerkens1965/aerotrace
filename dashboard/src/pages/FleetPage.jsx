@@ -434,7 +434,7 @@ export default function FleetPage() {
       <div style={{ maxWidth: 1240, margin: '0 auto', padding: '24px 24px 40px' }}>
         {/* En-tête */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ ...headingStyle(24), margin: 0 }}>Fleet</h1>
+          <h1 style={{ ...headingStyle(28), margin: 0 }}>Fleet</h1>
           <span style={labelStyle(T.etch)}>FIRMWARE · ADMIN</span>
         </div>
         <p style={{ fontSize: 14, lineHeight: 1.5, color: T.graphite, margin: '6px 0 0', maxWidth: 720 }}>

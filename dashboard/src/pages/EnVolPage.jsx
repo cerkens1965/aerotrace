@@ -4,7 +4,7 @@ import useFleet from '../hooks/useFleet'
 import useOwnerNames, { ownerOf } from '../hooks/useOwnerNames'
 import { useClub } from '../contexts/ClubContext'
 import {
-  T, labelStyle, monoStyle, StatusDot, Button, Banner, Skeleton,
+  T, labelStyle, monoStyle, headingStyle, StatusDot, Button, Banner, Skeleton,
 } from '../components/ui'
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ function fmtDuration(startTs) {
   const s  = Math.floor(ms / 1000)
   const h  = Math.floor(s / 3600)
   const m  = Math.floor((s % 3600) / 60)
-  return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`   // (22/09) HH:MM, comme le panneau Live
 }
 
 // ─── (21/09) Mise en page en 3 COLONNES (demande Christophe) : In flight · On ground · Unknown ──────────
@@ -154,7 +154,7 @@ export default function EnVolPage() {
     <div style={{ width: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
       <div style={{ padding: '28px 24px 40px', display: 'flex', flexDirection: 'column', gap: 22 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ margin: 0, fontFamily: T.sans, fontWeight: 600, fontSize: 28, letterSpacing: '-0.02em' }}>In flight</h1>
+          <h1 style={{ ...headingStyle(28), margin: 0 }}>In flight</h1>
           <span style={{ ...monoStyle(12, T.etch) }}>{fleet.length} AIRCRAFT · REFRESH 5 S</span>
         </div>
 

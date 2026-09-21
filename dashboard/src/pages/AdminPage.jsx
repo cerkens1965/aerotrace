@@ -984,6 +984,8 @@ export default function AdminPage() {
         padding: '16px 24px', flexShrink: 0, borderBottom: T.border,
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
       }}>
+        {/* (22/09) titre de page comme In flight / Logbook / Fleet (heading 28) */}
+        <h1 style={{ ...headingStyle(28), margin: '0 12px 0 0' }}>Admin</h1>
         <Tabs
           ariaLabel="Admin sections"
           value={tab}
