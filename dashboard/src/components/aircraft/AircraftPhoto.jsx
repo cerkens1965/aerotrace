@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import { fetchWebPhoto } from '../../lib/webphoto'
 import { T, monoStyle } from '../ui'
+import { photoFrame } from './photoFrame'
 
 export default function AircraftPhoto({ ac, width = 56, height = 42, onInk = false }) {
   const [webPhoto, setWebPhoto] = useState(null)
@@ -21,8 +22,10 @@ export default function AircraftPhoto({ ac, width = 56, height = 42, onInk = fal
   const box = { width, height, borderRadius: T.radius.sm, flexShrink: 0, display: 'block',
                 border: `1px solid ${onInk ? T.ruleDark : T.rule}` }
   return url ? (
-    <img src={url} alt="" title={title} loading="lazy"
-      style={{ ...box, objectFit: 'cover', filter: ac.archived ? 'grayscale(1)' : undefined }} />
+    <div title={title} style={{ ...box, overflow: 'hidden' }}>
+      <img src={url} alt="" loading="lazy"
+        style={{ ...photoFrame(ac.photoUrl ? ac : {}), filter: ac.archived ? 'grayscale(1)' : undefined }} />
+    </div>
   ) : (
     <div style={{ ...box, background: onInk ? '#1C1C1A' : T.paper, display: 'flex', alignItems: 'center', justifyContent: 'center',
                   ...monoStyle(10, onInk ? T.mutedDark : T.etch) }}>

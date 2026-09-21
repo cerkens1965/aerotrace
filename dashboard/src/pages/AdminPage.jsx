@@ -9,6 +9,7 @@ import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
 import { useClub } from '../contexts/ClubContext'
 import AircraftPhoto from '../components/aircraft/AircraftPhoto'
+import { photoFrame } from '../components/aircraft/photoFrame'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
@@ -60,6 +61,7 @@ const EMPTY_AIRCRAFT = {
   ownership: 'club', ownerPilotId: '',   // 'club' = avion du club · 'owner' = privé (propriétaire = un pilote)
   photoUrl: '', photoStoragePath: '',
   photoCredit: '', photoLink: '', photoSource: '',   // (2026-08-31) photo web auto (planespotters)
+  photoZoom: 1, photoX: 50, photoY: 50,              // (21/09) cadrage de la photo (zoom 1–3, point visé en %)
 }
 
 // ─── Reusable form components (déclarés au niveau module : pas de remontage) ──
@@ -341,6 +343,54 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit }) {
 }
 
 // ─── Aircraft photo uploader ──────────────────────────────────────────────────
+// (21/09) RECADREUR : cadre 4:3 (format des vignettes), glisser = déplacer le point visé, curseur = zoom 1–3,
+// flèches clavier = déplacer, +/- = zoom. Le résultat (photoZoom / photoX / photoY) est enregistré avec la fiche.
+function PhotoFramer({ form, setForm }) {
+  const W = 192, H = 144
+  const z = Number(form.photoZoom) || 1, x = Number(form.photoX ?? 50), y = Number(form.photoY ?? 50)
+  const drag = useRef(null)
+  const [dragging, setDragging] = useState(false)
+  const clamp = (v) => Math.min(100, Math.max(0, v))
+  const set = (patch) => setForm(p => ({ ...p, ...patch }))
+  const onDown = (e) => { e.currentTarget.setPointerCapture(e.pointerId); drag.current = { px: e.clientX, py: e.clientY, x, y }; setDragging(true) }
+  const onMove = (e) => {
+    const d = drag.current; if (!d) return
+    // glisser vers la droite = l'image suit le doigt = le point visé part vers la gauche
+    set({ photoX: clamp(d.x - (e.clientX - d.px) / W * 100 / z * 1.6), photoY: clamp(d.y - (e.clientY - d.py) / H * 100 / z * 1.6) })
+  }
+  const onUp = () => { drag.current = null; setDragging(false) }
+  const onKey = (e) => {
+    const k = e.key, step = e.shiftKey ? 10 : 3
+    if (k === 'ArrowLeft')  { e.preventDefault(); set({ photoX: clamp(x - step) }) }
+    if (k === 'ArrowRight') { e.preventDefault(); set({ photoX: clamp(x + step) }) }
+    if (k === 'ArrowUp')    { e.preventDefault(); set({ photoY: clamp(y - step) }) }
+    if (k === 'ArrowDown')  { e.preventDefault(); set({ photoY: clamp(y + step) }) }
+    if (k === '+' || k === '=') set({ photoZoom: Math.min(3, +(z + 0.1).toFixed(2)) })
+    if (k === '-')              set({ photoZoom: Math.max(1, +(z - 0.1).toFixed(2)) })
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: W, flexShrink: 0 }}>
+      <div role="img" aria-label="Photo framing — drag to position, arrow keys to move, + and − to zoom" tabIndex={0} className="ak-focus"
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onKey}
+        style={{ width: W, height: H, borderRadius: T.radius.md, border: T.border, overflow: 'hidden', background: T.paper,
+                 cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', userSelect: 'none' }}>
+        <img src={form.photoUrl} alt="" draggable={false} style={{ ...photoFrame(form), pointerEvents: 'none' }} />
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ ...labelStyle(T.etch) }}>ZOOM</span>
+        <input type="range" min={1} max={3} step={0.05} value={z} aria-label="Zoom"
+          onChange={e => set({ photoZoom: Number(e.target.value) })}
+          style={{ flex: 1, accentColor: T.ink }} />
+        <span style={{ ...monoStyle(11, T.graphite), width: 34, textAlign: 'right' }}>{z.toFixed(1)}×</span>
+      </label>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite }}>Drag to position</span>
+        <Button size="sm" variant="ghost" onClick={() => set({ photoZoom: 1, photoX: 50, photoY: 50 })}>Reset</Button>
+      </div>
+    </div>
+  )
+}
+
 function AircraftPhotoField({ form, setForm }) {
   const inputRef = useRef(null)
   const [uploading, setUploading] = useState(false)
@@ -358,7 +408,7 @@ function AircraftPhotoField({ form, setForm }) {
       const r    = storageRef(storage, path)
       await uploadBytes(r, file)
       const url  = await getDownloadURL(r)
-      setForm(p => ({ ...p, photoUrl: url, photoStoragePath: path }))
+      setForm(p => ({ ...p, photoUrl: url, photoStoragePath: path, photoZoom: 1, photoX: 50, photoY: 50 }))
     } catch (e) { setErr(e.message) }
     finally { setUploading(false) }
   }
@@ -370,28 +420,27 @@ function AircraftPhotoField({ form, setForm }) {
     const v = await fetchWebPhoto({ hex: form.icao24, reg: form.callSign })
     setFetching(false)
     if (!v) return setErr('No web photo found (fill in ICAO24 or call sign first)')
-    setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: v.site || 'planespotters.net' }))
+    setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: v.site || 'planespotters.net', photoZoom: 1, photoX: 50, photoY: 50 }))
   }
 
-  const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '', photoCredit: '', photoLink: '', photoSource: '' }))
+  const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '', photoCredit: '', photoLink: '', photoSource: '', photoZoom: 1, photoX: 50, photoY: 50 }))
 
   return (
     <div style={full}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        {form.photoUrl ? <PhotoFramer form={form} setForm={setForm} /> : (
         <button
           type="button" className="ak-focus" onClick={() => inputRef.current?.click()}
-          aria-label={form.photoUrl ? 'Replace photo' : 'Add photo'}
+          aria-label="Add photo"
           style={{
-            width: 192, height: 128, flexShrink: 0, padding: 0,
+            width: 192, height: 144, flexShrink: 0, padding: 0,
             borderRadius: T.radius.md, border: T.border, background: T.paper,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden', cursor: 'pointer',
           }}
         >
-          {form.photoUrl
-            ? <img src={form.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-            : <span style={{ fontFamily: T.sans, fontSize: 13, color: T.graphite }}>Add photo</span>}
-        </button>
+          <span style={{ fontFamily: T.sans, fontSize: 13, color: T.graphite }}>Add photo</span>
+        </button>)}
         <div style={{ flex: '1 1 140px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
           <Button size="sm" icon="upload" onClick={() => inputRef.current?.click()} disabled={uploading}>
             {uploading ? 'Uploading…' : form.photoUrl ? 'Replace' : 'Upload'}
@@ -773,6 +822,9 @@ export default function AdminPage() {
         photoCredit:      aircraftForm.photoCredit || '',
         photoLink:        aircraftForm.photoLink   || '',
         photoSource:      aircraftForm.photoSource || '',
+        photoZoom:        Number(aircraftForm.photoZoom) || 1,
+        photoX:           Number(aircraftForm.photoX ?? 50),
+        photoY:           Number(aircraftForm.photoY ?? 50),
         clubId:           clubId,        // toujours le club courant
         updatedAt:        serverTimestamp(),
       }
