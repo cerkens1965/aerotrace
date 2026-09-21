@@ -255,9 +255,9 @@ export default function AerotraceMap({ flyTo = null }) {
   const map = useRef(null)
   const markersRef = useRef({})
   const [mapBounds, setMapBounds] = useState(null)
-  const { traffic, failures: trafficFailures, ready: trafficReady } = useTrafficPoll(mapBounds)
-  const [fleetLoaded, setFleetLoaded] = useState(false)   // 1re lecture Firestore de la flotte terminée
-  const [bcnReady, setBcnReady]       = useState(false)   // 1er poll des balises flotte terminé
+  const { traffic, failures: trafficFailures } = useTrafficPoll(mapBounds)
+  const [, setFleetLoaded] = useState(false)   // 1re lecture Firestore de la flotte terminée
+  const [, setBcnReady] = useState(false)   // 1er poll des balises flotte terminé
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
   const [fleetRole, setFleetRole] = useState(new Map())  // callSign -> 'club' | 'owner' (balises AeroTrace)
   const [fleetBcn, setFleetBcn]   = useState({})         // callSign -> balise FlyADSL (avions HORS flux radar)
@@ -366,27 +366,9 @@ export default function AerotraceMap({ flyTo = null }) {
   })).filter(a => (a.altitude || 0) >= altRange[0] && (a.altitude || 0) <= altRange[1])
   const allTargets = [...filteredTraffic, ...beaconTargets]
 
-  // ── États visibles (bannière trafic, chargement flotte, flotte au sol) ──────────────
-  // Avions de la flotte du club EN VOL : trafic SafeSky (viewport, non filtré par altitude)
-  // reconnu par hex/callsign + balises FlyADSL fraîches. En vol = pas GROUNDED et > 50 ft
-  // (même seuil que useFleet). Dédupliqué par callsign/hex.
-  const fleetAirborne = new Set()
-  traffic.forEach(ac => {
-    const own = fleetOwn.get((ac.id || '').toUpperCase()) || fleetRole.get((ac.call_sign || '').toUpperCase())
-    if (own && String(ac.status || '').toUpperCase() !== 'GROUNDED' && (ac.altitude || 0) > 50)
-      fleetAirborne.add((ac.call_sign || ac.id || '').toUpperCase())
-  })
-  Object.values(fleetBcn ?? {}).forEach(b => {
-    if (!b || b.latitude == null) return
-    const sign = (b.call_sign || '').toUpperCase()
-    const fresh = (Date.now() / 1000 - (b.timestamp ?? 0)) < 180
-    const altFt = b.altitude != null ? b.altitude * 3.28084 : 0
-    if (fresh && fleetRole.get(sign) && String(b.flight_state || '').toUpperCase() !== 'GROUNDED' && altFt > 50)
-      fleetAirborne.add(sign)
-  })
+  // ── (21/09) État « flotte » : désormais dans FleetStrip (page Live, source useFleet = même que In flight).
+  //    La carte ne garde que l'alerte trafic.
   const trafficDown  = trafficFailures >= 2    // 2 échecs consécutifs (~6 s) → évite le clignotement sur un raté isolé
-  const fleetLoading = !!clubId && (!fleetLoaded || !trafficReady || (fleetRole.size > 0 && !bcnReady))
-  const fleetEmpty   = !fleetLoading && !trafficDown && fleetAirborne.size === 0
 
   const toggleLayer = (id) => {
     const next = { ...visible, [id]: !visible[id] }
@@ -636,18 +618,9 @@ export default function AerotraceMap({ flyTo = null }) {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
-      {(trafficDown || fleetLoading || fleetEmpty) && (
-        <div role="status" aria-live="polite" style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 10,
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}>
-          {trafficDown && (
-            <div style={statusPill}><span style={statusDot('#F5A623')} />Traffic unavailable, retrying…</div>
-          )}
-          {fleetLoading && (
-            <div style={statusPill}><span style={statusDot('#9A9A94')} />Loading fleet…</div>
-          )}
-          {fleetEmpty && (
-            <div style={statusPill}><span style={statusDot('#9A9A94')} />No aircraft in flight</div>
-          )}
+      {trafficDown && (
+        <div role="status" aria-live="polite" style={{ position: 'absolute', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 10, pointerEvents: 'none' }}>
+          <div style={statusPill}><span style={statusDot('#F5A623')} />Traffic unavailable, retrying…</div>
         </div>
       )}
 
