@@ -308,7 +308,8 @@ async function resolveClubByAircraft(db, icao24, reg) {
     if (regN && norm(a.callSign) === regN) byCall = a
   }
   const m = byReg || byCall || byIcao
-  return m ? { clubId: m.clubId || null, registration: m.registration || reg } : null
+  return m ? { clubId: m.clubId || null, registration: m.registration || reg,
+               ownership: m.ownership || 'club', ownerPilotId: m.ownerPilotId || '' } : null   // (2026-09-21) propriétaire
 }
 
 // PIN → pilote, uniquement si le match est unique dans le club (sinon admin).
@@ -343,18 +344,25 @@ async function normalizeFlightDoc(db, flightId, data) {
   const pilot      = data.pilot_code ? await resolvePilotByPin(db, clubId, data.pilot_code) : null
   const instructor = data.instr_code ? await resolvePilotByPin(db, clubId, data.instr_code) : null
 
+  // (2026-09-21, règle Christophe) AVION PROPRIÉTAIRE → le pilote EST le propriétaire, aucune attribution à faire.
+  // Auto-validé en solo SAUF si le boîtier a identifié un autre pilote (PIN) ou un instructeur (vol d'instruction
+  // sur avion privé) : ces cas restent dans la file « To assign », pré-remplis, pour décision humaine.
+  const ownerAc   = resolved?.ownership === 'owner' && resolved?.ownerPilotId ? resolved.ownerPilotId : null
+  const ownerAuto = !!ownerAc && !instructor && (!pilot || pilot.id === ownerAc)
+
   const patch = {
     clubId,
     aircraftIdent,
     aircraftType: data.aircraft_type || null,
     icao24: data.icao24 || null,
     fileName: (data.csvStoragePath || `${data.flight_id || flightId}.csv`).split('/').pop(),
-    pilotId: pilot?.id || null,
-    pilotRole: data.pilot_role || (pilot ? (pilot.isInstructor ? 'pilot' : 'pilot') : null),
+    pilotId: pilot?.id || ownerAc || null,
+    pilotRole: ownerAuto ? 'pilot' : (data.pilot_role || (pilot ? 'pilot' : null)),
     instructorId: instructor?.id || null,
     instructorOnboard: instructor ? true : null,
-    flightType: null,
-    validated: false,                                      // l'admin assigne depuis le carnet
+    flightType: ownerAuto ? 'solo' : null,
+    validated: ownerAuto,                                  // propriétaire → auto ; sinon l'admin/instructeur assigne depuis le carnet
+    autoAssigned: ownerAuto ? 'owner' : null,
     startTs, endTs,
     duration: stats?.duration ?? 0,
     maxAlt: stats?.maxAlt ?? null,
