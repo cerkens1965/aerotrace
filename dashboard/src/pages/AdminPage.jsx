@@ -4,7 +4,7 @@ import {
   collection, getDocs, addDoc, updateDoc, setDoc, deleteDoc,
   doc, serverTimestamp, query, where,
 } from 'firebase/firestore'
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
 import { useClub } from '../contexts/ClubContext'
@@ -510,7 +510,7 @@ function AircraftForm({ form, setForm, error, pilots = [] }) {
               value={form.ownerPilotId || ''}
               onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
               options={[{ value: '', label: 'Select owner…' },
-                ...pilots.map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))]}
+                ...pilots.filter(p => !p.archived || p.id === form.ownerPilotId).map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))]}
             />
           </div>
         )}
@@ -724,7 +724,51 @@ export default function AdminPage() {
 
   const deletePilot = async (p) => {
     await updateDoc(doc(db, 'pilots', p.id), { archived: true, updatedAt: serverTimestamp() })
-    setPilots(prev => prev.filter(x => x.id !== p.id))
+    setPilots(prev => prev.map(x => x.id === p.id ? { ...x, archived: true } : x))   // (21/09) gardé grisé + Restore (comme les avions)
+  }
+  const restorePilot = async (p) => {
+    await updateDoc(doc(db, 'pilots', p.id), { archived: false, updatedAt: serverTimestamp() })
+    setPilots(prev => prev.map(x => x.id === p.id ? { ...x, archived: false } : x))
+  }
+
+  // ── (21/09) PURGE = suppression DÉFINITIVE d'une fiche ARCHIVÉE (Restore reste le filet avant purge).
+  // Garde-fou historique : une fiche encore citée par des vols non archivés du club n'est PAS purgée
+  // (le carnet perdrait le nom du pilote / l'avion) → message clair, la fiche reste archivée.
+  const [purgeMsg, setPurgeMsg] = useState(null)   // { tone, text }
+  const flightsCiting = async (field, value) => {
+    if (!value) return 0
+    const snap = await getDocs(query(collection(db, 'flights'), where('clubId', '==', clubId), where(field, '==', value)))
+    return snap.docs.filter(d => d.data().archived !== true).length
+  }
+  const purgePilotDoc = async (p) => {
+    const n = (await flightsCiting('pilotId', p.id)) + (await flightsCiting('instructorId', p.id))
+    if (n > 0) return { ok: false, why: `${p.firstName || ''} ${p.lastName || ''}`.trim() + ` is on ${n} flight${n > 1 ? 's' : ''}` }
+    await deleteDoc(doc(db, 'pilots', p.id))
+    return { ok: true }
+  }
+  const purgeAircraftDoc = async (a) => {
+    const ids = [...new Set([a.registration, a.callSign].filter(Boolean))]
+    let n = 0; for (const v of ids) n += await flightsCiting('aircraftIdent', v)
+    if (n > 0) return { ok: false, why: `${a.callSign || a.registration} has ${n} flight${n > 1 ? 's' : ''}` }
+    if (a.photoStoragePath) { try { await deleteObject(storageRef(storage, a.photoStoragePath)) } catch (e) { console.warn('[Admin] photo purge:', e?.message || e) } }
+    await deleteDoc(doc(db, 'aircraft', a.id))
+    return { ok: true }
+  }
+  const runPurge = async (items, fn, setList, noun) => {
+    setPurgeMsg(null); setSaving(true)
+    const kept = []; let done = 0
+    try {
+      for (const it of items) {
+        const r = await fn(it)
+        if (r.ok) { done++; setList(prev => prev.filter(x => x.id !== it.id)) } else kept.push(r.why)
+      }
+      const head = `${done} archived ${noun}${done === 1 ? '' : 's'} purged.`
+      setPurgeMsg(kept.length
+        ? { tone: 'caution', text: `${head} Kept to preserve the logbook: ${kept.join(' · ')}.` }
+        : { tone: 'ok', text: head })
+    } catch (e) {
+      setPurgeMsg({ tone: 'caution', text: `Purge stopped: ${e?.message || e}` })
+    } finally { setSaving(false) }
   }
 
   // ── Aircraft CRUD ───────────────────────────────────────────────────────────
@@ -780,12 +824,12 @@ export default function AdminPage() {
 
   const closePilotForm    = () => { setPilotForm(null); setEditId(null); setError('') }
   const closeAircraftForm = () => { setAircraftForm(null); setEditId(null); setError('') }
-  const switchTab = (k) => { setTab(k); setPilotForm(null); setAircraftForm(null) }
+  const switchTab = (k) => { setTab(k); setPilotForm(null); setAircraftForm(null); setPurgeMsg(null) }
   const [qPilots, setQPilots] = useState(''), [qAircraft, setQAircraft] = useState(''), [qAccess, setQAccess] = useState('')
 
   const pendingInvites = invites.filter(i => i.status !== 'accepted')
   const pilotName = (id) => { const p = pilots.find(x => x.id === id); return p ? `${p.firstName || ''} ${p.lastName || ''} ${p.trigram || ''}` : '' }
-  const pilotsShown   = pilots.filter(p => matches(qPilots, p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
+  const pilotsShown   = [...pilots].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0)).filter(p => matches(qPilots, p.archived ? 'archived' : '', p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
   const aircraftShown = [...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))
     .filter(a => matches(qAircraft, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? `owner ${pilotName(a.ownerPilotId)}` : 'club', a.archived ? 'archived' : ''))
   const membersShown  = members.filter(m => matches(qAccess, m.email, m.displayName, m.role))
@@ -794,11 +838,14 @@ export default function AdminPage() {
   // ── Colonnes ────────────────────────────────────────────────────────────────
   const pilotColumns = [
     { key: 'trigram', label: 'TRIG', mono: true, width: 56,
-      render: p => <span style={{ fontWeight: 500, letterSpacing: '0.08em' }}>{p.trigram || '—'}</span> },
+      render: p => <span style={{ fontWeight: 500, letterSpacing: '0.08em', color: p.archived ? T.etch : undefined }}>{p.trigram || '—'}</span> },
     { key: 'name', label: 'PILOT',
       render: p => (
         <div style={{ minWidth: 140 }}>
-          <div style={{ fontWeight: 600, color: T.ink }}>{p.firstName} {p.lastName}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontWeight: 600, color: p.archived ? T.etch : T.ink }}>{p.firstName} {p.lastName}</span>
+            {p.archived && <Chip>ARCHIVED</Chip>}
+          </div>
           {p.licences?.length > 0 && (
             <div style={{ ...monoStyle(11, T.graphite), marginTop: 2 }}>{p.licences.map(l => l.toUpperCase()).join(' · ')}</div>
           )}
@@ -833,10 +880,16 @@ export default function AdminPage() {
     { key: 'actions', label: '', align: 'right',
       render: p => (
         <Actions>
-          <InviteCodeButton pilot={p} />
+          {!p.archived && <InviteCodeButton pilot={p} />}
           <Button size="sm" icon="edit" onClick={() => openEditPilot(p)}>Edit</Button>
-          <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
-            title={`Archive pilot ${p.firstName} ${p.lastName}`} onClick={() => deletePilot(p)}>Archive</Button>
+          {p.archived ? (<>
+            <Button size="sm" icon="refresh" onClick={() => restorePilot(p)}>Restore</Button>
+            <Button size="sm" variant="danger" icon="close" confirm="Delete forever?"
+              title={`Delete ${p.firstName} ${p.lastName} permanently`} onClick={() => runPurge([p], purgePilotDoc, setPilots, 'pilot')}>Purge</Button>
+          </>) : (
+            <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
+              title={`Archive pilot ${p.firstName} ${p.lastName}`} onClick={() => deletePilot(p)}>Archive</Button>
+          )}
         </Actions>
       ) },
   ]
@@ -875,9 +928,11 @@ export default function AdminPage() {
       render: a => (
         <Actions>
           <Button size="sm" icon="edit" onClick={() => openEditAircraft(a)}>Edit</Button>
-          {a.archived ? (
+          {a.archived ? (<>
             <Button size="sm" icon="refresh" onClick={() => restoreAircraft(a)}>Restore</Button>
-          ) : (
+            <Button size="sm" variant="danger" icon="close" confirm="Delete forever?"
+              title={`Delete ${a.callSign || a.registration} permanently`} onClick={() => runPurge([a], purgeAircraftDoc, setAircraft, 'aircraft')}>Purge</Button>
+          </>) : (
             <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
               title={`Archive aircraft ${a.callSign || a.registration}`} onClick={() => deleteAircraft(a)}>Archive</Button>
           )}
@@ -946,14 +1001,26 @@ export default function AdminPage() {
           value={tab}
           onChange={switchTab}
           tabs={[
-            { key: 'PILOTS',   label: 'Pilots',   count: pilots.length },
-            { key: 'AIRCRAFT', label: 'Aircraft', count: aircraft.length },
+            { key: 'PILOTS',   label: 'Pilots',   count: pilots.filter(p => !p.archived).length },
+            { key: 'AIRCRAFT', label: 'Aircraft', count: aircraft.filter(a => !a.archived).length },
             { key: 'ACCESS',   label: 'Access',   count: members.length + invites.length },
           ]}
         />
 
         <div style={{ flex: 1 }} />
 
+        {tab === 'PILOTS' && pilots.some(p => p.archived) && (
+          <Button variant="danger" confirm="Delete all archived?" disabled={saving}
+            onClick={() => runPurge(pilots.filter(p => p.archived), purgePilotDoc, setPilots, 'pilot')}>
+            Purge archived ({pilots.filter(p => p.archived).length})
+          </Button>
+        )}
+        {tab === 'AIRCRAFT' && aircraft.some(a => a.archived) && (
+          <Button variant="danger" confirm="Delete all archived?" disabled={saving}
+            onClick={() => runPurge(aircraft.filter(a => a.archived), purgeAircraftDoc, setAircraft, 'aircraft')}>
+            Purge archived ({aircraft.filter(a => a.archived).length})
+          </Button>
+        )}
         {tab === 'PILOTS' && (
           <Button variant="primary" onClick={openNewPilot}>New pilot</Button>
         )}
@@ -968,6 +1035,9 @@ export default function AdminPage() {
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 32px' }}>
         <div style={{ maxWidth: 1120, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {purgeMsg && (tab === 'PILOTS' || tab === 'AIRCRAFT') && (
+            <Banner tone={purgeMsg.tone} action={<Button size="sm" variant="ghost" onClick={() => setPurgeMsg(null)}>Dismiss</Button>}>{purgeMsg.text}</Banner>
+          )}
 
           {tab === 'PILOTS' && (<>
             <SearchBox value={qPilots} onChange={setQPilots} placeholder="Search pilots — name, trigram, e-mail, licence" count={pilotsShown.length} total={pilots.length} />
