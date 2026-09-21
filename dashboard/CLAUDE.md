@@ -241,3 +241,5 @@ locked club mode (the radar exists in firmware — restyle it, don't redesign it
 chosen; pick one open, non-rounded, 1.5 px-stroke family — no rounded geometric sets. Pricing.
 Dashboard panel colour: the guidelines use ink #141414; an earlier product brief said #0A0E1E —
 confirm with the user before using blue-black.
+- 2026-09-21 08h : dashboard DÉPLOYÉ EN PROD (hosting) avec la coquille AirKi + Fleet wifiKnown (« go publie » Christophe). Pages Live/Loop/Logbook/Fleet/Admin encore à restyler.
+- 2026-09-21 : Fleet → fiche boîtier : liste des réseaux connus avec Modifier (pré-remplit SSID, nouveau mot de passe) et Supprimer (wifiForget + wifiForgetSeq au Save, ATC ≥214). Déployé prod.

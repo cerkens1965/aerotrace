@@ -225,6 +225,7 @@ export default function FleetPage() {
       wifiSsid: cfg.wifiSsid ?? '',
       wifiPass: cfg.wifiPass ?? '',
       otaTag: cfg.otaTag ?? '',        // (2026-09-20) canal OTA du boîtier : '' inchangé · 's3' flotte · 's3dev' dev (ATC ≥210)
+      forget: [],                      // (2026-09-21) SSID à SUPPRIMER du boîtier (ATC ≥214) — envoyés avec un numéro de séquence
       reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '', wifiKnown: dev.wifiKnown || '' },
       hasConfig: !!(cfg.reg || cfg.wifiSsid),
     })
@@ -233,7 +234,8 @@ export default function FleetPage() {
     if (!cfgEdit) return
     const reg = (cfgEdit.reg || '').trim().toUpperCase()
     const wifiSsid = (cfgEdit.wifiSsid || '').trim()
-    if (!reg && !wifiSsid) return
+    const forget = (cfgEdit.forget || []).filter(Boolean)
+    if (!reg && !wifiSsid && !forget.length) return
     const type = (cfgEdit.type || '').trim().toUpperCase()
     const hex  = (cfgEdit.hex  || '').trim().toUpperCase()
     setCfgSaving(true)
@@ -256,6 +258,8 @@ export default function FleetPage() {
       await setDoc(doc(db, 'deviceConfig', cfgEdit.boxId), {
         boxId: cfgEdit.boxId, reg, type, hex, otaTag: cfgEdit.otaTag || '',
         wifiSsid, wifiPass: cfgEdit.wifiPass || '',
+        // (2026-09-21) suppression de réseaux connus : liste + séquence (le boîtier n'applique qu'une séquence plus récente que la dernière traitée)
+        ...(forget.length ? { wifiForget: forget.join(','), wifiForgetSeq: Date.now() } : {}),
         updatedAt: serverTimestamp(), updatedBy: email,
       }, { merge: true })
       // Reflète tout de suite l'immat DÉSIRÉE dans la liste (le report /devices peut retarder).
@@ -554,20 +558,27 @@ export default function FleetPage() {
                   {cfgEdit.reported.wifiKnown.split(',').map(x => x.trim()).filter(Boolean).map((x, i) => {
                     const pilot = x.endsWith('*'); const name = pilot ? x.slice(0, -1) : x
                     const active = name.toLowerCase() === (cfgEdit.reported.wifiSsid || '').toLowerCase()
+                    const marked = (cfgEdit.forget || []).includes(name)
+                    const btn = { padding: '2px 8px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.mid, cursor: 'pointer', fontFamily: C.mono, fontSize: 10 }
                     return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontFamily: C.mono, fontSize: 11, padding: '3px 0', color: active ? C.text : C.mid }}>
-                        <span>{i + 1}. {name}{active ? ' · connecté' : ''}</span>
-                        <span style={{ color: pilot ? C.text : C.low }}>{pilot ? 'saisi par le pilote · protégé' : 'poussé par le dashboard'}</span>
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: C.mono, fontSize: 11, padding: '3px 0', color: marked ? C.low : (active ? C.text : C.mid), textDecoration: marked ? 'line-through' : 'none' }}>
+                        <span style={{ flex: 1 }}>{i + 1}. {name}{active ? ' · connecté' : ''}</span>
+                        <span style={{ color: pilot ? C.text : C.low }}>{pilot ? 'pilote · protégé' : 'dashboard'}</span>
+                        {/* Modifier = pré-remplit le champ WiFi ci-dessus (nouveau mot de passe) ; Supprimer = marque pour suppression, envoyée au Save */}
+                        <button type="button" style={btn} title="Changer le mot de passe de ce réseau"
+                          onClick={() => setCfgEdit(c => ({ ...c, wifiSsid: name, wifiPass: '' }))}>Modifier</button>
+                        <button type="button" style={{ ...btn, color: marked ? C.text : '#b91c1c' }} title={marked ? 'Annuler la suppression' : 'Supprimer ce réseau du boîtier au prochain passage WiFi'}
+                          onClick={() => setCfgEdit(c => ({ ...c, forget: marked ? c.forget.filter(x => x !== name) : [...(c.forget || []), name] }))}>{marked ? 'Garder' : 'Supprimer'}</button>
                       </div>
                     )
                   })}
-                  <div style={{ fontSize: 10, color: C.low, marginTop: 6 }}>Ordre = priorité du boîtier. Un réseau du dashboard est éjecté avant un réseau du pilote si la liste (6) déborde.</div>
+                  <div style={{ fontSize: 10, color: C.low, marginTop: 6 }}>Ordre = priorité du boîtier. Un réseau du dashboard est éjecté avant un réseau du pilote si la liste (6) déborde. Les suppressions partent au Save et s'appliquent au prochain passage WiFi du boîtier (ATC ≥214).</div>
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
                 <button onClick={() => setCfgEdit(null)} disabled={cfgSaving}
                   style={{ padding: '8px 16px', borderRadius: 8, background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, cursor: 'pointer', fontFamily: C.mono, fontSize: 11 }}>Annuler</button>
-                <button onClick={saveConfig} disabled={cfgSaving || (!cfgEdit.reg.trim() && !cfgEdit.wifiSsid.trim())}
+                <button onClick={saveConfig} disabled={cfgSaving || (!cfgEdit.reg.trim() && !cfgEdit.wifiSsid.trim() && !(cfgEdit.forget || []).length)}
                   style={{ padding: '8px 18px', borderRadius: 8, background: C.text, border: 'none', color: '#fff', cursor: 'pointer', fontFamily: C.mono, fontSize: 11, fontWeight: 700 }}>
                   {cfgSaving ? '…' : 'Pousser au boîtier'}
                 </button>
