@@ -647,7 +647,7 @@ exports.reportDevice = onRequest({ region: 'europe-west1', cors: true }, async (
   const db = getFirestore()
   const f = { boxId, lastSeen: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
   const num = new Set(['fwVersion', 'atvVersion'])
-  for (const k of ['clubId', 'callSign', 'icao24', 'board', 'fwVersion', 'fwVersionStr', 'atvVersion', 'otaState', 'wifiSsid', 'iccid']) {
+  for (const k of ['clubId', 'callSign', 'icao24', 'board', 'fwVersion', 'fwVersionStr', 'atvVersion', 'otaState', 'wifiSsid', 'iccid', 'wifiKnown']) {   // (2026-09-21) wifiKnown = SSID connus du boîtier (ATC ≥213)
     if (b[k] === undefined || b[k] === null) continue
     f[k] = num.has(k) ? Number(b[k]) : String(b[k])
   }
