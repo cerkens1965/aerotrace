@@ -11,8 +11,25 @@ import { useClub } from '../contexts/ClubContext'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon,
 } from '../components/ui'
+
+// (21/09) Recherche Admin : filtre texte insensible à la casse et aux accents sur plusieurs champs.
+const fold = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+const matches = (q, ...fields) => { const n = fold(q).trim(); if (!n) return true; const hay = fields.map(fold).join(' '); return n.split(/\s+/).every(w => hay.includes(w)) }
+function SearchBox({ value, onChange, placeholder, count, total }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <label style={{ position: 'relative', flex: '1 1 320px', maxWidth: 440 }}>
+        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: T.etch, display: 'flex' }}><Icon name="search" size={16} /></span>
+        <input type="search" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+          className="ak-focus" onKeyDown={e => { if (e.key === 'Escape') onChange('') }}
+          style={{ ...fieldBase, width: '100%', paddingLeft: 34, fontFamily: T.sans }} />
+      </label>
+      {value.trim() && <span style={{ ...monoStyle(12, T.graphite) }}>{count} / {total}</span>}
+    </div>
+  )
+}
 
 // (2026-09-21, lot 02 B) Page restylée AirKi : jetons T, Tabs, Drawer, DataTable, Button, StatusDot.
 // Logique inchangée (CRUD pilotes/avions/accès, archivage, codes d'invitation, trigramme/PIN, photos, hex).
@@ -764,8 +781,15 @@ export default function AdminPage() {
   const closePilotForm    = () => { setPilotForm(null); setEditId(null); setError('') }
   const closeAircraftForm = () => { setAircraftForm(null); setEditId(null); setError('') }
   const switchTab = (k) => { setTab(k); setPilotForm(null); setAircraftForm(null) }
+  const [qPilots, setQPilots] = useState(''), [qAircraft, setQAircraft] = useState(''), [qAccess, setQAccess] = useState('')
 
   const pendingInvites = invites.filter(i => i.status !== 'accepted')
+  const pilotName = (id) => { const p = pilots.find(x => x.id === id); return p ? `${p.firstName || ''} ${p.lastName || ''} ${p.trigram || ''}` : '' }
+  const pilotsShown   = pilots.filter(p => matches(qPilots, p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
+  const aircraftShown = [...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))
+    .filter(a => matches(qAircraft, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? `owner ${pilotName(a.ownerPilotId)}` : 'club', a.archived ? 'archived' : ''))
+  const membersShown  = members.filter(m => matches(qAccess, m.email, m.displayName, m.role))
+  const invitesShown  = pendingInvites.filter(i => matches(qAccess, i.email, i.id, i.role))
 
   // ── Colonnes ────────────────────────────────────────────────────────────────
   const pilotColumns = [
@@ -945,23 +969,30 @@ export default function AdminPage() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 32px' }}>
         <div style={{ maxWidth: 1120, display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {tab === 'PILOTS' && (
+          {tab === 'PILOTS' && (<>
+            <SearchBox value={qPilots} onChange={setQPilots} placeholder="Search pilots — name, trigram, e-mail, licence" count={pilotsShown.length} total={pilots.length} />
             <DataTable
-              columns={pilotColumns} rows={pilots} loading={loading}
-              empty={<EmptyState text="No pilots yet." actionLabel="New pilot" onAction={openNewPilot} />}
+              columns={pilotColumns} rows={pilotsShown} loading={loading}
+              empty={qPilots.trim()
+                ? <EmptyState text={`No pilot matches “${qPilots.trim()}”.`} actionLabel="Clear search" onAction={() => setQPilots('')} />
+                : <EmptyState text="No pilots yet." actionLabel="New pilot" onAction={openNewPilot} />}
             />
-          )}
+          </>)}
 
-          {tab === 'AIRCRAFT' && (
+          {tab === 'AIRCRAFT' && (<>
+            <SearchBox value={qAircraft} onChange={setQAircraft} placeholder="Search aircraft — registration, type, hex, base, owner" count={aircraftShown.length} total={aircraft.length} />
             <DataTable
               columns={aircraftColumns} loading={loading}
-              rows={[...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))}
-              empty={<EmptyState text="No aircraft yet." actionLabel="New aircraft" onAction={openNewAircraft} />}
+              rows={aircraftShown}
+              empty={qAircraft.trim()
+                ? <EmptyState text={`No aircraft matches “${qAircraft.trim()}”.`} actionLabel="Clear search" onAction={() => setQAircraft('')} />
+                : <EmptyState text="No aircraft yet." actionLabel="New aircraft" onAction={openNewAircraft} />}
             />
-          )}
+          </>)}
 
           {tab === 'ACCESS' && (
             <>
+              <SearchBox value={qAccess} onChange={setQAccess} placeholder="Search access — e-mail, name, role" count={membersShown.length + invitesShown.length} total={members.length + pendingInvites.length} />
               {error && !inviteForm && (
                 <Banner tone="caution" action={<Button size="sm" variant="ghost" onClick={() => setError('')}>Dismiss</Button>}>
                   {error}
@@ -1005,18 +1036,18 @@ export default function AdminPage() {
 
               {/* Members (people with access now) */}
               <div>
-                {sectionTitle('Members', members.length)}
+                {sectionTitle('Members', membersShown.length)}
                 <DataTable
-                  columns={memberColumns} rows={members} loading={loading}
-                  empty={<EmptyState text="No one has access to this club yet." />}
+                  columns={memberColumns} rows={membersShown} loading={loading}
+                  empty={<EmptyState text={qAccess.trim() ? `No member matches “${qAccess.trim()}”.` : 'No one has access to this club yet.'} />}
                 />
               </div>
 
               {/* Pending invites */}
-              {!loading && pendingInvites.length > 0 && (
+              {!loading && invitesShown.length > 0 && (
                 <div>
-                  {sectionTitle('Pending invites', pendingInvites.length)}
-                  <DataTable columns={inviteColumns} rows={pendingInvites} />
+                  {sectionTitle('Pending invites', invitesShown.length)}
+                  <DataTable columns={inviteColumns} rows={invitesShown} />
                 </div>
               )}
             </>
