@@ -2,10 +2,14 @@
 // Le rôle du vol est auto-dérivé du profil pilote via isStudent() (logbookUtils) :
 // licence === 'student' → élève → section instructeur obligatoire
 // tout le reste (y compris licence absente) → breveté → SOLO, pas d'instructeur
+// (lot 02, 2026-09-21) Présenté en tiroir droit AirKi (<Drawer>) au lieu d'une modale centrée.
+// Mêmes props et même logique : LogbookPage l'appelle de la même façon (rendu conditionnel,
+// donc état ré-initialisé à chaque vol ouvert).
 
 import { useState, useMemo } from 'react'
 import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../../firebase/config'
+import { Drawer, Button, Banner, StatusDot, T, labelStyle, monoStyle } from '../ui'
 import { formatDateTime, formatDuration, deriveFlightType, isStudent as pilotIsStudent, ownerPilotIdFor, FLIGHT_TYPES } from '../../utils/logbookUtils'
 
 export default function FlightAssignModal({ flight, pilots, aircraft, onSave, onClose }) {
@@ -77,182 +81,151 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
     }
   }
 
-  // ── Styles ───────────────────────────────────────────────────
-  const lbl = { display: 'block', color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5, marginBottom: 7 }
-  const sel = {
-    background: 'rgba(10,14,30,0.04)', border: '1px solid rgba(10,14,30,0.13)',
-    color: '#0a0e1e', fontFamily: 'monospace', fontSize: 13,
-    padding: '9px 12px', borderRadius: 6, width: '100%',
-    outline: 'none', cursor: 'pointer', boxSizing: 'border-box',
-  }
-  const RadioBtn = ({ label, active, onClick }) => (
-    <button onClick={onClick} type="button" style={{
-      flex: 1, padding: '7px 0',
-      background: active ? 'rgba(10,14,30,0.08)' : 'rgba(10,14,30,0.03)',
-      border: `1px solid ${active ? 'rgba(10,14,30,0.3)' : 'rgba(10,14,30,0.1)'}`,
-      color: active ? '#0a0e1e' : 'rgba(10,14,30,0.4)',
-      fontFamily: 'monospace', fontSize: 11, fontWeight: active ? 700 : 400,
-      borderRadius: 6, cursor: 'pointer', transition: 'all 0.15s',
-    }}>{label}</button>
+  const subtitle = [
+    formatDateTime(flight.startTs),
+    formatDuration(flight.duration),
+    flight.maxAlt ? `${Math.round(flight.maxAlt)} ft max` : null,
+    flight.maxSpd ? `${Math.round(flight.maxSpd * 1.852)} km/h max` : null,
+  ].filter(Boolean).join(' · ')
+
+  const footer = (
+    <>
+      <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" icon="check" onClick={handleSave} disabled={!canSave || saving}>
+        {saving ? 'Saving…' : (isEdit ? 'Save' : 'Validate flight')}
+      </Button>
+    </>
   )
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 9000,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'monospace', backdropFilter: 'blur(4px)',
-      }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    <Drawer closeOnOverlay={false}
+      open
+      onClose={onClose}
+      title={isEdit ? 'Edit flight' : 'Assign flight'}
+      subtitle={subtitle}
+      footer={footer}
     >
-      <div style={{
-        background: '#ffffff',
-        border: '1px solid rgba(10,14,30,0.12)',
-        borderRadius: 12, padding: '28px 32px',
-        width: 520, maxWidth: '92vw', maxHeight: '88vh',
-        overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-      }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 2, marginBottom: 6 }}>
-            {isEdit ? 'Edit flight' : 'Assign flight'}
-          </div>
-          <div style={{ color: '#0a0e1e', fontSize: 15, fontWeight: 700 }}>
-            {flight.fileName || flight.id}
-          </div>
-          <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 12, marginTop: 4 }}>
-            {formatDateTime(flight.startTs)} · {formatDuration(flight.duration)}
-            {flight.maxAlt ? ` · ${Math.round(flight.maxAlt)} ft max` : ''}
-            {flight.maxSpd ? ` · ${Math.round(flight.maxSpd * 1.852)} km/h max` : ''}
-          </div>
+      {/* Fichier source */}
+      <Section first>
+        <div style={labelStyle(T.etch)}>FILE</div>
+        <div style={{ ...monoStyle(13, T.ink), marginTop: 6, wordBreak: 'break-all' }}>
+          {flight.fileName || flight.id}
         </div>
+      </Section>
 
-        {/* Aircraft */}
-        <div style={{ marginBottom: 18 }}>
-          <label style={lbl}>AIRCRAFT</label>
-          <select value={aircraftIdent} onChange={e => { const cs = e.target.value; setAircraftIdent(cs); const o = ownerFor(cs); if (o) { setPilotId(o); setInstructorId('') } }} style={sel}>
-            <option value="">Select an aircraft…</option>
-            {aircraft.map(a => { const cs = a.callSign || a.registration; return (
-              <option key={a.id} value={cs}>
-                {cs} — {a.typeDesig || a.type}
-              </option>
-            )})}
-          </select>
-          {ownerId && (
-            <div style={{ color: 'rgba(10,14,30,0.55)', fontSize: 11, marginTop: 6 }}>
-              Owner aircraft — pilot set to the owner
-            </div>
-          )}
-        </div>
+      {/* Aircraft */}
+      <Section>
+        <label htmlFor="assign-aircraft" style={LBL}>AIRCRAFT</label>
+        <select id="assign-aircraft" className="ak-focus" value={aircraftIdent} onChange={e => { const cs = e.target.value; setAircraftIdent(cs); const o = ownerFor(cs); if (o) { setPilotId(o); setInstructorId('') } }} style={SEL}>
+          <option value="">Select an aircraft…</option>
+          {aircraft.map(a => { const cs = a.callSign || a.registration; return (
+            <option key={a.id} value={cs}>
+              {cs} — {a.typeDesig || a.type}
+            </option>
+          )})}
+        </select>
+        {ownerId && (
+          <div style={HINT}>Owner aircraft — pilot set to the owner</div>
+        )}
+      </Section>
 
-        {/* Pilote */}
-        <div style={{ marginBottom: 18 }}>
-          <label style={lbl}>PILOT AT THE CONTROLS</label>
-          <select value={pilotId} onChange={e => { setPilotId(e.target.value); setInstructorId('') }} style={sel}>
-            <option value="">Select a pilot…</option>
-            {pilots.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.firstName} {p.lastName}
-                {p.trigram ? ` (${p.trigram})` : ''}
-                {p.licences?.length ? ` — ${p.licences.join('/')}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Pilote */}
+      <Section>
+        <label htmlFor="assign-pilot" style={LBL}>PILOT AT THE CONTROLS</label>
+        <select id="assign-pilot" className="ak-focus" value={pilotId} onChange={e => { setPilotId(e.target.value); setInstructorId('') }} style={SEL}>
+          <option value="">Select a pilot…</option>
+          {pilots.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.firstName} {p.lastName}
+              {p.trigram ? ` (${p.trigram})` : ''}
+              {p.licences?.length ? ` — ${p.licences.join('/')}` : ''}
+            </option>
+          ))}
+        </select>
 
         {/* Statut vol auto — depuis champ licence du profil */}
         {selectedPilot && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            background: 'rgba(10,14,30,0.03)', border: '1px solid rgba(10,14,30,0.08)',
-            borderRadius: 8, padding: '10px 14px', marginBottom: 18,
-          }}>
-            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHT STATUS</span>
-            {isLicensed ? (
-              <span style={{ color: '#22c55e', fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
-                ✈ PILOT{selectedPilot.isInstructor ? ' · INSTRUCTOR' : ''}
-              </span>
-            ) : (
-              <span style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
-                🎓 STUDENT — instructor required
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', color: 'rgba(10,14,30,0.3)', fontSize: 10 }}>from profile</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            <span style={labelStyle(T.etch)}>FLIGHT STATUS</span>
+            {isLicensed
+              ? <StatusDot tone="ok" text={`PILOT${selectedPilot.isInstructor ? ' · INSTRUCTOR' : ''}`} />
+              : <StatusDot tone="info" text="STUDENT — INSTRUCTOR REQUIRED" />}
+            <span style={{ marginLeft: 'auto', color: T.etch, fontSize: 12 }}>from profile</span>
           </div>
         )}
+      </Section>
 
-        {/* Section instructeur — uniquement si student */}
-        {isStudent && pilotId && (
-          <div style={{
-            background: 'rgba(96,165,250,0.04)',
-            border: '1px solid rgba(96,165,250,0.2)',
-            borderRadius: 8, padding: '16px', marginBottom: 18,
-          }}>
-            <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>INSTRUCTOR</label>
-              <select value={instructorId} onChange={e => setInstructorId(e.target.value)} style={sel}>
-                <option value="">Select an instructor…</option>
-                {instructors.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}
-                  </option>
-                ))}
-              </select>
-              {instructors.length === 0 && (
-                <div style={{ color: '#F5A623', fontSize: 11, marginTop: 6 }}>
-                  No instructor — check roles in Admin
-                </div>
-              )}
+      {/* Section instructeur — uniquement si student */}
+      {isStudent && pilotId && (
+        <Section>
+          <label htmlFor="assign-instructor" style={LBL}>INSTRUCTOR</label>
+          <select id="assign-instructor" className="ak-focus" value={instructorId} onChange={e => setInstructorId(e.target.value)} style={SEL}>
+            <option value="">Select an instructor…</option>
+            {instructors.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}
+              </option>
+            ))}
+          </select>
+          {instructors.length === 0 && (
+            <div style={{ marginTop: 8 }}>
+              <StatusDot tone="caution" text="No instructor — check roles in Admin" />
             </div>
-            <label style={{ ...lbl, marginBottom: 8 }}>INSTRUCTOR PRESENCE</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <RadioBtn label="🪑 ON BOARD"  active={instructorOnboard === true}  onClick={() => setInstructorOnboard(true)} />
-              <RadioBtn label="📡 ON GROUND"  active={instructorOnboard === false} onClick={() => setInstructorOnboard(false)} />
-            </div>
+          )}
+
+          <div style={{ ...LBL, marginTop: 16 }} id="assign-presence">INSTRUCTOR PRESENCE</div>
+          <div role="group" aria-labelledby="assign-presence" style={{ display: 'flex', gap: 8 }}>
+            <Button
+              variant={instructorOnboard === true ? 'primary' : 'secondary'}
+              aria-pressed={instructorOnboard === true}
+              onClick={() => setInstructorOnboard(true)}
+              style={{ flex: 1 }}
+            >
+              On board
+            </Button>
+            <Button
+              variant={instructorOnboard === false ? 'primary' : 'secondary'}
+              aria-pressed={instructorOnboard === false}
+              onClick={() => setInstructorOnboard(false)}
+              style={{ flex: 1 }}
+            >
+              On ground
+            </Button>
           </div>
-        )}
+        </Section>
+      )}
 
-        {/* Type détecté */}
-        {ft && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            background: 'rgba(10,14,30,0.03)', border: '1px solid rgba(10,14,30,0.08)',
-            borderRadius: 6, padding: '10px 14px', marginBottom: 22,
-          }}>
-            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHT TYPE</span>
-            <span style={{ color: ft.color, fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
-              {ft.label.toUpperCase()}
+      {/* Type détecté */}
+      {ft && (
+        <Section>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={labelStyle(T.etch)}>FLIGHT TYPE</span>
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: T.radius.pill, background: ft.color }} />
+              <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 500, color: T.graphite }}>{ft.short}</span>
             </span>
-            <span style={{ marginLeft: 'auto', width: 8, height: 8, borderRadius: '50%', background: ft.color }} />
           </div>
-        )}
+        </Section>
+      )}
 
-        {error && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 14 }}>{error}</div>}
+      {error && <Banner tone="caution" style={{ marginTop: 16 }}>{error}</Banner>}
+    </Drawer>
+  )
+}
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} type="button" style={{
-            background: 'transparent', border: '1px solid rgba(10,14,30,0.15)',
-            color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace',
-            fontSize: 12, padding: '8px 18px', borderRadius: 6, cursor: 'pointer',
-          }}>
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={!canSave || saving} type="button" style={{
-            background: canSave && !saving ? '#0a0e1e' : 'rgba(10,14,30,0.06)',
-            border: `1px solid ${canSave && !saving ? '#0a0e1e' : 'rgba(10,14,30,0.1)'}`,
-            color: canSave && !saving ? '#ffffff' : 'rgba(10,14,30,0.25)',
-            fontFamily: 'monospace', fontSize: 12, fontWeight: 700,
-            padding: '8px 22px', borderRadius: 6,
-            cursor: canSave && !saving ? 'pointer' : 'not-allowed',
-            letterSpacing: 0.5, transition: 'all 0.15s',
-          }}>
-            {saving ? '…' : (isEdit ? '✓ Save' : '✓ Validate flight')}
-          </button>
-        </div>
-      </div>
+// ── Styles & sections (top-level : jamais déclarés dans le composant) ─────────
+const LBL  = { ...labelStyle(T.etch), display: 'block', marginBottom: 8 }
+const HINT = { color: T.graphite, fontSize: 12, marginTop: 8 }
+const SEL  = {
+  background: T.card, border: T.border, color: T.ink, fontFamily: T.sans, fontSize: 14,
+  height: 38, padding: '0 10px', borderRadius: T.radius.sm, width: '100%', cursor: 'pointer', boxSizing: 'border-box',
+}
+
+// Section du tiroir, séparée de la précédente par un filet 1 px.
+function Section({ first = false, children }) {
+  return (
+    <div style={{ padding: first ? '0 0 16px' : '16px 0', borderTop: first ? 'none' : T.border }}>
+      {children}
     </div>
   )
 }

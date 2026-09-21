@@ -10,6 +10,9 @@
 // Vols lus en temps réel (onSnapshot), archivés (soft delete) exclus partout.
 // Vol « To assign » = needsAssignment() (logbookUtils) : non validé, hors vol
 // propriétaire déjà attribué. Les rendus utilisent f._pending, calculé une fois.
+// (lot 02, 2026-09-21) Habillage AirKi : bibliothèque src/components/ui (T, MetricCard, Tabs,
+// DataTable, Button, StatusDot, Banner, EmptyState, Icon). Logique inchangée. Libellés en
+// capitales écrits dans la chaîne (aucun text-transform), pas de rouge, ambre jamais en texte.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { collection, getDocs, query, where, doc, updateDoc, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
@@ -21,6 +24,10 @@ import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import RedeemInvite from '../components/auth/RedeemInvite'
 import {
+  T, labelStyle, valueStyle, headingStyle, monoStyle,
+  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Icon,
+} from '../components/ui'
+import {
   formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
   FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment, findMyPilot,
 } from '../utils/logbookUtils'
@@ -30,53 +37,37 @@ const IMPORT_ROLES = ['instructor', 'admin', 'super_admin']
 
 // ─── Shared low-level components ──────────────────────────────────────────────
 
-function StatCard({ label, value, accent = false }) {
-  return (
-    <div style={{
-      background: '#ffffff',
-      border: '1px solid rgba(10,14,30,0.12)',
-      borderRadius: 8,
-      padding: '12px 18px',
-    }}>
-      <div style={{ color: 'rgba(10,14,30,0.50)', fontSize: 10, letterSpacing: 1.5 }}>{label}</div>
-      <div style={{ color: accent ? '#F5A623' : '#0a0e1e', fontSize: 22, fontWeight: 700, marginTop: 4 }}>{value}</div>
-    </div>
-  )
+const DASH = <span style={{ color: T.etch }}>—</span>
+
+// Point coloré 8 px (type de vol) — la couleur n'est portée que par le point.
+function Dot({ color, size = 8 }) {
+  return <span aria-hidden="true" style={{ width: size, height: size, borderRadius: T.radius.pill, background: color, flexShrink: 0 }} />
 }
 
+// Type de vol : point coloré + texte mono graphite (FLIGHT_TYPES n'a ni rouge ni texte ambre).
 function TypeBadge({ type }) {
   const b = flightTypeBadge(type)
-  if (!b) return <span style={{ color: 'rgba(10,14,30,0.35)' }}>—</span>
+  if (!b) return DASH
   return (
-    <span style={{
-      background: `${b.color}18`,
-      border: `1px solid ${b.color}44`,
-      color: b.color,
-      fontFamily: 'monospace',
-      fontSize: 10,
-      padding: '2px 8px',
-      borderRadius: 4,
-      letterSpacing: 0.5,
-      whiteSpace: 'nowrap',
-    }}>
-      {b.label}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+      <Dot color={b.color} />
+      <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 500, letterSpacing: '0.02em', color: T.graphite }}>{b.label}</span>
     </span>
   )
 }
 
 function ValidBadge({ validated }) {
+  return <StatusDot tone={validated ? 'ok' : 'caution'} text={validated ? 'VALIDATED' : 'TO ASSIGN'} style={{ whiteSpace: 'nowrap' }} />
+}
+
+// Puce texte bordée (licences, propriété avion).
+function Chip({ children }) {
   return (
     <span style={{
-      background: validated ? 'rgba(34,197,94,0.08)' : 'rgba(245,166,35,0.08)',
-      border: `1px solid ${validated ? 'rgba(34,197,94,0.25)' : 'rgba(245,166,35,0.25)'}`,
-      color: validated ? '#22c55e' : '#F5A623',
-      fontSize: 10,
-      padding: '2px 7px',
-      borderRadius: 4,
-      fontFamily: 'monospace',
-      whiteSpace: 'nowrap',
+      fontFamily: T.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.2,
+      color: T.graphite, border: T.border, borderRadius: T.radius.sm, padding: '2px 6px', whiteSpace: 'nowrap',
     }}>
-      {validated ? '✓ OK' : '⚠ To assign'}
+      {children}
     </span>
   )
 }
@@ -89,57 +80,109 @@ function ValidBadge({ validated }) {
  * apparaissent à la place, ce qui reste lisible.
  */
 function Airfield({ icao }) {
-  if (!icao) return <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>
+  if (!icao) return DASH
   const flag = icaoFlag(icao)
   return (
-    <span title={icaoCountry(icao) || 'unknown country'} style={{ color: '#0a0e1e' }}>
+    <span title={icaoCountry(icao) || 'unknown country'} style={{ color: T.ink }}>
       {flag && <span style={{ marginRight: 4 }}>{flag}</span>}{icao}
     </span>
   )
 }
 
-const TH = { textAlign: 'left', padding: '5px 10px', fontWeight: 400, fontSize: 10, letterSpacing: 1.5, color: 'rgba(10,14,30,0.45)', whiteSpace: 'nowrap' }
-const TD = { padding: '9px 10px', color: '#0a0e1e', fontFamily: 'monospace', fontSize: 12, verticalAlign: 'middle' }
-const REPLAY_BTN = {
-  background: 'rgba(245,166,35,0.1)', border: '1px solid rgba(245,166,35,0.3)',
-  color: '#F5A623', fontFamily: 'monospace', fontSize: 11, padding: '3px 10px',
-  borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+function Route({ f }) {
+  if (!(f.depIcao || f.arrIcao)) return DASH
+  return (
+    <span style={{ whiteSpace: 'nowrap' }}>
+      <Airfield icao={f.depIcao} />
+      <span style={{ color: T.etch }}> → </span>
+      <Airfield icao={f.arrIcao} />
+    </span>
+  )
 }
-const ASSIGN_BTN = {
-  background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.3)',
-  color: '#60a5fa', fontFamily: 'monospace', fontSize: 11, padding: '3px 10px',
-  borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+
+// G max : au-delà de 2.5 G, valeur en gras précédée d'un point ambre (statut, jamais du texte ambre ni rouge).
+function GMax({ g }) {
+  if (!g) return DASH
+  const high = g > 2.5
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: high ? 600 : 400, color: high ? T.ink : T.graphite }}>
+      {high && <Dot color={T.amber} />}
+      {`${g.toFixed(1)}G`}
+    </span>
+  )
 }
-const DEL_BTN = {
-  background: 'transparent', border: '1px solid rgba(239,68,68,0.3)',
-  color: 'rgba(239,68,68,0.85)', fontFamily: 'monospace', fontSize: 11,
-  padding: '3px 9px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+
+const presenceText = f => (f.instructorOnboard ? 'On board' : 'On ground')
+
+// Boutons de ligne : Open Loop, Assign (vol en attente) / Edit (vol validé), Delete (admin, 2 temps).
+function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+      <Button size="sm" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button>
+      {onAssign && (!f._pending
+        ? <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment">Edit</Button>
+        : <Button size="sm" variant="primary" icon="edit" onClick={() => onAssign(f)}>Assign</Button>)}
+      {canDelete && (
+        <Button size="sm" variant="danger" confirm="Confirm?" onClick={() => onDelete(f.id)} title="Remove this flight from the logbook">
+          Delete
+        </Button>
+      )}
+    </span>
+  )
 }
-// (édition) Ré-attribution d'un vol DÉJÀ validé — neutre, à côté de REPLAY.
-const EDIT_BTN = {
-  background: 'rgba(10,14,30,0.05)', border: '1px solid rgba(10,14,30,0.18)',
-  color: 'rgba(10,14,30,0.6)', fontFamily: 'monospace', fontSize: 11,
-  padding: '3px 9px', borderRadius: 4, cursor: 'pointer', whiteSpace: 'nowrap',
+
+// Colonnes communes des tables de vols.
+const COL_DATE     = { key: 'date', label: 'DATE', mono: true, render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDateTime(f.startTs)}</span> }
+const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', render: f => formatDuration(f.duration) }
+const COL_TYPE     = { key: 'type', label: 'TYPE', render: f => <TypeBadge type={f.flightType} /> }
+const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
+const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax g={f.maxG} /> }
+const colAircraft  = acLabel => ({
+  key: 'aircraft', label: 'AIRCRAFT', mono: true,
+  render: f => <span title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</span>,
+})
+
+// Table dépliée dans une carte : sans cadre propre, séparée par un filet.
+const NESTED_TABLE = { border: 'none', borderTop: T.border, borderRadius: 0 }
+
+// Bloc chiffré aligné à droite dans l'en-tête des cartes.
+function CardStat({ label, value, sub, minWidth }) {
+  return (
+    <div style={{ textAlign: 'right', minWidth }}>
+      <div style={labelStyle(T.etch)}>{label}</div>
+      <div style={{ ...valueStyle(18), marginTop: 6 }}>{value}</div>
+      {sub}
+    </div>
+  )
 }
-const DEL_CONFIRM_BTN = {
-  ...DEL_BTN, background: '#ef4444', border: '1px solid #ef4444', color: '#fff', fontWeight: 700,
+
+// En-tête de carte dépliable (clic + Entrée/Espace).
+function CardHeader({ open, onToggle, columns, children }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      className="ak-focus"
+      onClick={onToggle}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
+      style={{ display: 'grid', gridTemplateColumns: columns, gap: 20, padding: '14px 16px', cursor: 'pointer', alignItems: 'center' }}
+    >
+      {children}
+      <Icon name="chevron-right" size={16} color={T.graphite} style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
+    </div>
+  )
 }
-const CARD_STYLE = { background: '#ffffff', borderRadius: 8, overflow: 'hidden' }
+
+const cardStyle = open => ({
+  background: T.card, border: `1px solid ${open ? T.graphite : T.rule}`, borderRadius: T.radius.md, overflow: 'hidden',
+})
 
 // ─── PilotCard ────────────────────────────────────────────────────────────────
 
-// Badge propriété avion — CLUB (rouge, = highlight carte live) / OWNER (bleu).
+// Puce propriété avion — CLUB / OWNER (texte graphite bordé, plus de rouge/bleu).
 function OwnershipBadge({ ac }) {
-  const isOwner = ac?.ownership === 'owner'
-  return (
-    <span style={{
-      fontFamily: 'monospace', fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
-      padding: '2px 6px', borderRadius: 4,
-      background: isOwner ? 'rgba(96,165,250,0.10)' : 'rgba(239,68,68,0.10)',
-      color: isOwner ? '#3b82f6' : '#ef4444',
-      border: `1px solid ${isOwner ? 'rgba(96,165,250,0.35)' : 'rgba(239,68,68,0.35)'}`,
-    }}>{isOwner ? 'OWNER' : 'CLUB'}</span>
-  )
+  return <Chip>{ac?.ownership === 'owner' ? 'OWNER' : 'CLUB'}</Chip>
 }
 
 function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }) {
@@ -179,122 +222,74 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
 
   const unvalidated = myFlights.filter(f => f._pending).length
 
+  const columns = [
+    COL_DATE,
+    colAircraft(acLabel),
+    ...(mode === 'instructor' ? [{ key: 'student', label: 'STUDENT', render: f => getPilotName(pilots, f.pilotId) }] : []),
+    ...(mode === 'pilot' ? [{ key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span> : DASH) }] : []),
+    COL_DURATION,
+    COL_TYPE,
+    ...(mode === 'instructor' ? [{ key: 'presence', label: 'PRESENCE', render: f => <span style={{ color: T.graphite }}>{presenceText(f)}</span> }] : []),
+    COL_ALT,
+    COL_G,
+    { key: 'actions', label: '', align: 'right', render: f => <RowActions f={f} onReplay={onReplay} onAssign={onAssign} /> },
+  ]
+
   return (
-    <div style={{
-      ...CARD_STYLE,
-      border: `1px solid ${open ? 'rgba(245,166,35,0.3)' : 'rgba(10,14,30,0.10)'}`,
-      transition: 'border-color 0.2s',
-    }}>
-      <div
-        onClick={() => setOpen(v => !v)}
-        style={{ display: 'grid', gridTemplateColumns: '1fr repeat(3, auto)', gap: 20, padding: '14px 20px', cursor: 'pointer', alignItems: 'center' }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 14, fontWeight: 600 }}>
-              {pilot.firstName} {pilot.lastName}
-            </span>
-            {unvalidated > 0 && (
-              <span style={{ color: '#F5A623', fontSize: 10, background: 'rgba(245,166,35,0.1)', border: '1px solid rgba(245,166,35,0.2)', padding: '1px 6px', borderRadius: 3 }}>
-                {unvalidated} to assign
-              </span>
-            )}
+    <div style={cardStyle(open)}>
+      <CardHeader open={open} onToggle={() => setOpen(v => !v)} columns="1fr repeat(3, auto) 16px">
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={headingStyle(15)}>{pilot.firstName} {pilot.lastName}</span>
+            {unvalidated > 0 && <StatusDot tone="caution" text={`${unvalidated} TO ASSIGN`} />}
           </div>
-          <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-            {(pilot.licences || []).map(lic => (
-              <span key={lic} style={{ background: 'rgba(10,14,30,0.06)', border: '1px solid rgba(10,14,30,0.15)', color: '#0a0e1e', fontSize: 10, fontFamily: 'monospace', padding: '1px 6px', borderRadius: 3 }}>{lic}</span>
-            ))}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {(pilot.licences || []).map(lic => <Chip key={lic}>{lic}</Chip>)}
             {counterparts.length > 0 && (
-              <span style={{ color: 'rgba(10,14,30,0.45)', fontSize: 11, fontFamily: 'monospace' }}>
-                {mode === 'pilot' ? 'with:' : 'students:'} {counterparts.slice(0, 2).join(', ')}{counterparts.length > 2 ? ` +${counterparts.length - 2}` : ''}
+              <span style={{ color: T.graphite, fontSize: 12 }}>
+                {mode === 'pilot' ? 'With' : 'Students'}: {counterparts.slice(0, 2).join(', ')}
+                {counterparts.length > 2 && <span style={monoStyle(12, T.graphite)}>{` +${counterparts.length - 2}`}</span>}
               </span>
             )}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>TOTAL</div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{formatDuration(total)}</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHTS</div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{myFlights.length}</div>
-          {mode === 'instructor' && myFlights.length > 0 && (
-            <div style={{ color: 'rgba(10,14,30,0.50)', fontSize: 10, marginTop: 2 }}>{onboard.length}✈ {fromGround.length}📡</div>
+        <CardStat label="TOTAL" value={formatDuration(total)} />
+        <CardStat
+          label="FLIGHTS"
+          value={myFlights.length}
+          sub={mode === 'instructor' && myFlights.length > 0 && (
+            <div style={{ ...monoStyle(11, T.graphite), marginTop: 4, whiteSpace: 'nowrap' }}>
+              {onboard.length} on board · {fromGround.length} ground
+            </div>
           )}
-        </div>
+        />
         <div style={{ textAlign: 'right', minWidth: 118 }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>LAST FLIGHT</div>
-          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs) : '—'}</div>
-          {last && <TypeBadge type={last.flightType} />}
+          <div style={labelStyle(T.etch)}>LAST FLIGHT</div>
+          <div style={{ ...monoStyle(12, T.ink), marginTop: 6 }}>{last ? formatDate(last.startTs) : '—'}</div>
+          {last && <div style={{ marginTop: 4 }}><TypeBadge type={last.flightType} /></div>}
         </div>
-      </div>
+      </CardHeader>
 
       {open && mode === 'pilot' && Object.keys(byType).length > 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '10px 20px', display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+        <div style={{ borderTop: T.border, padding: '10px 16px', display: 'flex', gap: 18, flexWrap: 'wrap' }}>
           {Object.entries(byType).map(([type, secs]) => {
             const ft = FLIGHT_TYPES[type]
             if (!ft) return null
             return (
               <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: ft.color, flexShrink: 0 }} />
-                <span style={{ color: ft.color, fontFamily: 'monospace', fontSize: 11 }}>{ft.label}</span>
-                <span style={{ color: 'rgba(10,14,30,0.75)', fontFamily: 'monospace', fontSize: 11 }}>{formatDuration(secs)}</span>
+                <Dot color={ft.color} />
+                <span style={{ color: T.graphite, fontSize: 12 }}>{ft.label}</span>
+                <span style={monoStyle(12, T.ink)}>{formatDuration(secs)}</span>
               </div>
             )
           })}
         </div>
       )}
 
-      {open && myFlights.length > 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
-            <thead>
-              <tr>
-                <th style={TH}>DATE</th>
-                <th style={TH}>AIRCRAFT</th>
-                {mode === 'instructor' && <th style={TH}>STUDENT</th>}
-                {mode === 'pilot' && <th style={TH}>INSTRUCTOR</th>}
-                <th style={TH}>DURATION</th>
-                <th style={TH}>TYPE</th>
-                {mode === 'instructor' && <th style={TH}>PRESENCE</th>}
-                <th style={TH}>ALT MAX</th>
-                <th style={TH}>G MAX</th>
-                <th style={TH}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {myFlights.map((f, i) => (
-                <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.06)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
-                  <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</td>
-                  {mode === 'instructor' && <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>}
-                  {mode === 'pilot' && <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.instructorId ? getPilotName(pilots, f.instructorId) : '—'}</td>}
-                  <td style={TD}>{formatDuration(f.duration)}</td>
-                  <td style={TD}><TypeBadge type={f.flightType} /></td>
-                  {mode === 'instructor' && (
-                    <td style={{ ...TD, color: 'rgba(10,14,30,0.65)', fontSize: 11 }}>
-                      {f.instructorOnboard ? '🪑 on board' : '📡 on ground'}
-                    </td>
-                  )}
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
-                  <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
-                      {!f._pending
-                        ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                        : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {open && myFlights.length > 0 && <DataTable columns={columns} rows={myFlights} style={NESTED_TABLE} />}
 
       {open && myFlights.length === 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>No flights recorded</div>
+        <div style={{ borderTop: T.border }}><EmptyState text="No flights recorded." /></div>
       )}
     </div>
   )
@@ -315,77 +310,63 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
   const uniquePilots = useMemo(() => new Set(acFlights.map(f => f.pilotId).filter(Boolean)).size, [acFlights])
   const byType = useMemo(() => acFlights.reduce((acc, f) => { const t = f.flightType || 'solo'; acc[t] = (acc[t] || 0) + 1; return acc }, {}), [acFlights])
 
+  const columns = [
+    COL_DATE,
+    { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
+    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId
+      ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)} · {presenceText(f).toLowerCase()}</span>
+      : DASH) },
+    COL_DURATION,
+    COL_TYPE,
+    COL_ALT,
+    COL_G,
+    { key: 'actions', label: '', align: 'right', render: f => <RowActions f={f} onReplay={onReplay} onAssign={onAssign} /> },
+  ]
+
   return (
-    <div style={{ ...CARD_STYLE, border: `1px solid ${open ? 'rgba(245,166,35,0.3)' : 'rgba(10,14,30,0.10)'}`, transition: 'border-color 0.2s' }}>
-      <div onClick={() => setOpen(v => !v)} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr repeat(4, auto)', gap: 16, padding: '14px 20px', cursor: 'pointer', alignItems: 'center' }}>
-        <div style={{ width: 42, height: 42, background: 'rgba(245,166,35,0.07)', border: '1px solid rgba(245,166,35,0.17)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>✈</div>
-        <div>
+    <div style={cardStyle(open)}>
+      <CardHeader open={open} onToggle={() => setOpen(v => !v)} columns="auto 1fr repeat(4, auto) 16px">
+        <div style={{
+          width: 40, height: 40, background: T.paper, border: T.border, borderRadius: T.radius.sm,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.ink, flexShrink: 0,
+        }}>
+          <Icon name="plane" size={20} />
+        </div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 16, fontWeight: 700 }}>{ac.callSign || ac.registration}</span>
+            <span style={{ ...monoStyle(16, T.ink), fontWeight: 600 }}>{ac.callSign || ac.registration}</span>
             <OwnershipBadge ac={ac} />
           </div>
-          <div style={{ color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{[ac.ownership === 'owner' ? `👤 ${getPilotName(pilots, ac.ownerPilotId)}` : null, ac.typeDesig || ac.type, ac.icao24?.toUpperCase()].filter(Boolean).join(' · ')}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+          <div style={{ color: T.graphite, fontSize: 12, marginTop: 4 }}>
+            {[ac.ownership === 'owner' ? `Owner: ${getPilotName(pilots, ac.ownerPilotId)}` : null, ac.typeDesig || ac.type].filter(Boolean).join(' · ')}
+            {ac.icao24 && <span style={monoStyle(12, T.graphite)}>{`${ac.ownership === 'owner' || ac.typeDesig || ac.type ? ' · ' : ''}${ac.icao24.toUpperCase()}`}</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
             {Object.entries(byType).map(([type, cnt]) => {
               const ft = FLIGHT_TYPES[type]
-              return ft ? <span key={type} style={{ color: ft.color, fontSize: 10, fontFamily: 'monospace' }}>{cnt}× {ft.label}</span> : null
+              return ft ? (
+                <span key={type} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Dot color={ft.color} size={6} />
+                  <span style={{ ...monoStyle(11, T.graphite) }}>{cnt}×</span>
+                  <span style={{ color: T.graphite, fontSize: 11 }}>{ft.label}</span>
+                </span>
+              ) : null
             })}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>TOTAL</div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{formatDuration(total)}</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHTS</div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 600, marginTop: 2 }}>{acFlights.length}</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>PILOTS</div>
-          <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 600, marginTop: 2 }}>{uniquePilots}</div>
-        </div>
+        <CardStat label="TOTAL" value={formatDuration(total)} />
+        <CardStat label="FLIGHTS" value={acFlights.length} />
+        <CardStat label="PILOTS" value={uniquePilots} />
         <div style={{ textAlign: 'right', minWidth: 110 }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>LAST FLIGHT</div>
-          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs) : '—'}</div>
-          {lastPilot && <div style={{ color: 'rgba(10,14,30,0.55)', fontFamily: 'monospace', fontSize: 11 }}>{lastPilot}</div>}
+          <div style={labelStyle(T.etch)}>LAST FLIGHT</div>
+          <div style={{ ...monoStyle(12, T.ink), marginTop: 6 }}>{last ? formatDate(last.startTs) : '—'}</div>
+          {lastPilot && <div style={{ color: T.graphite, fontSize: 12, marginTop: 2 }}>{lastPilot}</div>}
         </div>
-      </div>
+      </CardHeader>
 
-      {open && acFlights.length > 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
-            <thead><tr>
-              <th style={TH}>DATE</th><th style={TH}>PILOT</th><th style={TH}>INSTRUCTOR</th>
-              <th style={TH}>DURATION</th><th style={TH}>TYPE</th><th style={TH}>ALT MAX</th><th style={TH}>G MAX</th><th style={TH}></th>
-            </tr></thead>
-            <tbody>
-              {acFlights.map((f, i) => (
-                <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.06)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
-                  <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.65)' }}>
-                    {f.instructorId ? `${getPilotName(pilots, f.instructorId)} ${f.instructorOnboard ? '🪑' : '📡'}` : '—'}
-                  </td>
-                  <td style={TD}>{formatDuration(f.duration)}</td>
-                  <td style={TD}><TypeBadge type={f.flightType} /></td>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                  <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
-                  <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
-                      {!f._pending
-                        ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                        : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {open && acFlights.length > 0 && <DataTable columns={columns} rows={acFlights} style={NESTED_TABLE} />}
       {open && acFlights.length === 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>No flights for this aircraft</div>
+        <div style={{ borderTop: T.border }}><EmptyState text="No flights for this aircraft." /></div>
       )}
     </div>
   )
@@ -393,14 +374,14 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
 // ─── FlightMatrix ─────────────────────────────────────────────────────────────
 
+const SELECT_STYLE = {
+  background: T.card, border: T.border, color: T.ink, fontFamily: T.sans, fontSize: 13,
+  height: 34, padding: '0 10px', borderRadius: T.radius.sm, cursor: 'pointer',
+}
+
 function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, canDelete, onDelete }) {
-  const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e archive
-  // Désarme automatiquement après 5 s (pas de dépendance au survol → pas de course).
-  useEffect(() => {
-    if (!confirmDelId) return
-    const t = setTimeout(() => setConfirmDelId(''), 5000)
-    return () => clearTimeout(t)
-  }, [confirmDelId])
+  // Suppression en 2 temps (1er clic arme, 2e archive, désarmement 5 s) : portée par
+  // <Button variant="danger" confirm="Confirm?">.
   const [filterPilot,    setFilterPilot]    = useState('')
   const [filterInstr,    setFilterInstr]    = useState('')
   const [filterAircraft, setFilterAircraft] = useState('')
@@ -436,123 +417,78 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const SortTH = ({ children, skey }) => (
-    <th onClick={() => toggleSort(skey)} style={{ ...TH, cursor: 'pointer', userSelect: 'none' }}>
-      {children}{sortKey === skey ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
-    </th>
+  // En-tête triable : bouton dans le <th> de DataTable.
+  const sortLabel = (text, skey) => (
+    <button
+      type="button"
+      className="ak-focus"
+      onClick={() => toggleSort(skey)}
+      aria-label={`Sort by ${text.toLowerCase()}`}
+      style={{
+        ...labelStyle(sortKey === skey ? T.ink : T.etch),
+        background: 'none', border: 'none', padding: 0, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+      }}
+    >
+      {text}{sortKey === skey ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+    </button>
   )
-
-  const selectStyle = {
-    background: 'rgba(10,14,30,0.07)', border: '1px solid rgba(255,255,255,0.1)',
-    color: '#0a0e1e', fontFamily: 'monospace', fontSize: 12, padding: '6px 10px',
-    borderRadius: 5, outline: 'none', cursor: 'pointer',
-  }
 
   const pendingCount = flights.filter(f => f._pending).length
 
+  const columns = [
+    { ...COL_DATE, label: sortLabel('DATE', 'date') },
+    { ...colAircraft(acLabel), label: sortLabel('AIRCRAFT', 'aircraft') },
+    // Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
+    // moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol.
+    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
+    { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
+    { key: 'role', label: 'ROLE', render: f => (
+      f.pilotRole === 'student' ? <Chip>STUDENT</Chip>
+        : f.pilotRole === 'pilot' ? <Chip>PILOT</Chip>
+        : DASH
+    ) },
+    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span> : DASH) },
+    { key: 'presence', label: 'PRESENCE', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{presenceText(f)}</span> : DASH) },
+    { ...COL_DURATION, label: sortLabel('DURATION', 'duration') },
+    COL_TYPE,
+    COL_ALT,
+    { key: 'status', label: 'STATUS', render: f => <ValidBadge validated={!f._pending} /> },
+    { key: 'actions', label: '', align: 'right', render: f => (
+      <RowActions f={f} onReplay={onReplay} onAssign={onAssign} canDelete={canDelete} onDelete={onDelete} />
+    ) },
+  ]
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
-        <select value={filterPilot} onChange={e => setFilterPilot(e.target.value)} style={selectStyle}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
+        <Icon name="filter" size={16} color={T.graphite} />
+        <select aria-label="Filter by pilot" className="ak-focus" value={filterPilot} onChange={e => setFilterPilot(e.target.value)} style={SELECT_STYLE}>
           <option value="">All pilots</option>
           {pilots.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
         </select>
-        <select value={filterInstr} onChange={e => setFilterInstr(e.target.value)} style={selectStyle}>
+        <select aria-label="Filter by instructor" className="ak-focus" value={filterInstr} onChange={e => setFilterInstr(e.target.value)} style={SELECT_STYLE}>
           <option value="">All instructors</option>
           {instructors.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
         </select>
-        <select value={filterAircraft} onChange={e => setFilterAircraft(e.target.value)} style={selectStyle}>
+        <select aria-label="Filter by aircraft" className="ak-focus" value={filterAircraft} onChange={e => setFilterAircraft(e.target.value)} style={SELECT_STYLE}>
           <option value="">All aircraft</option>
           {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
         </select>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={selectStyle}>
+        <select aria-label="Filter by flight type" className="ak-focus" value={filterType} onChange={e => setFilterType(e.target.value)} style={SELECT_STYLE}>
           <option value="">All types</option>
           {Object.entries(FLIGHT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>
+        <select aria-label="Filter by status" className="ak-focus" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={SELECT_STYLE}>
           <option value="">All statuses</option>
           <option value="validated">Validated</option>
           <option value="pending">To assign ({pendingCount})</option>
         </select>
-        <span style={{ color: 'rgba(10,14,30,0.45)', fontFamily: 'monospace', fontSize: 12, marginLeft: 'auto' }}>
+        <span style={{ ...monoStyle(12, T.graphite), marginLeft: 'auto' }}>
           {filtered.length} flight{filtered.length !== 1 ? 's' : ''}
         </span>
       </div>
 
-      <div style={{ ...CARD_STYLE, border: '1px solid rgba(10,14,30,0.12)', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
-          <thead style={{ borderBottom: '1px solid rgba(10,14,30,0.10)' }}>
-            <tr>
-              <SortTH skey="date">DATE</SortTH>
-              <SortTH skey="aircraft">AIRCRAFT</SortTH>
-              <th style={TH}>ROUTE</th>
-              <th style={TH}>PILOT</th>
-              <th style={TH}>ROLE</th>
-              <th style={TH}>INSTRUCTOR</th>
-              <th style={TH}>PRESENCE</th>
-              <SortTH skey="duration">DURATION</SortTH>
-              <th style={TH}>TYPE</th>
-              <th style={TH}>ALT MAX</th>
-              <th style={TH}>STATUS</th>
-              <th style={TH}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && (
-              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>No matching flights</td></tr>
-            )}
-            {filtered.map((f, i) => (
-              <tr key={f.id} style={{
-                borderTop: '1px solid rgba(10,14,30,0.07)',
-                background: f._pending ? 'rgba(245,166,35,0.02)' : i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)',
-              }}>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
-                <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel(f.aircraftIdent)}</td>
-                {/* Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
-                    moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol. */}
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                  {(f.depIcao || f.arrIcao)
-                    ? <><Airfield icao={f.depIcao} />
-                        <span style={{ color: 'rgba(10,14,30,0.35)' }}> → </span>
-                        <Airfield icao={f.arrIcao} /></>
-                    : <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>}
-                </td>
-                <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>
-                <td style={TD}>
-                  {f.pilotRole === 'student'
-                    ? <span style={{ color: '#60a5fa', fontSize: 11 }}>🎓 STUDENT</span>
-                    : f.pilotRole === 'pilot'
-                    ? <span style={{ color: 'rgba(10,14,30,0.70)', fontSize: 11 }}>✈ PILOT</span>
-                    : <span style={{ color: 'rgba(10,14,30,0.35)', fontSize: 11 }}>—</span>}
-                </td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.instructorId ? getPilotName(pilots, f.instructorId) : '—'}</td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.60)', fontSize: 11 }}>
-                  {f.instructorId ? (f.instructorOnboard ? '🪑 on board' : '📡 on ground') : '—'}
-                </td>
-                <td style={TD}>{formatDuration(f.duration)}</td>
-                <td style={TD}><TypeBadge type={f.flightType} /></td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                <td style={TD}><ValidBadge validated={!f._pending} /></td>
-                <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                  <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
-                    {!f._pending
-                      ? <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
-                    {canDelete && (
-                      confirmDelId === f.id
-                        ? <button onClick={() => { onDelete(f.id); setConfirmDelId('') }}
-                                  style={DEL_CONFIRM_BTN}>Confirm?</button>
-                        : <button onClick={() => setConfirmDelId(f.id)} title="Remove this flight from the logbook"
-                                  style={DEL_BTN}>Delete</button>
-                    )}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable columns={columns} rows={filtered} empty={<EmptyState text="No matching flights." />} />
     </div>
   )
 }
@@ -564,61 +500,31 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
 function MyFlights({ me, flights, pilots, acLabel, onReplay }) {
   const total = sumDuration(flights)
   const last  = flights[0]
+  const columns = [
+    COL_DATE,
+    colAircraft(acLabel),
+    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
+    { key: 'pilot', label: 'PILOT', render: f => <span style={{ fontWeight: f.pilotId === me.id ? 600 : 400 }}>{getPilotName(pilots, f.pilotId)}</span> },
+    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId
+      ? <span style={{ color: f.instructorId === me.id ? T.ink : T.graphite, fontWeight: f.instructorId === me.id ? 600 : 400 }}>
+          {getPilotName(pilots, f.instructorId)} · {presenceText(f).toLowerCase()}
+        </span>
+      : DASH) },
+    COL_DURATION,
+    COL_TYPE,
+    COL_ALT,
+    COL_G,
+    { key: 'actions', label: '', align: 'right', render: f => <RowActions f={f} onReplay={onReplay} /> },
+  ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
-        <StatCard label="FLIGHTS"     value={flights.length} />
-        <StatCard label="HOURS"       value={formatDuration(total)} accent />
-        <StatCard label="LAST FLIGHT" value={last ? formatDate(last.startTs) : '—'} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <MetricCard label="FLIGHTS"     value={flights.length} />
+        <MetricCard label="HOURS"       value={formatDuration(total)} />
+        <MetricCard label="LAST FLIGHT" value={last ? formatDate(last.startTs) : null} />
       </div>
 
-      <div style={{ ...CARD_STYLE, border: '1px solid rgba(10,14,30,0.12)', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
-          <thead style={{ borderBottom: '1px solid rgba(10,14,30,0.10)' }}>
-            <tr>
-              <th style={TH}>DATE</th>
-              <th style={TH}>AIRCRAFT</th>
-              <th style={TH}>ROUTE</th>
-              <th style={TH}>PILOT</th>
-              <th style={TH}>INSTRUCTOR</th>
-              <th style={TH}>DURATION</th>
-              <th style={TH}>TYPE</th>
-              <th style={TH}>ALT MAX</th>
-              <th style={TH}>G MAX</th>
-              <th style={TH}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {flights.length === 0 && (
-              <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>No flights recorded yet</td></tr>
-            )}
-            {flights.map((f, i) => (
-              <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.07)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
-                <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel(f.aircraftIdent)}</td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                  {(f.depIcao || f.arrIcao)
-                    ? <><Airfield icao={f.depIcao} />
-                        <span style={{ color: 'rgba(10,14,30,0.35)' }}> → </span>
-                        <Airfield icao={f.arrIcao} /></>
-                    : <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>}
-                </td>
-                <td style={{ ...TD, fontWeight: f.pilotId === me.id ? 700 : 400 }}>{getPilotName(pilots, f.pilotId)}</td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)', fontWeight: f.instructorId === me.id ? 700 : 400 }}>
-                  {f.instructorId ? `${getPilotName(pilots, f.instructorId)} ${f.instructorOnboard ? '🪑' : '📡'}` : '—'}
-                </td>
-                <td style={TD}>{formatDuration(f.duration)}</td>
-                <td style={TD}><TypeBadge type={f.flightType} /></td>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
-                <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                  <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>Open Loop</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable columns={columns} rows={flights} empty={<EmptyState text="No flights recorded yet." />} />
     </div>
   )
 }
@@ -697,9 +603,9 @@ function CsvImportCard({ clubId }) {
   }
 
   return (
-    <div style={{ ...CARD_STYLE, border: '1px solid rgba(10,14,30,0.12)', padding: '14px 20px', marginBottom: 24 }}>
+    <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '14px 16px', marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 10, letterSpacing: 1.5 }}>IMPORT CSV</div>
+        <div style={labelStyle(T.etch)}>IMPORT CSV</div>
         <div
           onClick={() => !uploading && inputRef.current?.click()}
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -707,26 +613,60 @@ function CsvImportCard({ clubId }) {
           onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]) }}
           style={{
             flex: 1, minWidth: 220,
-            border: `1px dashed ${dragging ? '#F5A623' : 'rgba(10,14,30,0.2)'}`,
-            background: dragging ? 'rgba(245,166,35,0.06)' : 'transparent',
-            borderRadius: 6, padding: '10px 14px', textAlign: 'center',
-            color: 'rgba(10,14,30,0.55)', fontFamily: 'monospace', fontSize: 12,
-            cursor: uploading ? 'wait' : 'pointer', transition: 'all 0.15s',
+            border: `1px dashed ${dragging ? T.ink : T.rule}`,
+            background: dragging ? T.paper : 'transparent',
+            borderRadius: T.radius.sm, padding: '10px 14px', textAlign: 'center',
+            color: T.graphite, fontFamily: T.sans, fontSize: 13,
+            cursor: uploading ? 'wait' : 'pointer',
           }}
         >
-          {uploading ? `Uploading… ${progress}%` : 'Drop a Garmin G3X CSV here'}
+          {uploading
+            ? <>Uploading… <span style={monoStyle(13, T.ink)}>{progress}%</span></>
+            : 'Drop a Garmin G3X CSV here'}
         </div>
         <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }}
           onChange={e => processFile(e.target.files[0])} />
-        <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...ASSIGN_BTN, cursor: uploading ? 'wait' : 'pointer' }}>
+        <Button icon="upload" disabled={uploading} onClick={() => inputRef.current?.click()}>
           Choose file
-        </button>
+        </Button>
       </div>
-      {error && <div style={{ color: '#ef4444', fontFamily: 'monospace', fontSize: 11, marginTop: 8 }}>⚠ {error}</div>}
-      {info  && <div style={{ color: '#22c55e', fontFamily: 'monospace', fontSize: 11, marginTop: 8 }}>✓ {info}</div>}
+      {error && <Banner tone="caution" style={{ marginTop: 12 }}>{error}</Banner>}
+      {info  && <Banner tone="ok" style={{ marginTop: 12 }}>{info}</Banner>}
     </div>
   )
 }
+
+// ─── SortBar ──────────────────────────────────────────────────────────────────
+// Top-level (déclaré hors de LogbookPage pour ne pas remonter à chaque rendu).
+function SortBar({ value, onChange, options }) {
+  return (
+    <div role="group" aria-label="Sort by" style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span style={{ ...labelStyle(T.etch), marginRight: 4 }}>SORT BY</span>
+      {options.map(opt => (
+        <Button
+          key={opt.key}
+          size="sm"
+          variant={value === opt.key ? 'primary' : 'secondary'}
+          aria-pressed={value === opt.key}
+          onClick={() => onChange(opt.key)}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+const PILOT_SORTS    = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
+const AIRCRAFT_SORTS = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
+
+// Colonnes fantômes affichées pendant le chargement (DataTable loading).
+const LOADING_COLUMNS = [
+  { key: 'date', label: 'DATE' }, { key: 'aircraft', label: 'AIRCRAFT' }, { key: 'pilot', label: 'PILOT' },
+  { key: 'duration', label: 'DURATION', align: 'right' }, { key: 'type', label: 'TYPE' },
+]
+
+const EMPTY_LIST = { background: T.card, border: T.border, borderRadius: T.radius.md }
 
 // ─── LogbookPage ──────────────────────────────────────────────────────────────
 
@@ -911,117 +851,66 @@ export default function LogbookPage({ role }) {
     return withStats
   }, [aircraft, flights, sortAircraft])
 
-  // ── Sort bar component ────────────────────────────────────────────────────────
-  const SortBar = ({ value, onChange, options }) => (
-    <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
-      <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.2, marginRight: 4 }}>SORT BY</span>
-      {options.map(opt => (
-        <button key={opt.key} onClick={() => onChange(opt.key)} style={{
-          background: value === opt.key ? 'rgba(10,14,30,0.08)' : 'transparent',
-          border: `1px solid ${value === opt.key ? 'rgba(10,14,30,0.25)' : 'rgba(10,14,30,0.1)'}`,
-          color: value === opt.key ? '#0a0e1e' : 'rgba(10,14,30,0.45)',
-          fontFamily: 'monospace', fontSize: 11, fontWeight: value === opt.key ? 700 : 400,
-          padding: '4px 12px', borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
-        }}>
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  )
-
-  const PILOT_SORTS    = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
-  const AIRCRAFT_SORTS = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
-
   const TABS = isPilot ? [
-    { key: 'mine',        label: `My flights (${myFlights.length})` },
+    { key: 'mine',        label: 'My flights', count: myFlights.length },
   ] : [
-    ...(me ? [{ key: 'mine', label: `My flights (${myFlights.length})` }] : []),
-    { key: 'pilots',      label: `👤 Pilots (${regularPilots.length})` },
-    { key: 'instructors', label: `🎓 Instructors (${instructors.length})` },
-    { key: 'aircraft',    label: `✈ Aircraft (${aircraft.length})` },
-    { key: 'matrix',      label: pendingCount > 0 ? `⚠ All flights  ${pendingCount} to assign` : '☰ All flights' },
+    ...(me ? [{ key: 'mine', label: 'My flights', count: myFlights.length }] : []),
+    { key: 'pilots',      label: 'Pilots',      count: regularPilots.length },
+    { key: 'instructors', label: 'Instructors', count: instructors.length },
+    { key: 'aircraft',    label: 'Aircraft',    count: aircraft.length },
+    { key: 'matrix',      label: 'All flights', count: pendingCount > 0 ? `${pendingCount} to assign` : undefined },
   ]
 
   const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: '#f0f2f8', fontFamily: 'monospace' }}>
-      <div style={{ padding: '80px 32px 48px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ height: '100%', overflowY: 'auto', background: T.paper, fontFamily: T.sans, color: T.ink }}>
+      <div style={{ padding: '28px 32px 48px', maxWidth: 1280, margin: '0 auto' }}>
 
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 10, letterSpacing: 2.5, marginBottom: 6 }}>
-            {clubLine}
-          </div>
-          <h1 style={{ color: '#0a0e1e', fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: 1 }}>Logbook</h1>
+        <div style={{ marginBottom: 24 }}>
+          {clubLine && <div style={{ ...labelStyle(T.etch), marginBottom: 8 }}>{clubLine}</div>}
+          <h1 style={{ ...headingStyle(28), margin: 0 }}>Logbook</h1>
         </div>
 
         {loadError && (
-          <div style={{
-            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
-            color: '#ef4444', fontFamily: 'monospace', fontSize: 12,
-          }}>
-            ❌ Could not load the logbook: {loadError}
-          </div>
+          <Banner tone="caution" title="Could not load the logbook" style={{ marginBottom: 20 }}>
+            {loadError}
+          </Banner>
         )}
 
         {!isPilot && !loading && !loadError && pilots.length === 0 && flights.length === 0 && (
-          <div style={{
-            background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
-            color: '#F5A623', fontFamily: 'monospace', fontSize: 12,
-          }}>
-            No data for this club yet.
-          </div>
+          <Banner tone="info" style={{ marginBottom: 20 }}>No data for this club yet.</Banner>
         )}
 
         {!isPilot && !loading && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 24 }}>
-            <StatCard label="PILOTS"              value={regularPilots.length} />
-            <StatCard label="INSTRUCTORS"         value={instructors.length} />
-            <StatCard label="AIRCRAFT"            value={aircraft.length} />
-            <StatCard label="TOTAL FLIGHTS"       value={flights.length} />
-            <StatCard label="TOTAL HOURS"         value={formatDuration(totalSeconds)} accent />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 24 }}>
+            <MetricCard label="PILOTS"        value={regularPilots.length} />
+            <MetricCard label="INSTRUCTORS"   value={instructors.length} />
+            <MetricCard label="AIRCRAFT"      value={aircraft.length} />
+            <MetricCard label="TOTAL FLIGHTS" value={flights.length} />
+            <MetricCard label="TOTAL HOURS"   value={formatDuration(totalSeconds)} />
           </div>
         )}
 
         {canImport && <CsvImportCard clubId={clubId} />}
 
         {isPilot && !loading && !loadError && !me && (
-          <div style={{
-            background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.3)',
-            borderRadius: 8, padding: '12px 16px', marginBottom: 20,
-            color: '#0a0e1e', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6,
-          }}>
-            <div style={{ marginBottom: 12 }}>
-              Your account is not linked to a pilot profile yet. Ask your club admin for an
-              invitation code, then enter it here.
-            </div>
+          <Banner
+            tone="info"
+            title="Your account is not linked to a pilot profile yet."
+            style={{ marginBottom: 20 }}
+          >
+            <div style={{ marginBottom: 12 }}>Ask your club admin for an invitation code, then enter it here.</div>
             <RedeemInvite onDone={() => window.location.reload()} />
-          </div>
+          </Banner>
         )}
 
         {!(isPilot && !loading && !me) && (
-        <div style={{ display: 'flex', gap: 0, marginBottom: 20, border: '1px solid rgba(10,14,30,0.12)', borderRadius: 8, overflow: 'hidden', width: 'fit-content' }}>
-          {TABS.map((t, i) => (
-            <button key={t.key} onClick={() => setTab(t.key)} style={{
-              background: activeTab === t.key ? 'rgba(10,14,30,0.07)' : 'transparent',
-              border: 'none',
-              borderRight: i < TABS.length - 1 ? '1px solid rgba(10,14,30,0.10)' : 'none',
-              color: activeTab === t.key ? '#0a0e1e' : 'rgba(10,14,30,0.5)',
-              fontFamily: 'monospace', fontSize: 12, padding: '10px 18px', cursor: 'pointer',
-              letterSpacing: 0.5, transition: 'all 0.15s', whiteSpace: 'nowrap',
-            }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+          <Tabs tabs={TABS} value={activeTab} onChange={setTab} ariaLabel="Logbook views" style={{ marginBottom: 20 }} />
         )}
 
         {loading ? (
-          <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 80, fontSize: 13 }}>
-            Loading logbook…
-          </div>
+          <DataTable loading columns={LOADING_COLUMNS} rows={[]} />
         ) : (
           <>
             {activeTab === 'mine' && me && (
@@ -1031,7 +920,7 @@ export default function LogbookPage({ role }) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedPilots.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No pilots in this club</div>}
+                  {sortedPilots.length === 0 && <EmptyState text="No pilots in this club." style={EMPTY_LIST} />}
                   {sortedPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
@@ -1040,7 +929,7 @@ export default function LogbookPage({ role }) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortInstructors} onChange={setSortInstructors} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedInstructors.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No instructors — check the instructor flag in Admin</div>}
+                  {sortedInstructors.length === 0 && <EmptyState text="No instructors — check the instructor flag in Admin." style={EMPTY_LIST} />}
                   {sortedInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
@@ -1049,7 +938,7 @@ export default function LogbookPage({ role }) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortAircraft} onChange={setSortAircraft} options={AIRCRAFT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedAircraft.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No aircraft in this club</div>}
+                  {sortedAircraft.length === 0 && <EmptyState text="No aircraft in this club." style={EMPTY_LIST} />}
                   {sortedAircraft.map(ac => <AircraftCard key={ac.id} ac={ac} flights={flights} pilots={pilots} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>

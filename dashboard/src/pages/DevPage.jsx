@@ -3,6 +3,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore'
 import { ref as storageRef, getDownloadURL, uploadBytes } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
+import { T, labelStyle, headingStyle, monoStyle, Button, MetricCard, DataTable, Tabs, EmptyState, Banner, StatusDot } from '../components/ui'
 
 // ─── DevPage — outils dev (admin + super_admin) ──────────────────────────────
 // Trois onglets :
@@ -17,11 +18,8 @@ import { useClub } from '../contexts/ClubContext'
 // sont préservés quand on change d'onglet. Phase 2 (à venir) : auto-injecter le
 // CSV d'un vol sélectionné dans l'outil via postMessage.
 
-const C = {
-  bg: '#f4f5f7', surface: '#ffffff', border: 'rgba(10,14,30,0.10)',
-  text: '#0a0e1e', mid: 'rgba(10,14,30,0.55)', low: 'rgba(10,14,30,0.30)',
-  mono: 'monospace', amber: '#F5A623', green: '#22c55e', red: '#ef4444',
-}
+// (2026-09-21, lot 02 B) Restylé AirKi : tokens T, Tabs, Button, MetricCard, DataTable, Banner, EmptyState.
+// Pas de rouge : signal faible / pas de service = blanc sur encre, qualité moyenne = ambre, bonne = vert.
 
 function median(a) { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
 
@@ -34,7 +32,7 @@ function parseLte(text) {
   const cols = lines[hi].split(',').map(s => s.trim().toLowerCase())
   const ci = (n) => cols.indexOf(n)
   const iLat = ci('lat'), iLon = ci('lon'), iTech = ci('tech'), iOp = ci('operator'),
-        iCsq = ci('csq_rssi'), iRsrp = ci('rsrp_dbm'), iSinr = ci('sinr_db'), iFix = ci('fix_ok')
+        iCsq = ci('csq_rssi'), iFix = ci('fix_ok')
   let tot = 0, svc = 0, fix = 0
   const csqs = [], ops = {}, pts = []
   for (let k = hi + 1; k < lines.length; k++) {
@@ -56,6 +54,9 @@ function parseLte(text) {
            csqMed: median(csqs), csqN: csqs.length, ops: opList, pts }
 }
 
+// Couleurs du tracé (sur encre) : bon = vert, moyen = ambre, faible / pas de service = blanc, n/a = graphite.
+const ROUTE = { good: T.ok, mid: T.amber, weak: T.white, na: T.graphite }
+
 // Route colorée par qualité signal.
 function RouteCanvas({ pts }) {
   const ref = useRef(null)
@@ -71,35 +72,41 @@ function RouteCanvas({ pts }) {
     const px = (p) => pad + (p.lon - minLo) * cosL * sc
     const py = (p) => H - pad - (p.lat - minLa) * sc
     for (const p of pts) {
-      ctx.fillStyle = !p.svc ? C.red : p.csq < 0 ? '#94a3b8' : p.csq >= 18 ? C.green : p.csq >= 10 ? C.amber : C.red
+      ctx.fillStyle = !p.svc ? ROUTE.weak : p.csq < 0 ? ROUTE.na : p.csq >= 18 ? ROUTE.good : p.csq >= 10 ? ROUTE.mid : ROUTE.weak
       ctx.fillRect(px(p) - 1, py(p) - 1, 2.4, 2.4)
     }
   }, [pts])
-  return <canvas ref={ref} width={520} height={230} style={{ width: '100%', maxWidth: 520, background: '#0d1117', borderRadius: 8 }} />
+  return <canvas ref={ref} width={520} height={230} style={{ width: '100%', maxWidth: 520, background: T.ink, border: T.borderDark, borderRadius: T.radius.md, display: 'block' }} />
 }
 
-function KPI({ n, l, color }) {
-  return <div style={{ background: C.bg, borderRadius: 8, padding: '10px 14px', minWidth: 92 }}>
-    <div style={{ fontSize: 22, fontWeight: 700, color: color || C.text, fontVariantNumeric: 'tabular-nums' }}>{n}</div>
-    <div style={{ fontSize: 10, color: C.mid, marginTop: 2 }}>{l}</div>
-  </div>
-}
-
-// Onglet de la barre supérieure.
-function TabBtn({ label, active, onClick }) {
+function Swatch({ color, text }) {
   return (
-    <button onClick={onClick} style={{
-      padding: '8px 16px', border: 'none', cursor: 'pointer',
-      background: active ? C.surface : 'transparent',
-      color: active ? C.text : C.mid,
-      borderBottom: active ? `2px solid ${C.amber}` : '2px solid transparent',
-      fontFamily: C.mono, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
-      whiteSpace: 'nowrap',
-    }}>{label}</button>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, ...monoStyle(11, T.graphite) }}>
+      <span aria-hidden="true" style={{ width: 10, height: 10, background: color, border: T.borderDark, borderRadius: 2 }} />
+      {text}
+    </span>
+  )
+}
+
+// Bouton d'upload : un <input type=file> caché par ligne (ref locale).
+function UploadButton({ onFile }) {
+  const ref = useRef(null)
+  return (
+    <>
+      <Button size="sm" variant="ghost" icon="upload" onClick={() => ref.current?.click()}>Upload LTE</Button>
+      <input type="file" accept=".csv" ref={ref} style={{ display: 'none' }}
+        onChange={e => { onFile(e.target.files[0]); e.target.value = '' }} />
+    </>
   )
 }
 
 const FRAME = { width: '100%', height: '100%', border: 'none', display: 'block' }
+
+const TABS = [
+  { key: 'lte', label: 'LTE dashboard' },
+  { key: 'sim', label: 'Simulator' },
+  { key: 'check', label: 'Quick-check' },
+]
 
 export default function DevPage() {
   const { clubId } = useClub()
@@ -109,7 +116,6 @@ export default function DevPage() {
   const [sel, setSel] = useState(null)      // flight sélectionné
   const [lte, setLte] = useState(null)      // stats LTE parsées
   const [busy, setBusy] = useState('')      // message d'état
-  const fileRef = useRef(null)
   const lteFrameRef = useRef(null)          // iframe LTE Dashboard (même origine → postMessage)
 
   useEffect(() => {
@@ -132,7 +138,7 @@ export default function DevPage() {
       const url = await getDownloadURL(storageRef(storage, path))
       const a = document.createElement('a'); a.href = url; a.download = filename; a.target = '_blank'
       document.body.appendChild(a); a.click(); a.remove(); setBusy('')
-    } catch (e) { setBusy(e.code === 'storage/object-not-found' ? 'Fichier absent sur le serveur' : e.message) }
+    } catch (e) { setBusy(e.code === 'storage/object-not-found' ? 'File not found on the server.' : e.message) }
   }
 
   // Analyse LTE : récupère flights_lte/<fid>.csv → parse → stats.
@@ -143,7 +149,7 @@ export default function DevPage() {
       const txt = await (await fetch(url)).text()
       setLte(parseLte(txt)); setBusy('')
     } catch (e) {
-      setBusy(e.code === 'storage/object-not-found' ? 'Aucun fichier LTE — uploade-le d’abord.' : e.message)
+      setBusy(e.code === 'storage/object-not-found' ? 'No LTE file for this flight — upload it first.' : e.message)
     }
   }
 
@@ -152,14 +158,14 @@ export default function DevPage() {
     setSel(f); setBusy('Uploading LTE…')
     try {
       await uploadBytes(storageRef(storage, `flights_lte/${fidOf(f)}.csv`), file, { contentType: 'text/csv' })
-      setBusy('Upload OK — analyzing…')
+      setBusy('Upload done — analysing…')
       const txt = await file.text(); setLte(parseLte(txt)); setBusy('')
     } catch (e) { setBusy(e.message) }
   }
 
   // Balance le CSV LTE d'un vol vers le LTE Dashboard (iframe même origine) pour étude approfondie.
   const studyLte = async (f) => {
-    setBusy('Envoi LTE → dashboard…')
+    setBusy('Sending LTE to the dashboard…')
     try {
       const url = await getDownloadURL(storageRef(storage, `flights_lte/${fidOf(f)}.csv`))
       const txt = await (await fetch(url)).text()
@@ -168,19 +174,17 @@ export default function DevPage() {
       setTimeout(() => lteFrameRef.current?.contentWindow?.postMessage(
         { type: 'aerotrace-lte-csv', name: `${fidOf(f)}.csv`, text: txt }, window.location.origin), 80)
     } catch (e) {
-      setBusy(e.code === 'storage/object-not-found' ? 'Aucun fichier LTE — uploade-le d’abord.' : e.message)
+      setBusy(e.code === 'storage/object-not-found' ? 'No LTE file for this flight — upload it first.' : e.message)
     }
   }
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, color: C.text }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: T.paper, color: T.ink, fontFamily: T.sans }}>
       {/* Barre d'onglets */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '0 12px', borderBottom: `1px solid ${C.border}`, background: C.bg }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: C.text, marginRight: 12, fontFamily: C.mono }}>DEV</span>
-        <TabBtn label="LTE DASHBOARD" active={tab === 'lte'} onClick={() => setTab('lte')} />
-        <TabBtn label="SIMULATOR"     active={tab === 'sim'} onClick={() => setTab('sim')} />
-        <TabBtn label="QUICK-CHECK"   active={tab === 'check'} onClick={() => setTab('check')} />
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: C.mid, fontFamily: C.mono, paddingRight: 4 }}>admin</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '10px 16px', borderBottom: T.border, background: T.paper }}>
+        <h1 style={{ ...headingStyle(18), margin: 0 }}>Dev</h1>
+        <Tabs tabs={TABS} value={tab} onChange={setTab} ariaLabel="Dev tools" />
+        <span style={{ ...labelStyle(T.etch), marginLeft: 'auto' }}>ADMIN</span>
       </div>
 
       {/* Contenu — les 2 iframes restent montées (display toggle) pour préserver l'état */}
@@ -192,10 +196,10 @@ export default function DevPage() {
           <iframe title="Alert Simulator" src="/tools/altsim/index.html" style={FRAME} />
         </div>
         {tab === 'check' && (
-          <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '20px 24px' }}>
+          <div style={{ position: 'absolute', inset: 0, overflowY: 'auto', padding: '24px' }}>
             <QuickCheck
-              C={C} loading={loading} clubId={clubId} flights={flights} sel={sel} lte={lte} busy={busy}
-              fidOf={fidOf} download={download} analyzeLte={analyzeLte} uploadLte={uploadLte} studyLte={studyLte} fileRef={fileRef}
+              loading={loading} clubId={clubId} flights={flights} sel={sel} lte={lte} busy={busy}
+              fidOf={fidOf} download={download} analyzeLte={analyzeLte} uploadLte={uploadLte} studyLte={studyLte}
             />
           </div>
         )}
@@ -205,81 +209,99 @@ export default function DevPage() {
 }
 
 // ─── QUICK-CHECK — l'outil léger d'origine (liste vols + check LTE express) ────
-function QuickCheck({ C, loading, clubId, flights, sel, lte, busy, fidOf, download, analyzeLte, uploadLte, studyLte, fileRef }) {
+function QuickCheck({ loading, clubId, flights, sel, lte, busy, fidOf, download, analyzeLte, uploadLte, studyLte }) {
+  // Message d'état : « …» final = en cours (info), sinon erreur récupérable (caution).
+  const busyTone = busy.endsWith('…') ? 'info' : 'caution'
+  const toneOf = (v, good, mid) => v >= good ? 'ok' : v >= mid ? 'caution' : 'off'
+
+  const columns = [
+    {
+      key: 'flight', label: 'FLIGHT',
+      render: (f) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {sel?.id === f.id && <StatusDot tone="caution" />}
+          <div>
+            <div style={{ fontWeight: 600 }}>{f.aircraftIdent || f.aircraft_ident || '—'}</div>
+            <div style={{ ...monoStyle(11, T.graphite), marginTop: 2 }}>{fidOf(f)}</div>
+          </div>
+        </div>
+      ),
+    },
+    { key: 'date', label: 'DATE (UTC)', mono: true, render: (f) => <span style={{ whiteSpace: 'nowrap' }}>{fmtDate(f)}</span> },
+    { key: 'route', label: 'ROUTE', mono: true, render: (f) => <span style={{ whiteSpace: 'nowrap' }}>{f.depIcao || '?'} → {f.arrIcao || '?'}</span> },
+    { key: 'dur', label: 'DURATION', mono: true, align: 'right', render: (f) => (f.duration ? Math.round(f.duration / 60) + ' min' : '—') },
+    {
+      key: 'actions', label: '', align: 'right',
+      render: (f) => (
+        <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Button size="sm" variant="primary" icon="download" title="Download the flight CSV (loadable in the simulator)"
+            onClick={() => download(`flights/${fidOf(f)}.csv`, `${fidOf(f)}.csv`)}>CSV for simulator</Button>
+          <Button size="sm" onClick={() => analyzeLte(f)}>Check LTE</Button>
+          <Button size="sm" iconRight="external" title="Load this flight in the LTE dashboard (in-depth study)"
+            onClick={() => studyLte(f)}>LTE dashboard</Button>
+          <UploadButton onFile={(file) => uploadLte(f, file)} />
+        </div>
+      ),
+    },
+  ]
+
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 18, margin: 0 }}>Quick-check · LTE</h1>
-      </div>
-      <p style={{ fontSize: 12.5, color: C.mid, marginTop: 4 }}>
-        Vérifier la capture LTE d’un vol (couverture, signal, opérateurs), uploader le fichier LTE
-        sur le serveur, et récupérer le CSV pour le charger dans le simulateur (onglet SIMULATOR).
+    <div style={{ maxWidth: 1040, margin: '0 auto' }}>
+      <h2 style={{ ...headingStyle(20), margin: 0 }}>Quick-check · LTE</h2>
+      <p style={{ fontSize: 14, lineHeight: 1.5, color: T.graphite, margin: '6px 0 0', maxWidth: 720 }}>
+        Check a flight's LTE capture (coverage, signal, operators), upload the LTE file to the server,
+        and fetch the flight CSV to load it in the simulator (Simulator tab).
       </p>
 
-      {busy && <div style={{ fontSize: 12, color: C.amber, margin: '8px 0', fontFamily: C.mono }}>{busy}</div>}
-
-      {loading && <div style={{ color: C.low, fontSize: 12, paddingTop: 30 }}>Chargement…</div>}
-      {!loading && !clubId && <div style={{ color: C.low, fontSize: 12 }}>Sélectionne un club d’abord.</div>}
-      {!loading && clubId && flights.length === 0 && <div style={{ color: C.low, fontSize: 12 }}>Aucun vol pour ce club.</div>}
+      {busy && <Banner tone={busyTone} style={{ marginTop: 14 }}>{busy}</Banner>}
 
       {/* Panneau d'analyse LTE */}
       {sel && lte && (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 18, margin: '14px 0' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
-            LTE — {sel.aircraftIdent || sel.aircraft_ident || fidOf(sel)} <span style={{ color: C.mid, fontFamily: C.mono, fontWeight: 400 }}>{fidOf(sel)}</span>
+        <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 16, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+            <h3 style={{ ...headingStyle(16), margin: 0 }}>LTE · {sel.aircraftIdent || sel.aircraft_ident || fidOf(sel)}</h3>
+            <span style={monoStyle(12, T.graphite)}>{fidOf(sel)}</span>
           </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-            <KPI n={`${lte.svcPct}%`} l="couverture LTE" color={lte.svcPct >= 70 ? C.green : lte.svcPct >= 40 ? C.amber : C.red} />
-            <KPI n={`${lte.fixPct}%`} l="fix GPS" color={lte.fixPct >= 90 ? C.green : C.amber} />
-            <KPI n={lte.csqMed} l="csq médian" color={lte.csqMed >= 18 ? C.green : lte.csqMed >= 10 ? C.amber : C.red} />
-            <KPI n={lte.tot} l="échantillons" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
+            <MetricCard label="LTE COVERAGE" value={lte.svcPct} unit="%" status={{ tone: toneOf(lte.svcPct, 70, 40), text: lte.svcPct >= 70 ? 'good' : lte.svcPct >= 40 ? 'partial' : 'poor' }} />
+            <MetricCard label="GPS FIX" value={lte.fixPct} unit="%" status={{ tone: lte.fixPct >= 90 ? 'ok' : 'caution', text: lte.fixPct >= 90 ? 'good' : 'partial' }} />
+            <MetricCard label="MEDIAN CSQ" value={lte.csqMed} status={{ tone: toneOf(lte.csqMed, 18, 10), text: lte.csqMed >= 18 ? 'good' : lte.csqMed >= 10 ? 'fair' : 'weak' }} />
+            <MetricCard label="SAMPLES" value={lte.tot} />
           </div>
           <RouteCanvas pts={lte.pts} />
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10, fontSize: 11, color: C.mid }}>
-            <span><b style={{ color: C.green }}>■</b> csq≥18</span>
-            <span><b style={{ color: C.amber }}>■</b> 10–17</span>
-            <span><b style={{ color: C.red }}>■</b> faible / no-service</span>
-            <span><b style={{ color: '#94a3b8' }}>■</b> csq n/a</span>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
+            <Swatch color={ROUTE.good} text="csq ≥ 18" />
+            <Swatch color={ROUTE.mid} text="10–17" />
+            <Swatch color={ROUTE.weak} text="weak / no service" />
+            <Swatch color={ROUTE.na} text="csq n/a" />
           </div>
-          <div style={{ marginTop: 12, fontSize: 11.5 }}>
-            <span style={{ color: C.mid }}>Opérateurs : </span>
-            {lte.ops.map(([op, n]) => <span key={op} style={{ fontFamily: C.mono, marginRight: 12 }}>{op} <b>{Math.round(100 * n / lte.tot)}%</b></span>)}
+          <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
+            <span style={labelStyle(T.etch)}>OPERATORS</span>
+            {lte.ops.map(([op, n]) => (
+              <span key={op} style={monoStyle(12)}>{op} <span style={{ fontWeight: 600 }}>{Math.round(100 * n / lte.tot)}%</span></span>
+            ))}
           </div>
         </div>
       )}
 
       {/* Liste des vols */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
-        {flights.map(f => (
-          <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${sel?.id === f.id ? C.amber : C.border}`, borderRadius: 8, padding: '10px 14px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {f.aircraftIdent || f.aircraft_ident || '—'} <span style={{ color: C.mid, fontFamily: C.mono, fontWeight: 400, fontSize: 11 }}>{fidOf(f)}</span>
-              </div>
-              <div style={{ fontSize: 11, color: C.mid }}>
-                {fmtDate(f)} · {(f.depIcao || '?')}→{(f.arrIcao || '?')} · {f.duration ? Math.round(f.duration / 60) + ' min' : '—'}
-              </div>
-            </div>
-            <button onClick={() => download(`flights/${fidOf(f)}.csv`, `${fidOf(f)}.csv`)}
-              title="Télécharger le CSV vol (chargeable dans le simulateur)"
-              style={btn(C.text, '#fff')}>CSV → SIMU</button>
-            <button onClick={() => analyzeLte(f)} style={btn('transparent', C.text, C.border)}>CHECK LTE</button>
-            <button onClick={() => studyLte(f)} title="Charger ce vol dans le LTE Dashboard (étude approfondie)"
-              style={btn('rgba(96,165,250,0.12)', '#2563eb', 'rgba(96,165,250,0.35)')}>→ LTE DASH</button>
-            <label style={{ ...btnStyle('transparent', C.mid, C.border), cursor: 'pointer' }}>
-              UPLOAD LTE
-              <input type="file" accept=".csv" ref={fileRef} style={{ display: 'none' }}
-                onChange={e => { uploadLte(f, e.target.files[0]); e.target.value = '' }} />
-            </label>
+      <div style={{ marginTop: 14 }}>
+        {!loading && !clubId ? (
+          <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md }}>
+            <EmptyState text="Select a club first." />
           </div>
-        ))}
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={flights}
+            loading={loading}
+            empty={<EmptyState text="No flights for this club." />}
+          />
+        )}
       </div>
     </div>
   )
 }
-
-const btnStyle = (bg, col, bd) => ({ padding: '7px 12px', borderRadius: 7, background: bg, border: bd ? `1px solid ${bd}` : 'none', color: col, fontFamily: 'monospace', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' })
-const btn = (bg, col, bd) => ({ ...btnStyle(bg, col, bd), cursor: 'pointer' })
 
 function tsOf(f) { const v = f.startTs ?? f.end_ts; if (!v) return 0; return typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : (v.toMillis?.() ?? 0) }
 function fmtDate(f) { const ms = tsOf(f); if (!ms) return '—'; try { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z' } catch { return '—' } }

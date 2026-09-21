@@ -2,38 +2,31 @@ import { useState, useEffect, useRef } from 'react'
 import { fetchWebPhoto, fetchHexForReg } from '../lib/webphoto'
 import {
   collection, getDocs, addDoc, updateDoc, setDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy, where,
+  doc, serverTimestamp, query, where,
 } from 'firebase/firestore'
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
 import { useClub } from '../contexts/ClubContext'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
+import {
+  T, labelStyle, headingStyle, monoStyle,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner,
+} from '../components/ui'
 
-// ─── Design tokens — WHITE theme ─────────────────────────────────────────────
-const C = {
-  bg:      '#f4f5f7',
-  surface: '#ffffff',
-  border:  'rgba(10,14,30,0.10)',
-  text:    '#0a0e1e',
-  mid:     'rgba(10,14,30,0.55)',
-  low:     'rgba(10,14,30,0.30)',
-  mono:    'monospace',
-  amber:   '#F5A623',
-  amber10: 'rgba(245,166,35,0.10)',
-  amber20: 'rgba(245,166,35,0.20)',
-  green:   '#22c55e',
-  green10: 'rgba(34,197,94,0.10)',
-  red:     '#ef4444',
-  red10:   'rgba(239,68,68,0.10)',
-  blue:    '#60a5fa',
-  blue10:  'rgba(96,165,250,0.10)',
-}
+// (2026-09-21, lot 02 B) Page restylée AirKi : jetons T, Tabs, Drawer, DataTable, Button, StatusDot.
+// Logique inchangée (CRUD pilotes/avions/accès, archivage, codes d'invitation, trigramme/PIN, photos, hex).
+// Règles : fond paper, cartes blanches bordées 1 px rule radius 6, pas d'ombre ; chiffres/identifiants en
+// Geist Mono ; ambre jamais en texte ; JAMAIS de rouge (conflit = StatusDot caution, suppression = Button danger).
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ROLES    = ['user', 'instructor', 'admin']
 const LICENCES = ['PPL', 'ULM', 'LAPL', 'CPL', 'ATPL', 'IR', 'ME', 'Night']
 // (2026-09-16) TYPE_DESIG figé retiré → base OACI Doc 8643 dans src/data/aircraftTypes.js (combobox + saisie libre)
+
+// Libellés affichés des rôles de plateforme (la valeur stockée ne change pas).
+const ROLE_LABEL = { user: 'Pilot', instructor: 'Instructor', admin: 'Admin', super_admin: 'Super admin' }
+const roleLabel = (r) => ROLE_LABEL[r] || r || '—'
 
 const EMPTY_PILOT = {
   firstName: '', lastName: '', email: '',
@@ -51,41 +44,87 @@ const EMPTY_AIRCRAFT = {
   photoCredit: '', photoLink: '', photoSource: '',   // (2026-08-31) photo web auto (planespotters)
 }
 
-// ─── Reusable form components ─────────────────────────────────────────────────
+// ─── Reusable form components (déclarés au niveau module : pas de remontage) ──
+const fieldBase = {
+  width: '100%', boxSizing: 'border-box', height: 34,
+  background: T.card, border: T.border, borderRadius: T.radius.sm,
+  color: T.ink, fontSize: 13, padding: '0 10px', outline: 'none',
+}
+
 const Label = ({ children }) => (
-  <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.12em', color: C.low, marginBottom: 5 }}>
-    {children}
-  </div>
+  <div style={{ ...labelStyle(T.etch), marginBottom: 6 }}>{children}</div>
 )
 
-const Input = ({ value, onChange, placeholder, type = 'text', maxLength }) => (
+const Hint = ({ children }) => (
+  <div style={{ fontFamily: T.sans, fontSize: 12, lineHeight: 1.4, color: T.graphite, marginTop: 4 }}>{children}</div>
+)
+
+const Input = ({ value, onChange, placeholder, type = 'text', maxLength, mono = false }) => (
   <input
     type={type} value={value} onChange={e => onChange(e.target.value)}
-    placeholder={placeholder} maxLength={maxLength}
-    style={{
-      width: '100%', boxSizing: 'border-box',
-      background: C.bg, border: `1px solid ${C.border}`,
-      color: C.text, fontFamily: C.mono, fontSize: 12,
-      padding: '8px 10px', borderRadius: 6, outline: 'none',
-    }}
+    placeholder={placeholder} maxLength={maxLength} className="ak-focus"
+    style={{ ...fieldBase, fontFamily: mono ? T.mono : T.sans, fontVariantNumeric: mono ? 'tabular-nums' : undefined }}
   />
 )
 
 const Select = ({ value, onChange, options }) => (
   <select
-    value={value} onChange={e => onChange(e.target.value)}
-    style={{
-      width: '100%', boxSizing: 'border-box',
-      background: C.bg, border: `1px solid ${C.border}`,
-      color: C.text, fontFamily: C.mono, fontSize: 12,
-      padding: '8px 10px', borderRadius: 6, outline: 'none', cursor: 'pointer',
-    }}
+    value={value} onChange={e => onChange(e.target.value)} className="ak-focus"
+    style={{ ...fieldBase, fontFamily: T.sans, cursor: 'pointer' }}
   >
     {options.map(o => (
       <option key={o.value} value={o.value}>{o.label}</option>
     ))}
   </select>
 )
+
+// Champ en lecture seule (club courant, rôle super_admin).
+const ReadOnly = ({ children, mono = false }) => (
+  <div style={{
+    ...fieldBase, display: 'flex', alignItems: 'center', background: T.paper, color: T.graphite,
+    fontFamily: mono ? T.mono : T.sans,
+  }}>
+    {children}
+  </div>
+)
+
+// Puce bordée (badges STUDENT / PILOT / FI / ARCHIVED / OWNER / CLUB, ratings).
+const Chip = ({ children, strong = false, title }) => (
+  <span title={title} style={{
+    display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 6px',
+    border: `1px solid ${strong ? T.ink : T.rule}`, borderRadius: T.radius.sm,
+    fontFamily: T.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em',
+    color: strong ? T.ink : T.graphite, background: T.card, whiteSpace: 'nowrap',
+  }}>{children}</span>
+)
+
+// Bascule segmentée / puce sélectionnable (aria-pressed) : actif = encre, texte blanc.
+const Toggle = ({ active, onClick, children, mono = false, style }) => (
+  <button
+    type="button" aria-pressed={active} onClick={onClick} className="ak-focus"
+    style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      height: 28, padding: '0 10px', borderRadius: T.radius.sm, cursor: 'pointer',
+      border: `1px solid ${active ? T.ink : T.rule}`, background: active ? T.ink : T.card,
+      color: active ? T.white : T.graphite,
+      fontFamily: mono ? T.mono : T.sans, fontSize: mono ? 11 : 13, fontWeight: mono ? 500 : 600,
+      letterSpacing: mono ? '0.04em' : '-0.01em', whiteSpace: 'nowrap', ...style,
+    }}
+  >{children}</button>
+)
+
+// Section de tiroir : titre mono + filet au-dessus (sauf la première).
+const Section = ({ title, first = false, children }) => (
+  <section style={{
+    borderTop: first ? 'none' : T.border,
+    paddingTop: first ? 0 : 16, marginTop: first ? 0 : 16,
+  }}>
+    <div style={{ ...labelStyle(T.graphite), marginBottom: 12 }}>{title}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>{children}</div>
+  </section>
+)
+
+const full = { gridColumn: '1/-1' }
 
 // (2026-09-16) Type designator OACI : combobox (datalist) sur la base Doc 8643 + saisie LIBRE d'un code
 // hors liste (5 car. max, majuscules). Affiche le modèle reconnu sous le champ, ou « code libre ».
@@ -94,26 +133,21 @@ const TypeDesigInput = ({ value, onChange }) => {
   return (
     <div>
       <input
-        list="ac-type-desig-list" value={value}
+        list="ac-type-desig-list" value={value} className="ak-focus"
         onChange={e => onChange(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
         placeholder="FK9, VL3, P28A, DR40…" maxLength={5} spellCheck={false}
-        style={{
-          width: '100%', boxSizing: 'border-box',
-          background: C.bg, border: `1px solid ${C.border}`,
-          color: C.text, fontFamily: C.mono, fontSize: 12,
-          padding: '8px 10px', borderRadius: 6, outline: 'none',
-        }}
+        style={{ ...fieldBase, fontFamily: T.mono }}
       />
       <datalist id="ac-type-desig-list">
         {AIRCRAFT_TYPES.map(t => (
           <option key={t.code} value={t.code}>{`${t.name} · ${CAT_LABEL[t.cat] || t.cat}`}</option>
         ))}
       </datalist>
-      <div style={{ fontFamily: C.mono, fontSize: 10, color: C.low, marginTop: 4, minHeight: 12 }}>
+      <Hint>
         {value
-          ? (known ? `${known.name} · ${CAT_LABEL[known.cat] || known.cat}` : 'Code libre — vérifier sur ICAO Doc 8643')
-          : 'Désignateur OACI Doc 8643 (liste + saisie libre)'}
-      </div>
+          ? (known ? `${known.name} · ${CAT_LABEL[known.cat] || known.cat}` : 'Custom code — check it against ICAO Doc 8643')
+          : 'ICAO Doc 8643 designator (pick from the list or type your own)'}
+      </Hint>
     </div>
   )
 }
@@ -131,8 +165,11 @@ function generateTrigram(firstName, lastName, existing = []) {
   return candidates.find(c => !set.has(c)) ?? ''
 }
 
-// ─── Pilot form panel ─────────────────────────────────────────────────────────
-function PilotForm({ form, setForm, allTrigrams, currentClub, saving, error, onSave, onCancel, isEdit }) {
+const trigramConflictOf = (form, allTrigrams, isEdit) =>
+  !!form && allTrigrams.filter(t => t !== (isEdit ? form._origTrigram : '')).includes((form.trigram || '').toUpperCase())
+
+// ─── Pilot form (corps du tiroir) ─────────────────────────────────────────────
+function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit }) {
   const toggleLicence = (lic) => {
     setForm(p => ({
       ...p,
@@ -146,19 +183,13 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, saving, error, onS
     if (trig) setForm(p => ({ ...p, trigram: trig }))
   }
 
-  const trigramConflict = allTrigrams.filter(t => t !== (isEdit ? form._origTrigram : '')).includes(form.trigram.toUpperCase())
+  const trigramConflict = trigramConflictOf(form, allTrigrams, isEdit)
 
   return (
-    <div style={{
-      background: C.surface, border: `1px solid ${C.border}`,
-      borderRadius: 10, padding: 20,
-    }}>
-      <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.14em', color: C.low, marginBottom: 18 }}>
-        {isEdit ? 'EDIT PILOT' : 'NEW PILOT'}
-      </div>
+    <div>
+      {error && <Banner tone="caution" style={{ marginBottom: 16 }}>{error}</Banner>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        {/* Name */}
+      <Section title="IDENTITY" first>
         <div>
           <Label>FIRST NAME</Label>
           <Input value={form.firstName} onChange={v => setForm(p => ({ ...p, firstName: v }))} placeholder="John" />
@@ -167,195 +198,126 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, saving, error, onS
           <Label>LAST NAME</Label>
           <Input value={form.lastName} onChange={v => setForm(p => ({ ...p, lastName: v }))} placeholder="Smith" />
         </div>
-
-        {/* Email */}
-        <div style={{ gridColumn: '1/-1' }}>
+        <div style={full}>
           <Label>EMAIL</Label>
           <Input value={form.email} onChange={v => setForm(p => ({ ...p, email: v }))} placeholder="john@example.com" type="email" />
         </div>
-
+        <div>
+          <Label>BIRTH DATE</Label>
+          <Input type="date" mono value={form.birthDate} onChange={v => setForm(p => ({ ...p, birthDate: v }))} />
+        </div>
         {/* Club — contexte d'opération, read-only */}
-        <div style={{ gridColumn: '1/-1' }}>
+        <div>
           <Label>CLUB</Label>
-          <div style={{
-            width: '100%', boxSizing: 'border-box',
-            background: C.bg, border: `1px solid ${C.border}`,
-            color: C.text, fontFamily: C.mono, fontSize: 12,
-            padding: '8px 10px', borderRadius: 6,
-          }}>
-            {currentClub ? `${currentClub.code} — ${currentClub.name}` : '(no club selected)'}
-          </div>
-          <div style={{ fontFamily: C.mono, fontSize: 8, color: C.low, marginTop: 3 }}>
-            Pilot will be created in this club. Switch club via the header to change.
-          </div>
+          <ReadOnly mono>{currentClub ? currentClub.code : 'No club selected'}</ReadOnly>
         </div>
-
-        {/* Platform role */}
-        <div>
-          <Label>PLATFORM ROLE</Label>
-          <Select value={form.role} onChange={v => setForm(p => ({ ...p, role: v }))}
-            options={ROLES.map(r => ({ value: r, label: r.toUpperCase() }))} />
-          <div style={{ fontFamily: C.mono, fontSize: 8, color: C.low, marginTop: 3 }}>
-            Page access & permissions
-          </div>
+        <div style={full}>
+          <Hint>
+            {currentClub ? `${currentClub.name}. ` : ''}The pilot is created in this club. Switch club from the header to change it.
+          </Hint>
         </div>
+      </Section>
 
-        {/* Flying qualification */}
-        <div>
+      <Section title="LICENCE & RATINGS">
+        <div style={full}>
           <Label>FLYING QUALIFICATION</Label>
           <div style={{ display: 'flex', gap: 6 }}>
-            {['student', 'pilot'].map(lic => {
-              const active = form.licence === lic
-              return (
-                <button key={lic} type="button"
-                  onClick={() => setForm(p => ({
-                    ...p,
-                    licence: lic,
-                    isInstructor: lic === 'student' ? false : p.isInstructor,
-                  }))}
-                  style={{
-                    flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-                    fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-                    background: active ? (lic === 'student' ? C.blue10 : C.green10) : 'transparent',
-                    border: `1px solid ${active ? (lic === 'student' ? C.blue : C.green) : C.border}`,
-                    color: active ? (lic === 'student' ? C.blue : C.green) : C.mid,
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {lic === 'student' ? '🎓 STUDENT' : '✈ PILOT'}
-                </button>
-              )
-            })}
+            {['student', 'pilot'].map(lic => (
+              <Toggle key={lic} active={form.licence === lic} style={{ flex: 1 }}
+                onClick={() => setForm(p => ({
+                  ...p,
+                  licence: lic,
+                  isInstructor: lic === 'student' ? false : p.isInstructor,
+                }))}
+              >
+                {lic === 'student' ? 'Student' : 'Pilot'}
+              </Toggle>
+            ))}
           </div>
         </div>
 
         {/* Is instructor — only if pilot */}
         {form.licence === 'pilot' && (
-          <div style={{ gridColumn: '1/-1' }}>
-            <button type="button"
-              onClick={() => setForm(p => ({ ...p, isInstructor: !p.isInstructor }))}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                width: '100%', padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
-                background: form.isInstructor ? C.amber10 : C.bg,
-                border: `1px solid ${form.isInstructor ? C.amber : C.border}`,
-                transition: 'all 0.15s',
-              }}
-            >
-              <div style={{
-                width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                background: form.isInstructor ? C.amber : 'transparent',
-                border: `2px solid ${form.isInstructor ? C.amber : C.border}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {form.isInstructor && <span style={{ fontSize: 10, color: '#fff' }}>✓</span>}
-              </div>
-              <div>
-                <div style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 700,
-                  color: form.isInstructor ? C.amber : C.mid }}>
-                  CERTIFIED INSTRUCTOR (FI)
-                </div>
-                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.low, marginTop: 2 }}>
-                  Can supervise student flights
-                </div>
-              </div>
-            </button>
-          </div>
+          <label style={{ ...full, display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
+            padding: '10px 12px', border: `1px solid ${form.isInstructor ? T.ink : T.rule}`, borderRadius: T.radius.sm }}>
+            <input
+              type="checkbox" checked={!!form.isInstructor} className="ak-focus"
+              onChange={() => setForm(p => ({ ...p, isInstructor: !p.isInstructor }))}
+              style={{ width: 16, height: 16, margin: '2px 0 0', accentColor: T.ink, flexShrink: 0 }}
+            />
+            <span>
+              <span style={{ display: 'block', fontFamily: T.sans, fontSize: 13, fontWeight: 600, color: T.ink }}>
+                Certified instructor (FI)
+              </span>
+              <span style={{ display: 'block', fontFamily: T.sans, fontSize: 12, color: T.graphite, marginTop: 2 }}>
+                Can supervise student flights
+              </span>
+            </span>
+          </label>
         )}
 
-        {/* Dates */}
-        <div>
-          <Label>BIRTH DATE</Label>
-          <Input type="date" value={form.birthDate} onChange={v => setForm(p => ({ ...p, birthDate: v }))} />
-        </div>
         <div>
           <Label>LICENCE DATE</Label>
-          <Input type="date" value={form.licenceDate} onChange={v => setForm(p => ({ ...p, licenceDate: v }))} />
+          <Input type="date" mono value={form.licenceDate} onChange={v => setForm(p => ({ ...p, licenceDate: v }))} />
         </div>
+        <div />
 
-        {/* Ratings */}
-        <div style={{ gridColumn: '1/-1' }}>
+        <div style={full}>
           <Label>RATINGS</Label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {LICENCES.map(lic => {
-              const on = form.licences.includes(lic)
-              return (
-                <button key={lic} type="button" onClick={() => toggleLicence(lic)} style={{
-                  padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
-                  fontFamily: C.mono, fontSize: 9, fontWeight: 700,
-                  background: on ? C.amber10 : 'transparent',
-                  border: `1px solid ${on ? C.amber : C.border}`,
-                  color: on ? C.amber : C.mid, transition: 'all 0.15s',
-                }}>{lic}</button>
-              )
-            })}
+            {LICENCES.map(lic => (
+              <Toggle key={lic} mono active={form.licences.includes(lic)} onClick={() => toggleLicence(lic)}>
+                {lic.toUpperCase()}
+              </Toggle>
+            ))}
           </div>
         </div>
+      </Section>
 
-        {/* Trigram */}
-        <div>
-          <Label>TRIGRAM (3 chars)</Label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              value={form.trigram}
-              onChange={e => setForm(p => ({ ...p, trigram: e.target.value.toUpperCase().slice(0,3) }))}
-              maxLength={3}
-              style={{
-                flex: 1, background: C.bg, border: `1px solid ${trigramConflict ? C.red : C.border}`,
-                color: C.text, fontFamily: C.mono, fontSize: 14, fontWeight: 700, letterSpacing: '0.2em',
-                padding: '7px 10px', borderRadius: 6, outline: 'none', textAlign: 'center',
-              }}
-            />
-            <button type="button" onClick={autoTrigram} style={{
-              padding: '0 12px', borderRadius: 6, cursor: 'pointer',
-              background: 'transparent', border: `1px solid ${C.border}`,
-              fontFamily: C.mono, fontSize: 9, color: C.mid,
-            }}>AUTO</button>
-          </div>
-          {trigramConflict && (
-            <div style={{ fontFamily: C.mono, fontSize: 9, color: C.red, marginTop: 4 }}>
-              Trigram already in use
-            </div>
+      <Section title="PLATFORM ROLE">
+        <div style={full}>
+          <Label>ROLE</Label>
+          {form.role === 'super_admin' ? (
+            <>
+              <ReadOnly>Super admin</ReadOnly>
+              <Hint>Platform role — managed outside club administration. Not editable here.</Hint>
+            </>
+          ) : (
+            <>
+              <Select value={form.role} onChange={v => setForm(p => ({ ...p, role: v }))}
+                options={ROLES.map(r => ({ value: r, label: roleLabel(r) }))} />
+              <Hint>Page access and permissions</Hint>
+            </>
           )}
         </div>
+      </Section>
 
-        {/* PIN */}
+      <Section title="FDR">
         <div>
-          <Label>PIN (4 digits)</Label>
-          <input
-            type="password" value={form.pin} maxLength={4}
-            onChange={e => setForm(p => ({ ...p, pin: e.target.value.replace(/\D/g,'').slice(0,4) }))}
-            placeholder="••••"
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              background: C.bg, border: `1px solid ${C.border}`,
-              color: C.text, fontFamily: C.mono, fontSize: 18, letterSpacing: '0.4em',
-              padding: '7px 10px', borderRadius: 6, outline: 'none', textAlign: 'center',
-            }}
-          />
-          <div style={{ fontFamily: C.mono, fontSize: 8, color: C.low, marginTop: 3 }}>
-            Used for FDR identification
+          <Label>TRIGRAM · 3 CHARS</Label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              value={form.trigram} className="ak-focus"
+              onChange={e => setForm(p => ({ ...p, trigram: e.target.value.toUpperCase().slice(0, 3) }))}
+              maxLength={3} aria-invalid={trigramConflict || undefined}
+              style={{ ...fieldBase, flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 14, fontWeight: 500,
+                letterSpacing: '0.2em', textAlign: 'center', borderColor: trigramConflict ? T.ink : T.rule }}
+            />
+            <Button size="md" onClick={autoTrigram} title="Generate a free trigram from the name">Auto</Button>
           </div>
+          {trigramConflict && <StatusDot tone="caution" text="TRIGRAM ALREADY IN USE" style={{ marginTop: 6 }} />}
         </div>
-      </div>
-
-      {error && (
-        <div style={{ fontFamily: C.mono, fontSize: 10, color: C.red, margin: '12px 0' }}>{error}</div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
-        <button type="button" onClick={onCancel} style={{
-          padding: '8px 18px', borderRadius: 6, cursor: 'pointer',
-          background: 'transparent', border: `1px solid ${C.border}`,
-          fontFamily: C.mono, fontSize: 10, color: C.mid,
-        }}>CANCEL</button>
-        <button type="button" onClick={onSave} disabled={saving || trigramConflict} style={{
-          padding: '8px 22px', borderRadius: 6, cursor: saving ? 'not-allowed' : 'pointer',
-          background: saving ? C.bg : C.text, border: `1px solid ${saving ? C.border : C.text}`,
-          fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
-          color: saving ? C.mid : '#ffffff', transition: 'all 0.15s',
-        }}>{saving ? '…' : isEdit ? '✓ UPDATE' : '✓ CREATE'}</button>
-      </div>
+        <div>
+          <Label>PIN · 4 DIGITS</Label>
+          <input
+            type="password" value={form.pin} maxLength={4} inputMode="numeric" className="ak-focus"
+            onChange={e => setForm(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+            placeholder="••••"
+            style={{ ...fieldBase, fontFamily: T.mono, fontSize: 16, letterSpacing: '0.4em', textAlign: 'center' }}
+          />
+          <Hint>Used to identify the pilot on the FDR</Hint>
+        </div>
+      </Section>
     </div>
   )
 }
@@ -369,7 +331,7 @@ function AircraftPhotoField({ form, setForm }) {
   const onFile = async (file) => {
     if (!file) return
     if (!file.type.startsWith('image/')) return setErr('Image file required')
-    if (file.size > 5 * 1024 * 1024)     return setErr('Max 5MB')
+    if (file.size > 5 * 1024 * 1024)     return setErr('Max 5 MB')
     setErr(''); setUploading(true)
     try {
       const ext  = (file.name.split('.').pop() || 'jpg').toLowerCase()
@@ -389,60 +351,47 @@ function AircraftPhotoField({ form, setForm }) {
     setErr(''); setFetching(true)
     const v = await fetchWebPhoto({ hex: form.icao24, reg: form.callSign })
     setFetching(false)
-    if (!v) return setErr('No web photo found (try after filling ICAO24 / call sign)')
+    if (!v) return setErr('No web photo found (fill in ICAO24 or call sign first)')
     setForm(p => ({ ...p, photoUrl: v.url, photoStoragePath: '', photoCredit: v.credit, photoLink: v.link, photoSource: v.site || 'planespotters.net' }))
   }
 
   const remove = () => setForm(p => ({ ...p, photoUrl: '', photoStoragePath: '', photoCredit: '', photoLink: '', photoSource: '' }))
 
   return (
-    <div>
-      <Label>PHOTO</Label>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{
-          width: 192, height: 128, flexShrink: 0,
-          borderRadius: 8, border: `1px dashed ${C.border}`, background: C.bg,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          overflow: 'hidden', cursor: 'pointer',
-        }} onClick={() => inputRef.current?.click()}>
+    <div style={full}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <button
+          type="button" className="ak-focus" onClick={() => inputRef.current?.click()}
+          aria-label={form.photoUrl ? 'Replace photo' : 'Add photo'}
+          style={{
+            width: 192, height: 128, flexShrink: 0, padding: 0,
+            borderRadius: T.radius.md, border: T.border, background: T.paper,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden', cursor: 'pointer',
+          }}
+        >
           {form.photoUrl
-            ? <img src={form.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : <span style={{ fontFamily: C.mono, fontSize: 9, color: C.low }}>+ ADD</span>}
-        </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <button type="button" onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            style={{
-              padding: '6px 14px', borderRadius: 6, cursor: uploading ? 'wait' : 'pointer',
-              background: 'transparent', border: `1px solid ${C.border}`,
-              fontFamily: C.mono, fontSize: 10, color: C.text, alignSelf: 'flex-start',
-            }}>
-            {uploading ? 'UPLOADING…' : form.photoUrl ? 'REPLACE' : 'UPLOAD'}
-          </button>
-          <button type="button" onClick={autoFetch} disabled={fetching || uploading}
-            title="Cherche automatiquement une photo sur planespotters.net (par ICAO24, sinon immat)"
-            style={{
-              padding: '6px 14px', borderRadius: 6, cursor: fetching ? 'wait' : 'pointer',
-              background: 'transparent', border: `1px solid ${C.border}`,
-              fontFamily: C.mono, fontSize: 10, color: C.text, alignSelf: 'flex-start',
-            }}>
-            {fetching ? 'SEARCHING…' : 'AUTO (WEB)'}
-          </button>
+            ? <img src={form.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            : <span style={{ fontFamily: T.sans, fontSize: 13, color: T.graphite }}>Add photo</span>}
+        </button>
+        <div style={{ flex: '1 1 140px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+          <Button size="sm" icon="upload" onClick={() => inputRef.current?.click()} disabled={uploading}>
+            {uploading ? 'Uploading…' : form.photoUrl ? 'Replace' : 'Upload'}
+          </Button>
+          <Button size="sm" icon="search" onClick={autoFetch} disabled={fetching || uploading}
+            title="Search planespotters.net for a photo (by ICAO24, otherwise by registration)">
+            {fetching ? 'Searching…' : 'Find on the web'}
+          </Button>
+          {form.photoUrl && !uploading && (
+            <Button size="sm" variant="danger" onClick={remove}>Remove</Button>
+          )}
           {form.photoSource && form.photoUrl && (
             <a href={form.photoLink || '#'} target="_blank" rel="noreferrer"
-              style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textDecoration: 'none' }}>
+              style={{ ...monoStyle(11, T.graphite), textDecoration: 'none' }}>
               © {form.photoCredit || '?'} · {form.photoSource}
             </a>
           )}
-          {form.photoUrl && !uploading && (
-            <button type="button" onClick={remove}
-              style={{
-                padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
-                fontFamily: C.mono, fontSize: 9, color: C.red, alignSelf: 'flex-start',
-              }}>REMOVE</button>
-          )}
-          {err && <div style={{ fontFamily: C.mono, fontSize: 9, color: C.red }}>{err}</div>}
+          {err && <StatusDot tone="caution" text={err} />}
         </div>
       </div>
       <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }}
@@ -451,7 +400,7 @@ function AircraftPhotoField({ form, setForm }) {
   )
 }
 
-// ─── Aircraft form panel ──────────────────────────────────────────────────────
+// ─── Aircraft form (corps du tiroir) ──────────────────────────────────────────
 function HexLookupField({ form, setForm }) {
   const [state, setState] = useState('')   // '' | 'searching' | 'found:<src>' | 'notfound'
   const find = async () => {
@@ -464,67 +413,71 @@ function HexLookupField({ form, setForm }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <Input value={form.icao24}
+        <Input value={form.icao24} mono
           onChange={v => setForm(p => ({ ...p, icao24: v.toLowerCase() }))}
           placeholder="4401ab" maxLength={6} />
-        <button type="button" onClick={find} disabled={state === 'searching'}
-          title="Cherche le hex Mode S depuis l'immat (hexdb.io / adsbdb.com)"
-          style={{ padding: '0 12px', borderRadius: 6, cursor: 'pointer', background: 'transparent',
-                   border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.text, whiteSpace: 'nowrap' }}>
-          {state === 'searching' ? '…' : 'FIND (WEB)'}
-        </button>
+        <Button onClick={find} disabled={state === 'searching'} icon="search"
+          title="Look up the Mode S hex from the registration (hexdb.io / adsbdb.com)">
+          {state === 'searching' ? 'Searching…' : 'Find'}
+        </Button>
       </div>
       {state.startsWith('found:') && (
-        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.green, marginTop: 3 }}>✓ {state.slice(6)}</div>
+        <StatusDot tone="ok" text={state.slice(6)} style={{ marginTop: 6 }} />
       )}
       {state === 'notfound' && (
-        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.amber, marginTop: 3 }}>
-          Introuvable — registres KO pour les F-J ; la source LIVE ne répond que si l'avion VOLE (réessaie en vol), sinon FR24 à la main
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginTop: 6 }}>
+          <StatusDot tone="caution" style={{ marginTop: 5 }} />
+          <span style={{ fontFamily: T.sans, fontSize: 12, lineHeight: 1.4, color: T.graphite }}>
+            Not found. Registries do not cover F-J aircraft, and the live source only answers while the
+            aircraft is flying (try again in flight). Otherwise, look it up on FR24 and enter it by hand.
+          </span>
         </div>
       )}
     </div>
   )
 }
 
-function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, pilots = [] }) {
+function AircraftForm({ form, setForm, error, pilots = [] }) {
   return (
-    <div style={{
-      background: C.surface, border: `1px solid ${C.border}`,
-      borderRadius: 10, padding: 20,
-    }}>
-      <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.14em', color: C.low, marginBottom: 18 }}>
-        {isEdit ? 'EDIT AIRCRAFT' : 'NEW AIRCRAFT'}
-      </div>
+    <div>
+      {error && <Banner tone="caution" style={{ marginBottom: 16 }}>{error}</Banner>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <Section title="IDENTITY" first>
         <div>
           <Label>CALL SIGN</Label>
-          <Input value={form.callSign}
+          <Input value={form.callSign} mono
             onChange={v => setForm(p => ({ ...p, callSign: v.toUpperCase() }))}
             placeholder="FJFVB" />
         </div>
         <div>
-          <Label>TYPE DESIGNATOR (ICAO)</Label>
+          <Label>HOME BASE · ICAO</Label>
+          <Input value={form.homeBase} mono
+            onChange={v => setForm(p => ({ ...p, homeBase: v.toUpperCase() }))}
+            placeholder="EBBY" maxLength={4} />
+        </div>
+      </Section>
+
+      <Section title="TYPE">
+        <div style={full}>
+          <Label>TYPE DESIGNATOR · ICAO</Label>
           <TypeDesigInput
             value={form.typeDesig}
             onChange={v => setForm(p => ({ ...p, typeDesig: v }))}
           />
         </div>
-        <div>
-          <Label>ICAO24 (hex)</Label>
+      </Section>
+
+      <Section title="TRANSPONDER">
+        <div style={full}>
+          <Label>ICAO24 · HEX</Label>
           {/* (2026-08-31, demande Christophe) FIND (WEB) : immat → hex Mode S via hexdb.io/adsbdb.com
               (variantes avec tiret : OO-I44…). Couverture partielle — si introuvable, saisie
               manuelle (FR24 reste la meilleure source pour les ULM belges OO-I4x / français F-J). */}
           <HexLookupField form={form} setForm={setForm} />
         </div>
+      </Section>
 
-        <div style={{ gridColumn: '1/-1' }}>
-          <Label>HOME BASE (ICAO)</Label>
-          <Input value={form.homeBase}
-            onChange={v => setForm(p => ({ ...p, homeBase: v.toUpperCase() }))}
-            placeholder="EBBY" maxLength={4} />
-        </div>
-
+      <Section title="OWNERSHIP">
         <div>
           <Label>OWNERSHIP</Label>
           <Select
@@ -535,7 +488,7 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, 
         </div>
         {form.ownership === 'owner' && (
           <div>
-            <Label>OWNER (pilot)</Label>
+            <Label>OWNER · PILOT</Label>
             <Select
               value={form.ownerPilotId || ''}
               onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
@@ -544,34 +497,16 @@ function AircraftForm({ form, setForm, saving, error, onSave, onCancel, isEdit, 
             />
           </div>
         )}
+      </Section>
 
-        <div style={{ gridColumn: '1/-1' }}>
-          <AircraftPhotoField form={form} setForm={setForm} />
-        </div>
-      </div>
-
-      {error && (
-        <div style={{ fontFamily: C.mono, fontSize: 10, color: C.red, margin: '12px 0' }}>{error}</div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
-        <button type="button" onClick={onCancel} style={{
-          padding: '8px 18px', borderRadius: 6, cursor: 'pointer',
-          background: 'transparent', border: `1px solid ${C.border}`,
-          fontFamily: C.mono, fontSize: 10, color: C.mid,
-        }}>CANCEL</button>
-        <button type="button" onClick={onSave} disabled={saving} style={{
-          padding: '8px 22px', borderRadius: 6, cursor: saving ? 'not-allowed' : 'pointer',
-          background: saving ? C.bg : C.text, border: `1px solid ${saving ? C.border : C.text}`,
-          fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
-          color: saving ? C.mid : '#ffffff', transition: 'all 0.15s',
-        }}>{saving ? '…' : isEdit ? '✓ UPDATE' : '✓ CREATE'}</button>
-      </div>
+      <Section title="PHOTO">
+        <AircraftPhotoField form={form} setForm={setForm} />
+      </Section>
     </div>
   )
 }
 
-// ─── Row components ───────────────────────────────────────────────────────────
+// ─── Row pieces ───────────────────────────────────────────────────────────────
 // (2026-09-21) Code d'invitation pour relier le compte d'un pilote à sa fiche (fonction cloud createPilotInvite).
 // Usage unique, 14 jours ; un nouveau code révoque le précédent. Le code n'est affiché qu'ici, jamais stocké côté client.
 function InviteCodeButton({ pilot }) {
@@ -587,125 +522,30 @@ function InviteCodeButton({ pilot }) {
   }
   const exp = res?.expiresAt ? new Date(res.expiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
       {res?.code && (
-        <span title={`Valid until ${exp}. Single use.`} style={{ fontFamily: C.mono, fontSize: 12, letterSpacing: '0.1em', color: C.text, border: `1px solid ${C.border}`, borderRadius: 4, padding: '3px 8px', userSelect: 'all' }}>
+        <span title={`Valid until ${exp}. Single use.`} style={{
+          ...monoStyle(12, T.ink), letterSpacing: '0.1em', border: T.border, borderRadius: T.radius.sm,
+          padding: '4px 8px', userSelect: 'all', background: T.paper,
+        }}>
           {res.code}
         </span>
       )}
       {res?.code && (
-        <button onClick={() => navigator.clipboard?.writeText(res.code)} style={{ padding: '5px 10px', borderRadius: 5, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.mid }}>COPY</button>
+        <Button size="sm" variant="ghost" onClick={() => navigator.clipboard?.writeText(res.code)}>Copy</Button>
       )}
-      {res?.error && <span style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{res.error}</span>}
-      <button onClick={gen} disabled={busy} title="Create a single-use code the pilot enters after signing in (Google, Apple…)" style={{
-        padding: '5px 12px', borderRadius: 5, cursor: busy ? 'default' : 'pointer',
-        background: 'transparent', border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 9, color: C.mid,
-      }}>{busy ? '…' : (res?.code ? 'NEW CODE' : 'INVITE CODE')}</button>
+      {res?.error && <StatusDot tone="caution" text={res.error} />}
+      <Button size="sm" onClick={gen} disabled={busy}
+        title="Create a single-use code the pilot enters after signing in (Google, Apple…)">
+        {busy ? 'Creating…' : (res?.code ? 'New code' : 'Invite code')}
+      </Button>
     </div>
   )
 }
 
-function PilotRow({ pilot, onEdit, onDelete }) {
-  const licCol = pilot.licence === 'pilot' ? C.green : C.blue
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 16px', background: C.surface,
-      border: `1px solid ${C.border}`, borderRadius: 8,
-      transition: 'box-shadow 0.15s',
-    }}>
-      {/* Avatar */}
-      <div style={{
-        width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-        background: `${licCol}20`, border: `1px solid ${licCol}44`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: C.mono, fontSize: 11, fontWeight: 700, color: licCol,
-      }}>
-        {pilot.trigram || `${pilot.firstName?.[0] ?? ''}${pilot.lastName?.[0] ?? ''}`}
-      </div>
-
-      {/* Name + details */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
-          {pilot.firstName} {pilot.lastName}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
-          {/* Licence badge */}
-          <span style={{
-            fontFamily: C.mono, fontSize: 9, fontWeight: 700,
-            color: licCol, background: `${licCol}15`,
-            padding: '1px 7px', borderRadius: 4,
-            border: `1px solid ${licCol}33`,
-          }}>
-            {pilot.licence?.toUpperCase() ?? 'STUDENT'}
-          </span>
-          {/* Instructor badge */}
-          {pilot.isInstructor && (
-            <span style={{
-              fontFamily: C.mono, fontSize: 9, fontWeight: 700,
-              color: C.amber, background: C.amber10,
-              padding: '1px 7px', borderRadius: 4,
-              border: `1px solid ${C.amber}44`,
-            }}>FI</span>
-          )}
-          {/* Platform role */}
-          <span style={{ fontFamily: C.mono, fontSize: 9, color: C.low }}>
-            {pilot.role?.toUpperCase()}
-          </span>
-          {/* Ratings */}
-          {pilot.licences?.map(l => (
-            <span key={l} style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{l}</span>
-          ))}
-          {/* PIN conflict warning — set by Cloud Function dedupPilotPin */}
-          {pilot.pinConflict && (
-            <span style={{
-              fontFamily: C.mono, fontSize: 9, fontWeight: 700,
-              color: C.red, background: C.red10,
-              padding: '1px 7px', borderRadius: 4,
-              border: `1px solid ${C.red}44`,
-            }} title="Another pilot in the same club has the same PIN — edit one of them to fix.">
-              ⚠ PIN CONFLICT
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* PIN indicator */}
-      {pilot.pin && (
-        <span style={{
-          fontFamily: C.mono, fontSize: 9,
-          color: pilot.pinConflict ? C.red : C.low,
-        }}>
-          PIN ••••
-        </span>
-      )}
-
-      {/* (2026-09-21) compte relié ? */}
-      <span title={pilot.uid ? `Linked account: ${pilot.accountEmail || 'yes'}` : 'No dashboard account linked yet'} style={{ fontFamily: C.mono, fontSize: 9, color: pilot.uid ? C.text : C.low, flexShrink: 0 }}>
-        {pilot.uid ? '● LINKED' : '○ NOT LINKED'}
-      </span>
-
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
-        <InviteCodeButton pilot={pilot} />
-        <button onClick={() => onEdit(pilot)} style={{
-          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-          background: 'transparent', border: `1px solid ${C.border}`,
-          fontFamily: C.mono, fontSize: 9, color: C.mid,
-        }}>EDIT</button>
-        <button onClick={() => onDelete(pilot)} style={{
-          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-          background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
-          fontFamily: C.mono, fontSize: 9, color: C.red,
-        }}>✕</button>
-      </div>
-    </div>
-  )
-}
-
-function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
+function AircraftThumb({ ac }) {
   // (2026-08-31) pas de photo enregistrée → tentative web auto (planespotters, cache 7 j).
-  // Affichage seul : rien n'est écrit en base (l'admin fige via AUTO (WEB) + Save dans la fiche).
+  // Affichage seul : rien n'est écrit en base (l'admin fige via « Find on the web » + Save dans la fiche).
   const [webPhoto, setWebPhoto] = useState(null)
   useEffect(() => {
     if (ac.photoUrl || (!ac.icao24 && !ac.callSign)) return undefined
@@ -717,105 +557,27 @@ function AircraftRow({ ac, onEdit, onDelete, onRestore, pilots = [] }) {
   const photoTitle = ac.photoUrl
     ? (ac.photoSource ? `© ${ac.photoCredit || '?'} · ${ac.photoSource}` : '')
     : (webPhoto ? `© ${webPhoto.credit || '?'} · ${webPhoto.site || 'planespotters.net'}` : '')
-  const isOwner = ac.ownership === 'owner'
-  const archived = !!ac.archived
-  const owner = isOwner ? pilots.find(p => p.id === ac.ownerPilotId) : null
-  const ownerName = owner ? `${owner.firstName} ${owner.lastName}` : (isOwner ? '—' : '')
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 16px', background: C.surface,
-      border: `1px solid ${C.border}`, borderRadius: 8,
-      opacity: archived ? 0.45 : 1,
-    }}>
-      {photoUrl ? (
-        <img src={photoUrl} alt="" title={photoTitle} style={{
-          width: 56, height: 36, borderRadius: 6, flexShrink: 0,
-          objectFit: 'cover', border: `1px solid ${C.border}`,
-        }} />
-      ) : (
-        <div style={{
-          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-          background: C.amber10, border: `1px solid ${C.amber}44`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: C.mono, fontSize: 9, fontWeight: 700, color: C.amber,
-        }}>
-          {ac.typeDesig || '?'}
-        </div>
-      )}
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
-            {ac.callSign || ac.registration}
-          </span>
-          {archived && (
-            <span style={{ fontFamily: C.mono, fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
-              color: '#94a3b8', border: '1px solid #94a3b855', borderRadius: 4, padding: '1px 6px' }}>
-              ARCHIVED
-            </span>
-          )}
-          <span style={{
-            fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em',
-            padding: '2px 6px', borderRadius: 4,
-            background: isOwner ? C.blue10 : C.red10,
-            color: isOwner ? C.blue : C.red,
-            border: `1px solid ${isOwner ? C.blue : C.red}44`,
-          }}>{isOwner ? 'OWNER' : 'CLUB'}</span>
-        </div>
-        <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, marginTop: 3 }}>
-          {[isOwner ? `👤 ${ownerName}` : null, ac.typeDesig, ac.homeBase, ac.icao24].filter(Boolean).join(' · ') || '—'}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <button onClick={() => onEdit(ac)} style={{
-          padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-          background: 'transparent', border: `1px solid ${C.border}`,
-          fontFamily: C.mono, fontSize: 9, color: C.mid,
-        }}>EDIT</button>
-        {archived ? (
-          <button onClick={() => onRestore(ac)} style={{
-            padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-            background: 'transparent', border: `1px solid rgba(34,197,94,0.35)`,
-            fontFamily: C.mono, fontSize: 9, color: '#22c55e',
-          }}>RESTORE</button>
-        ) : (
-          <button onClick={() => onDelete(ac)} style={{
-            padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
-            background: 'transparent', border: `1px solid rgba(239,68,68,0.25)`,
-            fontFamily: C.mono, fontSize: 9, color: C.red,
-          }}>✕</button>
-        )}
-      </div>
+  const box = { width: 56, height: 36, borderRadius: T.radius.sm, flexShrink: 0, border: T.border, display: 'block' }
+  return photoUrl ? (
+    <img src={photoUrl} alt="" title={photoTitle} style={{ ...box, objectFit: 'cover', filter: ac.archived ? 'grayscale(1)' : undefined }} />
+  ) : (
+    <div style={{ ...box, background: T.paper, display: 'flex', alignItems: 'center', justifyContent: 'center', ...monoStyle(10, T.etch) }}>
+      {ac.typeDesig || '—'}
     </div>
   )
 }
 
+// Liste d'actions de fin de ligne.
+const Actions = ({ children }) => (
+  <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>{children}</div>
+)
 
-// ─── Tab button ───────────────────────────────────────────────────────────────
-function TabBtn({ label, count, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 7,
-      padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
-      border: `1px solid ${active ? C.amber : C.border}`,
-      background: active ? C.amber10 : 'transparent',
-      transition: 'all 0.15s',
-    }}>
-      <span style={{
-        fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-        letterSpacing: '0.08em', color: active ? C.amber : C.mid,
-      }}>{label}</span>
-      <span style={{
-        fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-        color: active ? C.amber : C.low,
-        background: active ? C.amber20 : C.bg,
-        padding: '1px 7px', borderRadius: 4,
-      }}>{count}</span>
-    </button>
-  )
-}
+const sectionTitle = (text, count) => (
+  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+    <span style={headingStyle(15)}>{text}</span>
+    {count != null && <span style={monoStyle(12, T.etch)}>{count}</span>}
+  </div>
+)
 
 // ─── Main AdminPage ───────────────────────────────────────────────────────────
 export default function AdminPage() {
@@ -884,8 +646,8 @@ export default function AdminPage() {
     finally { setSaving(false) }
   }
 
+  // Confirmation portée par le Button danger (confirm="…") : plus de window.confirm ici.
   const revokeInvite = async (inv) => {
-    if (!window.confirm(`Revoke invitation for ${inv.email}?`)) return
     try { await deleteDoc(doc(db, 'invites', inv.id)); setInvites(prev => prev.filter(i => i.id !== inv.id)) }
     catch (e) { setError(e.message) }
   }
@@ -897,7 +659,6 @@ export default function AdminPage() {
   }
 
   const revokeMember = async (m) => {
-    if (!window.confirm(`Revoke access for ${m.email}? They will lose access at next login.`)) return
     try { await updateDoc(doc(db, 'users', m.id), { clubId: '', role: 'user', updatedAt: serverTimestamp() })
       setMembers(prev => prev.filter(x => x.id !== m.id)) }
     catch (e) { setError(e.message) }
@@ -909,7 +670,7 @@ export default function AdminPage() {
   // clubId est toujours pré-rempli avec le club courant — l'utilisateur n'a
   // pas à le choisir, c'est le contexte d'opération.
   const openNewPilot  = () => { setEditId(null); setPilotForm({ ...EMPTY_PILOT, clubId }); setError('') }
-  const openEditPilot = (p) => { setEditId(p.id); setPilotForm({ ...EMPTY_PILOT, ...p, isInstructor: p.isInstructor ?? false, _origTrigram: p.trigram }); setError('') }
+  const openEditPilot = (p) => { setEditId(p.id); setPilotForm({ ...EMPTY_PILOT, ...p, licence: p.licence || 'pilot', isInstructor: p.isInstructor ?? false, _origTrigram: p.trigram })   /* (21/09) licence absente = breveté (règle isStudent) — plus d'écriture silencieuse de 'student' */; setError('') }
 
   const savePilot = async () => {
     if (!pilotForm.firstName || !pilotForm.lastName) return setError('First and last name required')
@@ -945,7 +706,6 @@ export default function AdminPage() {
   }
 
   const deletePilot = async (p) => {
-    if (!window.confirm(`Archive pilot ${p.firstName} ${p.lastName}?`)) return
     await updateDoc(doc(db, 'pilots', p.id), { archived: true, updatedAt: serverTimestamp() })
     setPilots(prev => prev.filter(x => x.id !== p.id))
   }
@@ -989,7 +749,6 @@ export default function AdminPage() {
   }
 
   const deleteAircraft = async (a) => {
-    if (!window.confirm(`Archive aircraft ${a.callSign || a.registration}?`)) return
     await updateDoc(doc(db, 'aircraft', a.id), { archived: true, updatedAt: serverTimestamp() })
     // (T18) on GARDE la ligne (badge ARCHIVED + Restore) au lieu de la masquer localement —
     // avant, l'avion disparaissait de l'écran mais REVENAIT au rechargement (aucune vue ne
@@ -1002,218 +761,316 @@ export default function AdminPage() {
     setAircraft(prev => prev.map(x => x.id === a.id ? { ...x, archived: false } : x))
   }
 
+  const closePilotForm    = () => { setPilotForm(null); setEditId(null); setError('') }
+  const closeAircraftForm = () => { setAircraftForm(null); setEditId(null); setError('') }
+  const switchTab = (k) => { setTab(k); setPilotForm(null); setAircraftForm(null) }
+
+  const pendingInvites = invites.filter(i => i.status !== 'accepted')
+
+  // ── Colonnes ────────────────────────────────────────────────────────────────
+  const pilotColumns = [
+    { key: 'trigram', label: 'TRIG', mono: true, width: 56,
+      render: p => <span style={{ fontWeight: 500, letterSpacing: '0.08em' }}>{p.trigram || '—'}</span> },
+    { key: 'name', label: 'PILOT',
+      render: p => (
+        <div style={{ minWidth: 140 }}>
+          <div style={{ fontWeight: 600, color: T.ink }}>{p.firstName} {p.lastName}</div>
+          {p.licences?.length > 0 && (
+            <div style={{ ...monoStyle(11, T.graphite), marginTop: 2 }}>{p.licences.map(l => l.toUpperCase()).join(' · ')}</div>
+          )}
+        </div>
+      ) },
+    { key: 'qual', label: 'QUALIFICATION',
+      render: p => (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Chip>{p.licence === 'student' ? 'STUDENT' : 'PILOT'}</Chip>
+          {p.isInstructor && <Chip strong>FI</Chip>}
+        </div>
+      ) },
+    { key: 'role', label: 'ROLE', render: p => <span style={{ color: T.graphite }}>{roleLabel(p.role)}</span> },
+    { key: 'pin', label: 'PIN',
+      render: p => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={monoStyle(13, p.pin ? T.ink : T.etch)}>{p.pin ? '••••' : '—'}</span>
+          {/* PIN conflict warning — set by Cloud Function dedupPilotPin */}
+          {p.pinConflict && (
+            <span title="Another pilot in the same club has the same PIN. Edit one of them to fix it.">
+              <StatusDot tone="caution" text="PIN CONFLICT" />
+            </span>
+          )}
+        </div>
+      ) },
+    { key: 'account', label: 'ACCOUNT',
+      render: p => (
+        <span title={p.uid ? `Linked account: ${p.accountEmail || 'yes'}` : 'No dashboard account linked yet'}>
+          <StatusDot tone={p.uid ? 'ok' : 'off'} text={p.uid ? 'LINKED' : 'NOT LINKED'} />
+        </span>
+      ) },
+    { key: 'actions', label: '', align: 'right',
+      render: p => (
+        <Actions>
+          <InviteCodeButton pilot={p} />
+          <Button size="sm" icon="edit" onClick={() => openEditPilot(p)}>Edit</Button>
+          <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
+            title={`Archive pilot ${p.firstName} ${p.lastName}`} onClick={() => deletePilot(p)}>Archive</Button>
+        </Actions>
+      ) },
+  ]
+
+  const aircraftColumns = [
+    { key: 'photo', label: '', width: 72, render: a => <AircraftThumb ac={a} /> },
+    { key: 'callSign', label: 'CALL SIGN', mono: true,
+      render: a => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 500, color: a.archived ? T.etch : T.ink }}>{a.callSign || a.registration}</span>
+          {a.archived && <Chip>ARCHIVED</Chip>}
+        </div>
+      ) },
+    { key: 'typeDesig', label: 'TYPE', mono: true,
+      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.typeDesig || '—'}</span> },
+    { key: 'homeBase', label: 'BASE', mono: true,
+      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.homeBase || '—'}</span> },
+    { key: 'icao24', label: 'ICAO24', mono: true,
+      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.icao24 || '—'}</span> },
+    { key: 'ownership', label: 'OWNERSHIP',
+      render: a => {
+        const isOwner = a.ownership === 'owner'
+        const owner = isOwner ? pilots.find(p => p.id === a.ownerPilotId) : null
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Chip strong={isOwner}>{isOwner ? 'OWNER' : 'CLUB'}</Chip>
+            {isOwner && (
+              <span style={{ color: a.archived ? T.etch : T.graphite }}>
+                {owner ? `${owner.firstName} ${owner.lastName}` : '—'}
+              </span>
+            )}
+          </div>
+        )
+      } },
+    { key: 'actions', label: '', align: 'right',
+      render: a => (
+        <Actions>
+          <Button size="sm" icon="edit" onClick={() => openEditAircraft(a)}>Edit</Button>
+          {a.archived ? (
+            <Button size="sm" icon="refresh" onClick={() => restoreAircraft(a)}>Restore</Button>
+          ) : (
+            <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
+              title={`Archive aircraft ${a.callSign || a.registration}`} onClick={() => deleteAircraft(a)}>Archive</Button>
+          )}
+        </Actions>
+      ) },
+  ]
+
+  const memberColumns = [
+    { key: 'name', label: 'NAME',
+      render: m => <span style={{ fontWeight: 600 }}>{m.displayName || m.email}</span> },
+    { key: 'email', label: 'EMAIL', mono: true, render: m => <span style={{ color: T.graphite }}>{m.email}</span> },
+    { key: 'role', label: 'ROLE', width: 170,
+      render: m => m.role === 'super_admin' ? (
+        // super_admin : lecture seule — un select le rétrograderait.
+        <span title="Platform role — not editable from club administration"><Chip strong>SUPER ADMIN</Chip></span>
+      ) : (
+        <select value={m.role || 'user'} onChange={e => changeMemberRole(m, e.target.value)} className="ak-focus"
+          aria-label={`Role for ${m.email}`}
+          style={{ ...fieldBase, height: 28, fontFamily: T.sans, cursor: 'pointer' }}>
+          <option value="user">Pilot</option>
+          <option value="instructor">Instructor</option>
+          <option value="admin">Admin</option>
+        </select>
+      ) },
+    { key: 'actions', label: '', align: 'right',
+      render: m => (
+        <Actions>
+          <Button size="sm" variant="danger" confirm="Confirm revoke"
+            title={`Revoke access for ${m.email}. They lose access at next sign-in.`}
+            onClick={() => revokeMember(m)}>Revoke</Button>
+        </Actions>
+      ) },
+  ]
+
+  const inviteColumns = [
+    { key: 'email', label: 'EMAIL', mono: true },
+    { key: 'role', label: 'INVITED AS', render: i => <span style={{ color: T.graphite }}>{roleLabel(i.role || 'user')}</span> },
+    { key: 'status', label: 'STATUS', render: () => <StatusDot tone="caution" text="WAITING FOR FIRST SIGN-IN" /> },
+    { key: 'actions', label: '', align: 'right',
+      render: inv => (
+        <Actions>
+          <Button size="sm" variant="danger" confirm="Confirm revoke"
+            title={`Revoke invitation for ${inv.email}`} onClick={() => revokeInvite(inv)}>Revoke</Button>
+        </Actions>
+      ) },
+  ]
+
+  const pilotIsEdit = !!editId && !!pilotForm
+  const pilotConflict = trigramConflictOf(pilotForm, allTrigrams, pilotIsEdit)
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{
-      width: '100%', height: '100%', background: C.bg,
+      width: '100%', height: '100%', background: T.paper,
       display: 'flex', flexDirection: 'column',
-      fontFamily: C.mono, overflow: 'hidden',
+      fontFamily: T.sans, color: T.ink, overflow: 'hidden',
     }}>
 
       {/* Top bar */}
       <div style={{
-        background: C.surface, borderBottom: `1px solid ${C.border}`,
-        padding: '12px 24px', flexShrink: 0,
-        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '16px 24px', flexShrink: 0, borderBottom: T.border,
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
       }}>
-        <TabBtn label="PILOTS"   count={pilots.length}   active={tab === 'PILOTS'}   onClick={() => { setTab('PILOTS');   setPilotForm(null); setAircraftForm(null) }} />
-        <TabBtn label="AIRCRAFT" count={aircraft.length} active={tab === 'AIRCRAFT'} onClick={() => { setTab('AIRCRAFT'); setPilotForm(null); setAircraftForm(null) }} />
-        <TabBtn label="ACCESS"   count={members.length + invites.length} active={tab === 'ACCESS'} onClick={() => { setTab('ACCESS'); setPilotForm(null); setAircraftForm(null) }} />
+        <Tabs
+          ariaLabel="Admin sections"
+          value={tab}
+          onChange={switchTab}
+          tabs={[
+            { key: 'PILOTS',   label: 'Pilots',   count: pilots.length },
+            { key: 'AIRCRAFT', label: 'Aircraft', count: aircraft.length },
+            { key: 'ACCESS',   label: 'Access',   count: members.length + invites.length },
+          ]}
+        />
 
         <div style={{ flex: 1 }} />
 
-        {tab === 'PILOTS' && !pilotForm && (
-          <button onClick={openNewPilot} style={{
-            padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
-            background: C.text, border: 'none',
-            fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-            color: '#ffffff', letterSpacing: '0.05em',
-          }}>+ NEW PILOT</button>
+        {tab === 'PILOTS' && (
+          <Button variant="primary" onClick={openNewPilot}>New pilot</Button>
         )}
-        {tab === 'AIRCRAFT' && !aircraftForm && (
-          <button onClick={openNewAircraft} style={{
-            padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
-            background: C.text, border: 'none',
-            fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-            color: '#ffffff', letterSpacing: '0.05em',
-          }}>+ NEW AIRCRAFT</button>
+        {tab === 'AIRCRAFT' && (
+          <Button variant="primary" onClick={openNewAircraft}>New aircraft</Button>
         )}
         {tab === 'ACCESS' && !inviteForm && (
-          <button onClick={() => { setInviteForm({ email: '', role: 'user' }); setError('') }} style={{
-            padding: '7px 16px', borderRadius: 7, cursor: 'pointer',
-            background: C.text, border: 'none',
-            fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-            color: '#ffffff', letterSpacing: '0.05em',
-          }}>+ INVITE PERSON</button>
+          <Button variant="primary" onClick={() => { setInviteForm({ email: '', role: 'user' }); setError('') }}>Invite person</Button>
         )}
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-        {loading && (
-          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: '50%',
-              border: `2px solid ${C.border}`, borderTop: `2px solid ${C.amber}`,
-              animation: 'admin-spin 0.8s linear infinite',
-            }} />
-            <style>{`@keyframes admin-spin { to { transform: rotate(360deg) } }`}</style>
-          </div>
-        )}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 32px' }}>
+        <div style={{ maxWidth: 1120, display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-        {!loading && tab === 'PILOTS' && (
-          <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Form */}
-            {pilotForm && (
-              <PilotForm
-                form={pilotForm}
-                setForm={setPilotForm}
-                allTrigrams={allTrigrams}
-                currentClub={club}
-                saving={saving}
-                error={error}
-                onSave={savePilot}
-                onCancel={() => { setPilotForm(null); setEditId(null); setError('') }}
-                isEdit={!!editId}
-              />
-            )}
+          {tab === 'PILOTS' && (
+            <DataTable
+              columns={pilotColumns} rows={pilots} loading={loading}
+              empty={<EmptyState text="No pilots yet." actionLabel="New pilot" onAction={openNewPilot} />}
+            />
+          )}
 
-            {/* List */}
-            {pilots.length === 0 && !pilotForm && (
-              <div style={{ textAlign: 'center', color: C.low, fontSize: 12, paddingTop: 40 }}>
-                No pilots yet. Click + NEW PILOT to add one.
-              </div>
-            )}
-            {pilots.map(p => (
-              <PilotRow
-                key={p.id} pilot={p}
-                onEdit={openEditPilot}
-                onDelete={deletePilot}
-              />
-            ))}
-          </div>
-        )}
+          {tab === 'AIRCRAFT' && (
+            <DataTable
+              columns={aircraftColumns} loading={loading}
+              rows={[...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))}
+              empty={<EmptyState text="No aircraft yet." actionLabel="New aircraft" onAction={openNewAircraft} />}
+            />
+          )}
 
-        {!loading && tab === 'AIRCRAFT' && (
-          <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Form */}
-            {aircraftForm && (
-              <AircraftForm
-                form={aircraftForm}
-                setForm={setAircraftForm}
-                pilots={pilots}
-                saving={saving}
-                error={error}
-                onSave={saveAircraft}
-                onCancel={() => { setAircraftForm(null); setEditId(null); setError('') }}
-                isEdit={!!editId}
-              />
-            )}
+          {tab === 'ACCESS' && (
+            <>
+              {error && !inviteForm && (
+                <Banner tone="caution" action={<Button size="sm" variant="ghost" onClick={() => setError('')}>Dismiss</Button>}>
+                  {error}
+                </Banner>
+              )}
 
-            {/* List */}
-            {aircraft.length === 0 && !aircraftForm && (
-              <div style={{ textAlign: 'center', color: C.low, fontSize: 12, paddingTop: 40 }}>
-                No aircraft yet. Click + NEW AIRCRAFT to add one.
-              </div>
-            )}
-            {[...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0)).map(a => (
-              <AircraftRow
-                key={a.id} ac={a}
-                pilots={pilots}
-                onEdit={openEditAircraft}
-                onDelete={deleteAircraft}
-                onRestore={restoreAircraft}
-              />
-            ))}
-          </div>
-        )}
-
-        {!loading && tab === 'ACCESS' && (
-          <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Invite form */}
-            {inviteForm && (
-              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 18 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.text, letterSpacing: '0.05em', marginBottom: 12 }}>INVITE A PERSON</div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <label style={{ flex: 2, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: C.mid }}>EMAIL (Google account)</span>
-                    <input type="email" value={inviteForm.email} autoFocus
-                      onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
-                      placeholder="person@gmail.com"
-                      style={{ padding: '8px 10px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 13, color: C.text }} />
-                  </label>
-                  <label style={{ flex: 1, minWidth: 130, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: C.mid }}>ROLE</span>
-                    <select value={inviteForm.role}
-                      onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))}
-                      style={{ padding: '8px 10px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 13, color: C.text, background: '#fff' }}>
-                      <option value="user">user — replay only</option>
-                      <option value="instructor">instructor — logbook</option>
-                      <option value="admin">admin — full club</option>
-                    </select>
-                  </label>
-                  <button onClick={sendInvite} disabled={saving}
-                    style={{ padding: '9px 16px', borderRadius: 7, cursor: 'pointer', background: C.text, border: 'none', color: '#fff', fontFamily: C.mono, fontSize: 10, fontWeight: 700 }}>
-                    {saving ? '...' : 'SEND INVITE'}
-                  </button>
-                  <button onClick={() => { setInviteForm(null); setError('') }}
-                    style={{ padding: '9px 14px', borderRadius: 7, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: C.mid, fontFamily: C.mono, fontSize: 10 }}>
-                    CANCEL
-                  </button>
-                </div>
-                {error && <div style={{ color: '#ef4444', fontSize: 11, marginTop: 10 }}>{error}</div>}
-                <div style={{ fontSize: 10.5, color: C.low, marginTop: 12, lineHeight: 1.5 }}>
-                  The person signs in with this Google account and gets access to <strong>{club?.name || 'this club'}</strong> automatically. Until invited, they see an “access pending” screen.
-                </div>
-              </div>
-            )}
-
-            {/* Members (people with access now) */}
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: C.mid, letterSpacing: '0.08em', marginBottom: 8 }}>MEMBERS · {members.length}</div>
-              {members.length === 0 && <div style={{ color: C.low, fontSize: 12 }}>No one has access to this club yet.</div>}
-              {members.map(m => (
-                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, color: C.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.displayName || m.email}</div>
-                    <div style={{ fontSize: 11, color: C.mid, fontFamily: C.mono }}>{m.email}</div>
+              {/* Invite form */}
+              {inviteForm && (
+                <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 16 }}>
+                  <div style={{ ...headingStyle(15), marginBottom: 12 }}>Invite a person</div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <label style={{ flex: 2, minWidth: 220, display: 'flex', flexDirection: 'column' }}>
+                      <Label>EMAIL · GOOGLE ACCOUNT</Label>
+                      <input type="email" value={inviteForm.email} autoFocus className="ak-focus"
+                        onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder="person@gmail.com"
+                        style={{ ...fieldBase, fontFamily: T.mono }} />
+                    </label>
+                    <label style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column' }}>
+                      <Label>ROLE</Label>
+                      <select value={inviteForm.role} className="ak-focus"
+                        onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))}
+                        style={{ ...fieldBase, fontFamily: T.sans, cursor: 'pointer' }}>
+                        <option value="user">Pilot — own flights</option>
+                        <option value="instructor">Instructor — logbook</option>
+                        <option value="admin">Admin — full club</option>
+                      </select>
+                    </label>
+                    <Button variant="primary" onClick={sendInvite} disabled={saving}>
+                      {saving ? 'Sending…' : 'Send invite'}
+                    </Button>
+                    <Button onClick={() => { setInviteForm(null); setError('') }}>Cancel</Button>
                   </div>
-                  <select value={m.role || 'user'} onChange={e => changeMemberRole(m, e.target.value)}
-                    style={{ padding: '6px 8px', borderRadius: 6, border: `1px solid ${C.border}`, fontFamily: C.mono, fontSize: 11, color: C.text, background: '#fff' }}>
-                    <option value="user">user</option>
-                    <option value="instructor">instructor</option>
-                    <option value="admin">admin</option>
-                  </select>
-                  <button onClick={() => revokeMember(m)}
-                    style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: '#ef4444', fontFamily: C.mono, fontSize: 10 }}>
-                    REVOKE
-                  </button>
+                  {error && <Banner tone="caution" style={{ marginTop: 12 }}>{error}</Banner>}
+                  <div style={{ fontSize: 13, color: T.graphite, marginTop: 12, lineHeight: 1.5 }}>
+                    The person signs in with this Google account and gets access to <strong style={{ color: T.ink }}>{club?.name || 'this club'}</strong> automatically.
+                    Until then, they see an “Access pending” screen.
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
 
-            {/* Pending invites */}
-            {invites.filter(i => i.status !== 'accepted').length > 0 && (
+              {/* Members (people with access now) */}
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: C.mid, letterSpacing: '0.08em', marginBottom: 8 }}>PENDING INVITES</div>
-                {invites.filter(i => i.status !== 'accepted').map(inv => (
-                  <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: C.amber10, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: C.text, fontFamily: C.mono, overflow: 'hidden', textOverflow: 'ellipsis' }}>{inv.email}</div>
-                      <div style={{ fontSize: 10, color: C.mid }}>invited as {inv.role || 'user'} · waiting for first sign-in</div>
-                    </div>
-                    <button onClick={() => revokeInvite(inv)}
-                      style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: `1px solid ${C.border}`, color: '#ef4444', fontFamily: C.mono, fontSize: 10 }}>
-                      REVOKE
-                    </button>
-                  </div>
-                ))}
+                {sectionTitle('Members', members.length)}
+                <DataTable
+                  columns={memberColumns} rows={members} loading={loading}
+                  empty={<EmptyState text="No one has access to this club yet." />}
+                />
               </div>
-            )}
-          </div>
-        )}
 
+              {/* Pending invites */}
+              {!loading && pendingInvites.length > 0 && (
+                <div>
+                  {sectionTitle('Pending invites', pendingInvites.length)}
+                  <DataTable columns={inviteColumns} rows={pendingInvites} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Pilot drawer */}
+      <Drawer closeOnOverlay={false}
+        open={!!pilotForm}
+        onClose={closePilotForm}
+        title={editId ? 'Edit pilot' : 'New pilot'}
+        subtitle={pilotForm ? [pilotForm.trigram, club?.code].filter(Boolean).join(' · ') || undefined : undefined}
+        footer={<>
+          <Button onClick={closePilotForm}>Cancel</Button>
+          <Button variant="primary" onClick={savePilot} disabled={saving || pilotConflict}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </>}
+      >
+        {pilotForm && (
+          <PilotForm
+            form={pilotForm}
+            setForm={setPilotForm}
+            allTrigrams={allTrigrams}
+            currentClub={club}
+            error={error}
+            isEdit={!!editId}
+          />
+        )}
+      </Drawer>
+
+      {/* Aircraft drawer */}
+      <Drawer closeOnOverlay={false}
+        open={!!aircraftForm}
+        onClose={closeAircraftForm}
+        title={editId ? 'Edit aircraft' : 'New aircraft'}
+        subtitle={aircraftForm ? [aircraftForm.callSign, aircraftForm.typeDesig].filter(Boolean).join(' · ') || undefined : undefined}
+        footer={<>
+          <Button onClick={closeAircraftForm}>Cancel</Button>
+          <Button variant="primary" onClick={saveAircraft} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </>}
+      >
+        {aircraftForm && (
+          <AircraftForm
+            form={aircraftForm}
+            setForm={setAircraftForm}
+            pilots={pilots}
+            error={error}
+          />
+        )}
+      </Drawer>
     </div>
   )
 }

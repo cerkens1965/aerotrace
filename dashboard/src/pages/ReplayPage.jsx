@@ -8,29 +8,16 @@ import SixPack from '../components/ui/SixPack'
 import ReplayMap from '../components/map/ReplayMap'
 import FlightCharts from '../components/replay/FlightCharts'
 import { formatDateTime, formatDuration } from '../utils/logbookUtils'
-
-// ─── Design tokens ────────────────────────────────────────────────────────────
-const C = {
-  bg:     '#f0f2f8',
-  panel:  'rgba(255,255,255,0.97)',
-  border: 'rgba(0,0,0,0.08)',
-  amber:  '#F5A623',
-  amber10:'rgba(245,166,35,0.10)',
-  amber20:'rgba(245,166,35,0.20)',
-  green:  '#22c55e',
-  red:    '#ef4444',
-  text:   '#0a0e1e',
-  mid:    'rgba(10,14,30,0.5)',
-  mono:   'monospace',
-}
+import { T, labelStyle, monoStyle, headingStyle, Button, Icon, Banner, EmptyState, Skeleton } from '../components/ui'
 
 // ─── Flight phase colors ──────────────────────────────────────────────────────
+// Palette DS : jamais de rouge ; couleur portée par des marques (barres, points), jamais par le texte.
 const PHASE_COLORS = {
-  GROUND:   'rgba(255,255,255,0.3)',
-  CRUISE:   '#22c55e',
-  MANEUVER: '#f97316',
-  APPROACH: '#F5A623',
-  CRITICAL: '#ef4444',
+  GROUND:   T.rule,
+  CRUISE:   T.ok,
+  MANEUVER: T.info,
+  APPROACH: T.amber,
+  CRITICAL: T.ink,
 }
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
@@ -70,35 +57,35 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
   const handleMouseUp   = ()  => { isDragging.current = false }
 
   return (
-    <div style={{ padding: '12px 16px', background: C.panel, borderTop: `1px solid ${C.border}` }}>
+    <div style={{ padding: '12px 16px', background: T.card, borderTop: T.border }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
         {/* Play/Pause */}
-        <button onClick={onPlayPause} style={{
-          width: 32, height: 32, borderRadius: '50%',
-          background: C.amber10, border: `1px solid ${C.amber20}`,
-          color: C.amber, fontSize: 14, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {playing ? '⏸' : '▶'}
-        </button>
+        <Button variant="primary" size="sm" onClick={onPlayPause} aria-label={playing ? 'Pause' : 'Play'}
+          style={{ width: 32, height: 32, padding: 0 }}>
+          {playing
+            ? <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" style={{ display: 'block' }}>
+                <rect x={6} y={4} width={4} height={16} fill="currentColor" /><rect x={14} y={4} width={4} height={16} fill="currentColor" />
+              </svg>
+            : <Icon name="play" size={16} />}
+        </Button>
 
         {/* Time */}
-        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.text, minWidth: 50 }}>
+        <span style={{ ...monoStyle(12, T.ink), fontWeight: 500, minWidth: 50 }}>
           {fmtTime(currentTs - startTs)}
         </span>
-        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.amber, minWidth: 70 }}>
+        <span style={{ ...monoStyle(11, T.graphite), minWidth: 70 }}>
           {fmtUTC(currentTs)}
         </span>
 
         {/* Speed selector */}
         <div style={{ display: 'flex', gap: 4 }}>
           {[1, 2, 5, 10, 30].map(s => (
-            <button key={s} onClick={() => onSpeedChange(s)} style={{
-              padding: '2px 7px', borderRadius: 4,
-              background: speed === s ? C.amber10 : 'transparent',
-              border: `1px solid ${speed === s ? C.amber20 : C.border}`,
-              color: speed === s ? C.amber : C.mid,
-              fontFamily: C.mono, fontSize: 9, cursor: 'pointer',
+            <button key={s} onClick={() => onSpeedChange(s)} className="ak-focus" aria-pressed={speed === s} style={{
+              padding: '2px 7px', borderRadius: T.radius.sm,
+              background: speed === s ? T.ink : T.card,
+              border: `1px solid ${speed === s ? T.ink : T.rule}`,
+              color: speed === s ? T.white : T.graphite,
+              fontFamily: T.mono, fontSize: 11, fontVariantNumeric: 'tabular-nums', cursor: 'pointer',
             }}>
               {s}x
             </button>
@@ -106,23 +93,23 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
         </div>
 
         <div style={{ flex: 1 }} />
-        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.amber, minWidth: 70, textAlign: 'right' }}>
+        <span style={{ ...monoStyle(11, T.graphite), minWidth: 70, textAlign: 'right' }}>
           {fmtUTC(startTs + total)}
         </span>
-        <span style={{ fontFamily: C.mono, fontSize: 10, color: C.mid }}>
+        <span style={{ ...monoStyle(11, T.etch) }}>
           {fmtTime(total)}
         </span>
       </div>
 
       {/* Progress bar */}
-      <div onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ height: 6, background: C.border, borderRadius: 3, cursor: 'ew-resize', position: 'relative', userSelect: 'none' }}>
+      <div onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ height: 6, background: T.rule, borderRadius: 3, cursor: 'ew-resize', position: 'relative', userSelect: 'none' }}>
         <div style={{
-          height: '100%', width: `${progress}%`, background: C.amber,
+          height: '100%', width: `${progress}%`, background: T.amber,
           borderRadius: 3, transition: playing ? 'none' : 'width 0.05s', position: 'relative',
         }}>
           <div style={{ position: 'absolute', right: -8, top: -5,
             width: 16, height: 16, borderRadius: '50%',
-            background: C.amber, border: '2px solid #ffffff',
+            background: T.amber, border: `2px solid ${T.white}`,
             boxShadow: 'none',
             pointerEvents: 'none',
           }} />
@@ -136,7 +123,7 @@ function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSp
             const x = ((f.ts - startTs) / total) * 100
             return <div key={i} style={{
               position: 'absolute', left: `${x}%`, width: '0.25%', height: '100%',
-              background: PHASE_COLORS[f.phase] ?? C.green,
+              background: PHASE_COLORS[f.phase] ?? T.ok,
             }} />
           })}
         </div>
@@ -159,18 +146,22 @@ function DataStrip({ frame }) {
     { l: 'OAT',   v: `${Math.round(frame.oat)}°C` },
     { l: 'PHASE', v: frame.phase, color: PHASE_COLORS[frame.phase] },
   ]
+  // Couleur (alerte G, phase) portée par un point 6 px, le texte reste encre.
   return (
-    <div style={{ display: 'flex', gap: 0, background: C.panel,
-      borderTop: `1px solid ${C.border}`, padding: '8px 16px', flexWrap: 'wrap', gap: 20 }}>
-      {items.map(item => (
-        <div key={item.l}>
-          <div style={{ fontFamily: C.mono, fontSize: 7, color: C.mid, letterSpacing: '0.08em' }}>{item.l}</div>
-          <div style={{ fontFamily: C.mono, fontSize: 12, fontWeight: 700,
-            color: item.alert ? C.red : (item.color ?? C.text) }}>
-            {item.v}
+    <div style={{ display: 'flex', background: T.card,
+      borderTop: T.border, padding: '8px 16px', flexWrap: 'wrap', gap: 20 }}>
+      {items.map(item => {
+        const dot = item.alert ? T.amber : item.color
+        return (
+          <div key={item.l}>
+            <div style={labelStyle(T.etch)}>{item.l}</div>
+            <div style={{ ...monoStyle(12, T.ink), fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+              {dot && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: T.radius.pill, background: dot, flexShrink: 0 }} />}
+              {item.v}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -187,17 +178,10 @@ function FlightIdentity({ flight, pilotName }) {
     flight.duration ? formatDuration(flight.duration) : null,
   ].filter(Boolean)
   return (
-    <span style={{ fontFamily: C.mono, fontSize: 11, color: C.mid, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+    <span style={{ ...monoStyle(12, T.graphite), minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
       {items.join(' · ')}
     </span>
   )
-}
-
-// Bouton neutre du lecteur (retour Logbook, états vides).
-const NAV_BTN = {
-  padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-  background: 'transparent', border: `1px solid ${C.border}`,
-  color: C.text, fontFamily: C.mono, fontSize: 10, whiteSpace: 'nowrap',
 }
 
 // ─── Main REPLAY page ─────────────────────────────────────────────────────────
@@ -317,13 +301,13 @@ export default function ReplayPage() {
   const currentFrame = view ? getFrameAtTime(view.frames, currentTs) : null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bg, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflow: 'hidden' }}>
 
       {/* Titre de page — « Loop » : texte seul, Semibold, encre (règle de marque 10) */}
-      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0,
+      <div style={{ padding: '10px 16px', borderBottom: T.border, background: T.card, flexShrink: 0,
         display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
-        {flightId && <button onClick={backToLogbook} style={NAV_BTN}>← Back to logbook</button>}
-        <h1 style={{ margin: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>Loop</h1>
+        {flightId && <Button variant="ghost" size="sm" icon="back" onClick={backToLogbook}>Back to logbook</Button>}
+        <h1 style={{ ...headingStyle(18, T.ink), margin: 0 }}>Loop</h1>
         <FlightIdentity flight={shown} pilotName={pilotName} />
       </div>
 
@@ -335,23 +319,29 @@ export default function ReplayPage() {
           {!view ? (
             /* États vides : pas de vol dans l'URL / introuvable / illisible / chargement */
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexDirection: 'column', gap: 16 }}>
-              {status === 'none' && <>
-                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>Choose a flight in the logbook</div>
-                <button onClick={() => navigate('/logbook')} style={NAV_BTN}>Open logbook</button>
-              </>}
-              {status === 'notfound' && <>
-                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>Flight not found</div>
-                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>It may have been removed from the logbook.</div>
-                <button onClick={backToLogbook} style={NAV_BTN}>Back to logbook</button>
-              </>}
-              {status === 'error' && <>
-                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>This flight could not be loaded</div>
-                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>The recording file is missing or unreadable.</div>
-                <button onClick={backToLogbook} style={NAV_BTN}>Back to logbook</button>
-              </>}
+              flexDirection: 'column', gap: 16, padding: 24 }}>
+              {status === 'none' && (
+                <EmptyState text="Choose a flight in the logbook."
+                  action={<Button size="sm" icon="list" onClick={() => navigate('/logbook')}>Open logbook</Button>} />
+              )}
+              {status === 'notfound' && (
+                <Banner tone="info" title="Flight not found" style={{ width: '100%', maxWidth: 480 }}
+                  action={<Button size="sm" icon="back" onClick={backToLogbook}>Back to logbook</Button>}>
+                  It may have been removed from the logbook.
+                </Banner>
+              )}
+              {status === 'error' && (
+                <Banner tone="caution" title="This flight could not be loaded" style={{ width: '100%', maxWidth: 480 }}
+                  action={<Button size="sm" icon="back" onClick={backToLogbook}>Back to logbook</Button>}>
+                  The recording file is missing or unreadable.
+                </Banner>
+              )}
               {(status === 'loading' || status === 'ready') && (
-                <div style={{ fontFamily: C.mono, fontSize: 12, color: C.mid }}>Loading flight…</div>
+                <div role="status" aria-label="Loading flight" style={{ width: 240, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+                  <Skeleton width="100%" height={12} />
+                  <Skeleton width="60%" height={10} />
+                  <span style={{ ...monoStyle(11, T.etch), marginTop: 4 }}>LOADING FLIGHT…</span>
+                </div>
               )}
             </div>
           ) : (
@@ -363,34 +353,23 @@ export default function ReplayPage() {
                   <ReplayMap frames={view.frames} currentFrame={currentFrame} is3D={is3D} isPlaying={playing} speed={speed} />
 
                   {/* ── Bouton 2D / 3D ── */}
-                  <button
+                  <Button
+                    variant={is3D ? 'primary' : 'secondary'}
+                    size="sm"
                     onClick={() => setIs3D(v => !v)}
+                    aria-pressed={is3D}
                     style={{
-                      position:      'absolute',
-                      top:           10,
-                      left:          '50%',
-                      transform:     'translateX(-50%)',
-                      zIndex:        20,
-                      background:    is3D ? C.amber : 'rgba(255,255,255,0.92)',
-                      color:         is3D ? '#050814' : C.text,
-                      border:        `1px solid ${is3D ? C.amber : 'rgba(0,0,0,0.15)'}`,
-                      borderRadius:  6,
-                      padding:       '4px 16px',
-                      fontFamily:    C.mono,
-                      fontSize:      10,
-                      fontWeight:    700,
-                      letterSpacing: '0.12em',
-                      cursor:        'pointer',
-                      userSelect:    'none',
+                      position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 20,
+                      fontFamily: T.mono, letterSpacing: '0.08em', padding: '0 16px', userSelect: 'none',
                     }}
                   >
                     {is3D ? '3D' : '2D'}
-                  </button>
+                  </Button>
                 </div>
 
                 {/* Six-pack */}
                 <div style={{ width: 300, padding: '8px', display: 'flex', alignItems: 'center',
-                  borderLeft: '1px solid rgba(0,0,0,0.08)', background: 'rgba(255,255,255,0.97)' }}>
+                  borderLeft: T.border, background: T.card }}>
                   <SixPack frame={currentFrame} size={110} />
                 </div>
               </div>
@@ -418,7 +397,7 @@ export default function ReplayPage() {
 
       <style>{`
         ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb { background: ${T.rule}; border-radius: 2px; }
       `}</style>
     </div>
   )

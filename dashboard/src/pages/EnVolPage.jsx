@@ -2,40 +2,24 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useFleet from '../hooks/useFleet'
 import { useClub } from '../contexts/ClubContext'
-
-// ─── Design tokens — WHITE theme (matches LogbookPage) ───────────────────────
-const C = {
-  bg:      '#f4f5f7',
-  surface: '#ffffff',
-  border:  'rgba(10,14,30,0.10)',
-  text:    '#0a0e1e',
-  mid:     'rgba(10,14,30,0.55)',
-  low:     'rgba(10,14,30,0.35)',
-  mono:    'monospace',
-  green:   '#22c55e',
-  green10: 'rgba(34,197,94,0.10)',
-  green20: 'rgba(34,197,94,0.20)',
-  amber:   '#F5A623',
-  amber10: 'rgba(245,166,35,0.10)',
-  amber20: 'rgba(245,166,35,0.20)',
-  red:     '#ef4444',
-  red10:   'rgba(239,68,68,0.10)',
-  orange:  '#f97316',
-  orange10:'rgba(249,115,22,0.10)',
-}
+import {
+  T, labelStyle, monoStyle, MetricCard, Tabs, StatusDot, Button, Icon, Banner, EmptyState, Skeleton,
+} from '../components/ui'
 
 // ─── Status config ────────────────────────────────────────────────────────────
+// Règle DS : jamais de rouge ; la couleur n'est portée que par le point (StatusDot).
 const STATUS = {
-  IN_FLIGHT: { label: 'IN FLIGHT', color: '#22c55e', bg: 'rgba(34,197,94,0.10)',  pulse: true  },
-  LTE_LOST:  { label: 'LTE LOST',  color: '#f97316', bg: 'rgba(249,115,22,0.10)', pulse: true  },
-  GROUNDED:  { label: 'GROUNDED',  color: 'rgba(10,14,30,0.4)', bg: 'transparent', pulse: false },
-  UNKNOWN:   { label: 'UNKNOWN',   color: 'rgba(10,14,30,0.25)', bg: 'transparent', pulse: false },
+  IN_FLIGHT: { label: 'IN FLIGHT', tone: 'ok' },
+  LTE_LOST:  { label: 'LTE LOST',  tone: 'caution' },
+  GROUNDED:  { label: 'GROUNDED',  tone: 'off' },
+  UNKNOWN:   { label: 'UNKNOWN',   tone: 'off' },
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const fmtAlt = ft  => ft  != null ? `${Math.round(ft)} ft` : '—'
-const fmtSpd = kt  => kt  != null ? `${Math.round(kt * 1.852)} km/h` : '—'   // interne kt, affichage km/h (décision 2026-08-10)
-const fmtHdg = deg => deg != null ? `${Math.round(deg)}°`  : '—'
+// Donnée absente = « −−− » (convention DS). Vitesse affichée en kt, comme la donnée source.
+const fmtAlt = ft  => ft  != null ? `${Math.round(ft)} ft` : '−−−'
+const fmtSpd = kt  => kt  != null ? `${Math.round(kt)} kt` : '−−−'
+const fmtHdg = deg => deg != null ? `${String(Math.round(deg)).padStart(3, '0')}°`  : '−−−'
 
 function fmtDuration(startTs) {
   if (!startTs) return null
@@ -52,65 +36,13 @@ function StatBar({ fleet }) {
   const grounded = fleet.filter(a => a.status === 'GROUNDED').length
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 36,
-      padding: '16px 28px',
-      borderBottom: `1px solid ${C.border}`,
-      background: C.surface, flexShrink: 0,
-    }}>
-      <Stat value={inFlight} label="IN FLIGHT" color={C.green} />
-      <div style={{ width: 1, height: 36, background: C.border }} />
-      <Stat value={grounded} label="GROUNDED"  color={C.text} />
-      <div style={{ width: 1, height: 36, background: C.border }} />
-      <Stat value={fleet.length} label="AIRCRAFT" color={C.mid} />
-      <div style={{ flex: 1 }} />
-      {/* Live pulse */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{
-          width: 7, height: 7, borderRadius: '50%', background: C.green,
-          boxShadow: `0 0 8px ${C.green}`,
-          animation: 'if-blink 2s ease-in-out infinite',
-        }} />
-        <span style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.1em', color: C.mid }}>LIVE · 5s</span>
+    <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, maxWidth: 820 }}>
+        <MetricCard label="IN FLIGHT" value={inFlight} status={{ tone: inFlight > 0 ? 'ok' : 'off', text: 'LIVE · 5S' }} />
+        <MetricCard label="ON GROUND" value={grounded} />
+        <MetricCard label="AIRCRAFT"  value={fleet.length} />
       </div>
-
-      <style>{`
-        @keyframes if-blink  { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        @keyframes if-pulse  { 0%{box-shadow:0 0 0 0 rgba(34,197,94,0.5)} 70%{box-shadow:0 0 0 7px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
-        @keyframes if-spin   { to{transform:rotate(360deg)} }
-      `}</style>
     </div>
-  )
-}
-
-function Stat({ value, label, color }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-      <span style={{ fontFamily: C.mono, fontSize: 38, fontWeight: 700, color }}>{value}</span>
-      <span style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: '0.12em', color: C.mid }}>{label}</span>
-    </div>
-  )
-}
-
-// ─── Filter tab ───────────────────────────────────────────────────────────────
-function FilterTab({ label, count, active, color, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 7,
-      padding: '6px 14px', borderRadius: 7, cursor: 'pointer',
-      border: `1px solid ${active ? color : C.border}`,
-      background: active ? `${color}15` : 'transparent',
-      transition: 'all 0.15s',
-    }}>
-      <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-        letterSpacing: '0.08em', color: active ? color : C.mid }}>{label}</span>
-      <span style={{
-        fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-        color: active ? color : C.low,
-        background: active ? `${color}20` : C.bg,
-        padding: '1px 7px', borderRadius: 4,
-      }}>{count}</span>
-    </button>
   )
 }
 
@@ -128,110 +60,82 @@ function AircraftCard({ ac, expanded, onToggle, onLocate }) {
   const sourceLabel = ac.status === 'LTE_LOST' ? 'FDR only'
     : live ? 'SafeSky'
     : fdr  ? 'FDR'
-    : '—'
+    : '−−−'
 
   return (
     <div style={{
-      background: C.surface,
-      border: `1px solid ${ac.status === 'IN_FLIGHT' ? 'rgba(34,197,94,0.30)' : C.border}`,
-      borderRadius: 10, overflow: 'hidden',
-      boxShadow: ac.status === 'IN_FLIGHT' ? '0 2px 12px rgba(34,197,94,0.08)' : 'none',
-      transition: 'box-shadow 0.2s',
+      background: T.card, border: T.border, borderRadius: T.radius.md, overflow: 'hidden',
     }}>
 
       {/* Header row — clickable */}
       <div onClick={onToggle} style={{
-        display: 'flex', alignItems: 'center', gap: 16,
-        padding: '14px 20px', cursor: 'pointer',
-        background: ac.status === 'IN_FLIGHT' ? 'rgba(34,197,94,0.05)' : 'transparent',
+        display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+        padding: '14px 18px', cursor: 'pointer',
       }}>
-        {/* Status dot */}
-        <span style={{
-          width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-          background: st.color,
-          animation: st.pulse ? 'if-pulse 2s infinite' : 'none',
-        }} />
-
         {/* Registration + type */}
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <span style={{ fontFamily: C.mono, fontSize: 15, fontWeight: 700, color: C.text }}>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ ...monoStyle(15, T.ink), fontWeight: 500 }}>
               {ac.callSign || ac.registration}
             </span>
             <span style={{
-              fontFamily: C.mono, fontSize: 8, fontWeight: 700, letterSpacing: '0.05em', padding: '2px 6px', borderRadius: 4,
-              background: ac.ownership === 'owner' ? 'rgba(96,165,250,0.12)' : 'rgba(239,68,68,0.12)',
-              color: ac.ownership === 'owner' ? '#60a5fa' : '#ef4444',
-              border: `1px solid ${ac.ownership === 'owner' ? 'rgba(96,165,250,0.4)' : 'rgba(239,68,68,0.4)'}`,
+              ...labelStyle(T.graphite), padding: '2px 6px', borderRadius: T.radius.sm, border: T.border,
             }}>{ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}</span>
           </div>
-          <div style={{ fontFamily: C.mono, fontSize: 10, color: C.mid, marginTop: 2 }}>
-            {ac.typeDesig || ac.type || '—'}
+          <div style={{ ...monoStyle(11, T.etch), marginTop: 3 }}>
+            {ac.typeDesig || ac.type || '−−−'}
           </div>
         </div>
 
         {/* Duration */}
         {dur && (
-          <span style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.green }}>
+          <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>
             {dur}
           </span>
         )}
 
         {/* Locate button */}
         {ac.liveData?.lat != null && (
-          <button
+          <Button
+            size="sm" icon="map"
             onClick={e => { e.stopPropagation(); onLocate(ac.liveData.lat, ac.liveData.lon) }}
             title="Show on live map"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-              border: `1px solid ${C.amber}`, background: C.amber10,
-              fontFamily: C.mono, fontSize: 10, fontWeight: 700,
-              letterSpacing: '0.05em', color: C.amber,
-              transition: 'all 0.15s', flexShrink: 0,
-            }}
           >
-            ◎ MAP
-          </button>
+            Show on map
+          </Button>
         )}
 
-        {/* Status badge */}
-        <span style={{
-          fontFamily: C.mono, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-          color: st.color, background: st.bg,
-          padding: '3px 10px', borderRadius: 5,
-          border: `1px solid ${st.color}44`,
-        }}>{st.label}</span>
+        {/* Status */}
+        <StatusDot tone={st.tone} text={st.label} style={{ minWidth: 88 }} />
 
         {/* Chevron */}
-        <span style={{
-          color: C.low, fontSize: 12,
-          transform: expanded ? 'rotate(180deg)' : 'none',
-          transition: 'transform 0.2s',
-        }}>▾</span>
+        <Icon name="chevron-right" size={16} color={T.etch}
+          style={{ transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
       </div>
 
       {/* Expanded detail grid */}
       {expanded && (
         <div style={{
-          borderTop: `1px solid ${C.border}`,
-          padding: '16px 20px',
+          borderTop: T.border,
+          padding: '16px 18px',
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 14,
-          background: '#fafbfc',
+          background: T.paper,
         }}>
           {[
-            { label: 'ALTITUDE', value: fmtAlt(altFt) },
-            { label: 'SPEED',    value: fmtSpd(spdKt) },
-            { label: 'HEADING',  value: fmtHdg(hdgDeg) },
-            { label: 'PILOT',    value: ac.pilotName ?? '—' },
+            { label: 'ALTITUDE', value: fmtAlt(altFt),        mono: true },
+            { label: 'SPEED',    value: fmtSpd(spdKt),        mono: true },
+            { label: 'HEADING',  value: fmtHdg(hdgDeg),       mono: true },
+            { label: 'PILOT',    value: ac.pilotName ?? '−−−' },
             { label: 'SOURCE',   value: sourceLabel },
-            { label: 'ICAO24',   value: ac.icao24 ?? '—' },
-          ].map(({ label, value }) => (
+            { label: 'ICAO24',   value: ac.icao24 ?? '−−−',   mono: true },
+          ].map(({ label, value, mono }) => (
             <div key={label}>
-              <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: '0.12em', color: C.low, marginBottom: 4 }}>
+              <div style={{ ...labelStyle(T.etch), marginBottom: 4 }}>
                 {label}
               </div>
-              <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700, color: C.text }}>
+              <div style={mono
+                ? { ...monoStyle(13, T.ink), fontWeight: 500 }
+                : { fontFamily: T.sans, fontSize: 13, fontWeight: 500, color: T.ink }}>
                 {value}
               </div>
             </div>
@@ -272,57 +176,52 @@ export default function EnVolPage({ role }) {
 
   return (
     <div style={{
-      width: '100%', height: '100%', background: C.bg,
+      width: '100%', height: '100%', background: T.paper,
       display: 'flex', flexDirection: 'column',
-      fontFamily: C.mono, overflow: 'hidden',
+      fontFamily: T.sans, color: T.ink, overflow: 'hidden',
     }}>
 
       {/* Stat bar */}
       {!loading && !error && <StatBar fleet={fleet} />}
 
       {/* Filter toolbar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '12px 24px',
-        borderBottom: `1px solid ${C.border}`,
-        background: C.surface, flexShrink: 0,
-      }}>
-        <FilterTab label="ALL"       count={fleet.length}    active={filter==='ALL'}       color={C.text}  onClick={() => setFilter('ALL')} />
-        <FilterTab label="IN FLIGHT" count={inFlight.length} active={filter==='IN_FLIGHT'} color={C.green} onClick={() => setFilter('IN_FLIGHT')} />
-        <FilterTab label="GROUNDED"  count={grounded.length} active={filter==='GROUNDED'}  color={C.mid}   onClick={() => setFilter('GROUNDED')} />
-        {unknown.length > 0 && (
-          <FilterTab label="UNKNOWN" count={unknown.length}  active={filter==='UNKNOWN'}   color={C.low}   onClick={() => setFilter('UNKNOWN')} />
-        )}
+      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
+        <Tabs
+          ariaLabel="Filter aircraft"
+          value={filter}
+          onChange={setFilter}
+          tabs={[
+            { key: 'ALL',       label: 'All',       count: fleet.length },
+            { key: 'IN_FLIGHT', label: 'In flight', count: inFlight.length },
+            { key: 'GROUNDED',  label: 'Grounded',  count: grounded.length },
+            ...(unknown.length > 0 ? [{ key: 'UNKNOWN', label: 'Unknown', count: unknown.length }] : []),
+          ]}
+        />
       </div>
 
       {/* Fleet list */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
 
         {loading && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: '50%',
-              border: `2px solid ${C.border}`,
-              borderTop: `2px solid ${C.amber}`,
-              animation: 'if-spin 0.8s linear infinite',
-            }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }} aria-label="Loading fleet">
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '16px 18px',
+                display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Skeleton width={120} height={14} />
+                <Skeleton width={70} height={10} />
+              </div>
+            ))}
           </div>
         )}
 
         {error && (
-          <div style={{
-            background: C.red10, border: `1px solid rgba(239,68,68,0.3)`,
-            borderRadius: 8, padding: '14px 18px',
-            color: C.red, fontSize: 12, fontFamily: C.mono,
-          }}>
-            Fleet error: {error.message}
-          </div>
+          <Banner tone="caution" title="Fleet unavailable" style={{ maxWidth: 820 }}>
+            {error.message}
+          </Banner>
         )}
 
         {!loading && !error && sorted.length === 0 && (
-          <div style={{ textAlign: 'center', color: C.low, fontSize: 12, marginTop: 60 }}>
-            No aircraft found for this club.
-          </div>
+          <EmptyState text="No aircraft found for this club." style={{ maxWidth: 820 }} />
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>

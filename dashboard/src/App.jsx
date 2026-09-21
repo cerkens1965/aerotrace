@@ -16,23 +16,30 @@ import DevPage from './pages/DevPage'
 import FleetPage from './pages/FleetPage'
 import SelectClubPage from './pages/SelectClubPage'
 import { ClubProvider, useClub } from './contexts/ClubContext'
+import { Button, Skeleton, T, headingStyle } from './components/ui'
+import { AirKiLockup } from './components/ui/AirKiMark'
+
+// ─── Écrans plein cadre sur encre (chargement, accès) ────────────────────────
+// Règles DS : fond encre, lockup AirKi (jamais le mot en texte seul), titre Instrument Sans
+// Semibold blanc, texte #9A9A94 (pas d'alpha), boutons onInk, aucun rouge.
+const inkScreen = (height) => ({
+  display: 'flex', flexDirection: 'column',
+  alignItems: 'center', justifyContent: 'center',
+  height, background: T.ink,
+  fontFamily: T.sans, color: T.white,
+  padding: 40, textAlign: 'center',
+})
+const INK_TITLE = { ...headingStyle(20, T.white), margin: '24px 0 0' }
+const INK_TEXT  = { fontSize: 13, color: T.mutedDark, marginTop: 12, maxWidth: 440, lineHeight: 1.6 }
+const INK_STRONG = { color: T.white, fontWeight: 600 }
+const INK_CODE  = { fontFamily: T.mono, fontSize: 12, color: T.white }
 
 // ─── Loading screen ───────────────────────────────────────────────────────────
 function LoadingScreen() {
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--ink)',
-      fontFamily: 'var(--font-sans)', gap: 16,
-    }}>
-      <div style={{
-        width: 32, height: 32, border: '2px solid rgba(245,166,35,0.2)',
-        borderTop: '2px solid #F5A623', borderRadius: '50%',
-        animation: 'spin 0.8s linear infinite',
-      }} />
-      <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF' }}>AirKi</span>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    <div role="status" aria-label="Loading" style={{ ...inkScreen('100vh'), gap: 24 }}>
+      <AirKiLockup size={28} color={T.white} />
+      <Skeleton width={120} height={2} radius={1} style={{ background: T.ruleDark }} />
     </div>
   )
 }
@@ -59,33 +66,16 @@ function NotAllowedScreen({ role, allowed }) {
     ? `${required.slice(0, -1).join(', ')} or ${required[required.length - 1]}`
     : (required[0] ?? roleName(allowed[0]))
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      height: '100%', background: 'var(--ink)',
-      fontFamily: 'var(--font-sans)', color: '#fff',
-      padding: 40, textAlign: 'center',
-    }}>
-      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
-      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
-        Not allowed
-      </h1>
-      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 12, maxWidth: 440, lineHeight: 1.6 }}>
-        This page requires the <strong>{requiredTxt}</strong> role. Your role
-        is <strong>{roleName(role)}</strong>. Ask an administrator if you need access.
+    <div style={inkScreen('100%')}>
+      <AirKiLockup size={22} color={T.white} />
+      <h1 style={INK_TITLE}>Not allowed</h1>
+      <div style={INK_TEXT}>
+        This page requires the <strong style={INK_STRONG}>{requiredTxt}</strong> role. Your role
+        is <strong style={INK_STRONG}>{roleName(role)}</strong>. Ask an administrator if you need access.
       </div>
-      <button onClick={() => navigate('/live')}
-        style={{
-          marginTop: 32, padding: '10px 22px', borderRadius: 6,
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
-          color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
-          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#FFFFFF'; e.currentTarget.style.color = '#FFFFFF' }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
-      >
+      <Button variant="primary" onInk onClick={() => navigate('/live')} style={{ marginTop: 32 }}>
         Back to Live
-      </button>
+      </Button>
     </div>
   )
 }
@@ -248,37 +238,20 @@ function AccessPendingScreen({ user }) {
     try { await signOut(auth) } catch (err) { console.error('[Pending] signOut:', err) }
   }
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--ink)',
-      fontFamily: 'var(--font-sans)', color: '#fff',
-      padding: 40, textAlign: 'center',
-    }}>
-      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
-      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
-        Access pending
-      </h1>
-      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 12, maxWidth: 440, lineHeight: 1.6 }}>
-        You are signed in as <strong style={{ color: '#FFFFFF' }}>{user?.email || 'this account'}</strong>, but this
+    <div style={inkScreen('100vh')}>
+      <AirKiLockup size={22} color={T.white} />
+      <h1 style={INK_TITLE}>Access pending</h1>
+      <div style={INK_TEXT}>
+        You are signed in as <strong style={INK_STRONG}>{user?.email || 'this account'}</strong>, but this
         account has not been granted access yet. Enter the invitation code given by your club,
         or ask an administrator to invite your e-mail.
       </div>
       <div style={{ marginTop: 24, width: '100%', display: 'flex', justifyContent: 'center' }}>
         <RedeemInvite dark onDone={() => window.location.reload()} />
       </div>
-      <button onClick={handleSignOut}
-        style={{
-          marginTop: 32, padding: '10px 22px', borderRadius: 6,
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
-          color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
-          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
-      >
-        SIGN OUT
-      </button>
+      <Button variant="secondary" onInk onClick={handleSignOut} style={{ marginTop: 32 }}>
+        Sign out
+      </Button>
     </div>
   )
 }
@@ -291,37 +264,17 @@ function NoClubAssignedScreen({ role }) {
     try { await signOut(auth) } catch (err) { console.error('[NoClub] signOut:', err) }
   }
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: 'var(--ink)',
-      fontFamily: 'var(--font-sans)', color: '#fff',
-      padding: 40, textAlign: 'center',
-    }}>
-      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
-      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
-        No club assigned to your account
-      </h1>
-      <div style={{
-        fontSize: 12, color: 'rgba(255,255,255,0.6)',
-        marginTop: 12, maxWidth: 420, lineHeight: 1.6,
-      }}>
-        Your role is <strong>{role}</strong> but no <code>clubId</code> is set on
+    <div style={inkScreen('100vh')}>
+      <AirKiLockup size={22} color={T.white} />
+      <h1 style={INK_TITLE}>No club assigned to your account</h1>
+      <div style={{ ...INK_TEXT, maxWidth: 420 }}>
+        Your role is <strong style={INK_STRONG}>{role}</strong> but no <code style={INK_CODE}>clubId</code> is set on
         your user document. Ask your platform super_admin to assign you a club, or
-        change your role to <code>super_admin</code> to manage multiple clubs.
+        change your role to <code style={INK_CODE}>super_admin</code> to manage multiple clubs.
       </div>
-      <button onClick={handleSignOut}
-        style={{
-          marginTop: 32, padding: '10px 22px', borderRadius: 6,
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
-          color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
-          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444' }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
-      >
-        SIGN OUT
-      </button>
+      <Button variant="secondary" onInk onClick={handleSignOut} style={{ marginTop: 32 }}>
+        Sign out
+      </Button>
     </div>
   )
 }
