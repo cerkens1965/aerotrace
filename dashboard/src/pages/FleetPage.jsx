@@ -225,7 +225,7 @@ export default function FleetPage() {
       wifiSsid: cfg.wifiSsid ?? '',
       wifiPass: cfg.wifiPass ?? '',
       otaTag: cfg.otaTag ?? '',        // (2026-09-20) canal OTA du boîtier : '' inchangé · 's3' flotte · 's3dev' dev (ATC ≥210)
-      reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '' },
+      reported: { reg: dev.callSign || '', hex: dev.icao24 || '', wifiSsid: dev.wifiSsid || '', wifiKnown: dev.wifiKnown || '' },
       hasConfig: !!(cfg.reg || cfg.wifiSsid),
     })
   }
@@ -414,6 +414,12 @@ export default function FleetPage() {
                   <div>
                     <div style={{ fontFamily: C.mono, fontSize: 13, fontWeight: 700 }}>{dev.boxId || dev.id}</div>
                     <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>{dev.board || '?'}{dev.wifiSsid ? ` · ${dev.wifiSsid}` : ''}</div>
+                    {/* (2026-09-21) réseaux WiFi connus du boîtier (ATC ≥213) : « ssid* » = saisi par le pilote (protégé), sans étoile = poussé par le dashboard */}
+                    {dev.wifiKnown && (
+                      <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }} title="Réseaux WiFi connus du boîtier — * = saisi par le pilote (protégé)">
+                        known: {dev.wifiKnown}
+                      </div>
+                    )}
                   </div>
                   {(() => {
                     const reported = callSignOf(dev)
@@ -538,7 +544,7 @@ export default function FleetPage() {
                 </div>
               </div>
               <div style={{ fontSize: 10.5, color: C.low, marginTop: 10 }}>
-                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}
+                Actuel sur le boîtier : <b>{cfgEdit.reported.reg || '—'}</b>{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}{cfgEdit.reported.wifiKnown ? ` · connus : ${cfgEdit.reported.wifiKnown}` : ''}
                 {cfgEdit.hasConfig && <span style={{ color: C.amber }}> · une config est déjà en attente</span>}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
