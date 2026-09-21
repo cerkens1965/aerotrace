@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth'
 import { httpsCallable } from 'firebase/functions'
 import { doc, getDoc } from 'firebase/firestore'
@@ -11,7 +11,6 @@ import EnVolPage from './pages/EnVolPage'
 import ReplayPage from './pages/ReplayPage'
 import AdminPage from './pages/AdminPage'
 import LogbookPage from './pages/LogbookPage'
-import DiagPage from './pages/DiagPage'
 import DevPage from './pages/DevPage'
 import FleetPage from './pages/FleetPage'
 import SelectClubPage from './pages/SelectClubPage'
@@ -38,10 +37,56 @@ function LoadingScreen() {
 }
 
 // ─── Role guard ───────────────────────────────────────────────────────────────
+// Rôle insuffisant → écran « Not allowed » explicite (plus de redirection silencieuse vers /live).
 function RequireRole({ user, role, allowed, children }) {
   if (!user) return <Navigate to="/login" replace />
-  if (allowed && !allowed.includes(role)) return <Navigate to="/live" replace />
+  if (allowed && !allowed.includes(role)) return <NotAllowedScreen role={role} allowed={allowed} />
   return children
+}
+
+const ROLE_NAMES = { super_admin: 'Super admin', admin: 'Admin', instructor: 'Instructor', user: 'Pilot' }
+const roleName = (r) => ROLE_NAMES[r] ?? r
+
+// ─── NotAllowedScreen ─────────────────────────────────────────────────────────
+// Même présentation que AccessPendingScreen / NoClubAssignedScreen, mais rendu DANS la
+// mise en page (la barre latérale reste visible) → hauteur 100 % du <main>, pas 100vh.
+function NotAllowedScreen({ role, allowed }) {
+  const navigate = useNavigate()
+  // super_admin est implicite partout où admin est admis : on ne liste que les rôles « visibles ».
+  const required = allowed.filter(r => r !== 'super_admin').map(roleName)
+  const requiredTxt = required.length > 1
+    ? `${required.slice(0, -1).join(', ')} or ${required[required.length - 1]}`
+    : (required[0] ?? roleName(allowed[0]))
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      height: '100%', background: 'var(--ink)',
+      fontFamily: 'var(--font-sans)', color: '#fff',
+      padding: 40, textAlign: 'center',
+    }}>
+      <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '-0.04em', color: '#FFFFFF', marginBottom: 16 }}>AirKi</div>
+      <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
+        Not allowed
+      </h1>
+      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 12, maxWidth: 440, lineHeight: 1.6 }}>
+        This page requires the <strong>{requiredTxt}</strong> role. Your role
+        is <strong>{roleName(role)}</strong>. Ask an administrator if you need access.
+      </div>
+      <button onClick={() => navigate('/live')}
+        style={{
+          marginTop: 32, padding: '10px 22px', borderRadius: 6,
+          background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+          color: 'rgba(255,255,255,0.8)', cursor: 'pointer',
+          fontFamily: 'var(--font-sans)', fontSize: 11, letterSpacing: '0.1em',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#FFFFFF'; e.currentTarget.style.color = '#FFFFFF' }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' }}
+      >
+        Back to Live
+      </button>
+    </div>
+  )
 }
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -147,16 +192,17 @@ function AppLayout({ user, role, userClubId }) {
           {/* /select-club accessible aussi en pleine session pour switch club (super_admin) */}
           <Route path="/select-club" element={<SelectClubPage />} />
 
-          {/* EN VOL — instructeur + admin (+ super_admin) */}
-          <Route path="/en-vol"   element={
+          {/* IN FLIGHT — instructeur + admin (+ super_admin). /en-vol = ancien chemin, redirigé. */}
+          <Route path="/en-vol"   element={<Navigate to="/in-flight" replace />} />
+          <Route path="/in-flight" element={
             <RequireRole user={user} role={role} allowed={['instructor', 'admin', 'super_admin']}>
               <EnVolPage role={role} />
             </RequireRole>
           } />
 
           {/* REPLAY — tous les rôles */}
-          <Route path="/replay"   element={<ReplayPage user={user} role={role} />} />
-          <Route path="/replay/:flightId" element={<ReplayPage user={user} role={role} />} />
+          <Route path="/replay"   element={<ReplayPage role={role} />} />
+          <Route path="/replay/:flightId" element={<ReplayPage role={role} />} />
 
           <Route path="/admin" element={
             <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
@@ -168,13 +214,6 @@ function AppLayout({ user, role, userClubId }) {
           <Route path="/logbook" element={
             <RequireRole user={user} role={role} allowed={['instructor', 'admin', 'super_admin']}>
               <LogbookPage role={role} />
-            </RequireRole>
-          } />
-
-          {/* DIAG — temporaire, admin only (+ super_admin) */}
-          <Route path="/diag" element={
-            <RequireRole user={user} role={role} allowed={['admin', 'super_admin']}>
-              <DiagPage />
             </RequireRole>
           } />
 

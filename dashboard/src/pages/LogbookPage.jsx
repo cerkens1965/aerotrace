@@ -1,22 +1,28 @@
 // src/pages/LogbookPage.jsx
-// Carnet de route relationnel — 4 onglets
-//   PILOTES      → logbook par pilote/étudiant (heures, vols, instructeurs)
-//   INSTRUCTEURS → logbook par instructeur (heures instruites, élèves, présence)
-//   AVIONS       → logbook par aéronef (heures, pilotes, utilisation)
-//   TOUS LES VOLS→ matrice admin filtrable (Qui-Quoi-Comment), assignation inline
+// Logbook relationnel — 4 onglets
+//   Pilots       → logbook par pilote/étudiant (heures, vols, instructeurs)
+//   Instructors  → logbook par instructeur (heures instruites, élèves, présence)
+//   Aircraft     → logbook par aéronef (heures, pilotes, utilisation)
+//   All flights  → matrice admin filtrable (Qui-Quoi-Comment), assignation inline
+// Vols lus en temps réel (onSnapshot), archivés (soft delete) exclus partout.
+// Vol « To assign » = needsAssignment() (logbookUtils) : non validé, hors vol
+// propriétaire déjà attribué. Les rendus utilisent f._pending, calculé une fois.
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore'
-import { db } from '../firebase/config'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { collection, getDocs, query, where, doc, updateDoc, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { ref, uploadBytesResumable } from 'firebase/storage'
+import { db, storage, auth } from '../firebase/config'
+import { parseG3XCSV } from '../utils/csvParser'
 import { useNavigate } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import {
-  formatDate, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
-  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge,
+  formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
+  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment,
 } from '../utils/logbookUtils'
 
-const CLUB_ID = 'club_aerobelgique'
+// Rôles autorisés à importer un CSV depuis le Logbook.
+const IMPORT_ROLES = ['instructor', 'admin', 'super_admin']
 
 // ─── Shared low-level components ──────────────────────────────────────────────
 
@@ -66,7 +72,7 @@ function ValidBadge({ validated }) {
       fontFamily: 'monospace',
       whiteSpace: 'nowrap',
     }}>
-      {validated ? '✓ OK' : '⚠ À ASSIGNER'}
+      {validated ? '✓ OK' : '⚠ To assign'}
     </span>
   )
 }
@@ -82,7 +88,7 @@ function Airfield({ icao }) {
   if (!icao) return <span style={{ color: 'rgba(10,14,30,0.30)' }}>—</span>
   const flag = icaoFlag(icao)
   return (
-    <span title={icaoCountry(icao) || 'pays inconnu'} style={{ color: '#0a0e1e' }}>
+    <span title={icaoCountry(icao) || 'unknown country'} style={{ color: '#0a0e1e' }}>
       {flag && <span style={{ marginRight: 4 }}>{flag}</span>}{icao}
     </span>
   )
@@ -167,7 +173,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
     }
   }, [myFlights, pilots, mode])
 
-  const unvalidated = myFlights.filter(f => !f.validated).length
+  const unvalidated = myFlights.filter(f => f._pending).length
 
   return (
     <div style={{
@@ -186,7 +192,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
             </span>
             {unvalidated > 0 && (
               <span style={{ color: '#F5A623', fontSize: 10, background: 'rgba(245,166,35,0.1)', border: '1px solid rgba(245,166,35,0.2)', padding: '1px 6px', borderRadius: 3 }}>
-                {unvalidated} non assigné{unvalidated > 1 ? 's' : ''}
+                {unvalidated} to assign
               </span>
             )}
           </div>
@@ -196,7 +202,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
             ))}
             {counterparts.length > 0 && (
               <span style={{ color: 'rgba(10,14,30,0.45)', fontSize: 11, fontFamily: 'monospace' }}>
-                {mode === 'pilot' ? 'avec :' : 'élèves :'} {counterparts.slice(0, 2).join(', ')}{counterparts.length > 2 ? ` +${counterparts.length - 2}` : ''}
+                {mode === 'pilot' ? 'with:' : 'students:'} {counterparts.slice(0, 2).join(', ')}{counterparts.length > 2 ? ` +${counterparts.length - 2}` : ''}
               </span>
             )}
           </div>
@@ -206,15 +212,15 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{formatDuration(total)}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>VOLS</div>
+          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHTS</div>
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{myFlights.length}</div>
           {mode === 'instructor' && myFlights.length > 0 && (
             <div style={{ color: 'rgba(10,14,30,0.50)', fontSize: 10, marginTop: 2 }}>{onboard.length}✈ {fromGround.length}📡</div>
           )}
         </div>
         <div style={{ textAlign: 'right', minWidth: 118 }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>DERNIÈRE SORTIE</div>
-          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs, true) : '—'}</div>
+          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>LAST FLIGHT</div>
+          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs) : '—'}</div>
           {last && <TypeBadge type={last.flightType} />}
         </div>
       </div>
@@ -241,12 +247,12 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
             <thead>
               <tr>
                 <th style={TH}>DATE</th>
-                <th style={TH}>AVION</th>
-                {mode === 'instructor' && <th style={TH}>ÉLÈVE</th>}
-                {mode === 'pilot' && <th style={TH}>INSTRUCTEUR</th>}
-                <th style={TH}>DURÉE</th>
+                <th style={TH}>AIRCRAFT</th>
+                {mode === 'instructor' && <th style={TH}>STUDENT</th>}
+                {mode === 'pilot' && <th style={TH}>INSTRUCTOR</th>}
+                <th style={TH}>DURATION</th>
                 <th style={TH}>TYPE</th>
-                {mode === 'instructor' && <th style={TH}>PRÉSENCE</th>}
+                {mode === 'instructor' && <th style={TH}>PRESENCE</th>}
                 <th style={TH}>ALT MAX</th>
                 <th style={TH}>G MAX</th>
                 <th style={TH}></th>
@@ -255,7 +261,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
             <tbody>
               {myFlights.map((f, i) => (
                 <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.06)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDate(f.startTs)}</td>
+                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
                   <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</td>
                   {mode === 'instructor' && <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>}
                   {mode === 'pilot' && <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.instructorId ? getPilotName(pilots, f.instructorId) : '—'}</td>}
@@ -263,18 +269,18 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
                   <td style={TD}><TypeBadge type={f.flightType} /></td>
                   {mode === 'instructor' && (
                     <td style={{ ...TD, color: 'rgba(10,14,30,0.65)', fontSize: 11 }}>
-                      {f.instructorOnboard ? '🪑 à bord' : '📡 au sol'}
+                      {f.instructorOnboard ? '🪑 on board' : '📡 on ground'}
                     </td>
                   )}
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    {f.validated
+                    {!f._pending
                       ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
                         </span>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
                   </td>
                 </tr>
               ))}
@@ -284,7 +290,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
       )}
 
       {open && myFlights.length === 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>Aucun vol enregistré</div>
+        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>No flights recorded</div>
       )}
     </div>
   )
@@ -327,16 +333,16 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 700, marginTop: 2 }}>{formatDuration(total)}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>VOLS</div>
+          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHTS</div>
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 600, marginTop: 2 }}>{acFlights.length}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>PILOTES</div>
+          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>PILOTS</div>
           <div style={{ color: '#0a0e1e', fontFamily: 'monospace', fontSize: 17, fontWeight: 600, marginTop: 2 }}>{uniquePilots}</div>
         </div>
         <div style={{ textAlign: 'right', minWidth: 110 }}>
-          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>DERNIÈRE SORTIE</div>
-          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs, true) : '—'}</div>
+          <div style={{ color: 'rgba(10,14,30,0.45)', fontSize: 10, letterSpacing: 1.5 }}>LAST FLIGHT</div>
+          <div style={{ color: 'rgba(10,14,30,0.80)', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>{last ? formatDate(last.startTs) : '—'}</div>
           {lastPilot && <div style={{ color: 'rgba(10,14,30,0.55)', fontFamily: 'monospace', fontSize: 11 }}>{lastPilot}</div>}
         </div>
       </div>
@@ -345,13 +351,13 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
         <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'monospace' }}>
             <thead><tr>
-              <th style={TH}>DATE</th><th style={TH}>PILOTE</th><th style={TH}>INSTRUCTEUR</th>
-              <th style={TH}>DURÉE</th><th style={TH}>TYPE</th><th style={TH}>ALT MAX</th><th style={TH}>G MAX</th><th style={TH}></th>
+              <th style={TH}>DATE</th><th style={TH}>PILOT</th><th style={TH}>INSTRUCTOR</th>
+              <th style={TH}>DURATION</th><th style={TH}>TYPE</th><th style={TH}>ALT MAX</th><th style={TH}>G MAX</th><th style={TH}></th>
             </tr></thead>
             <tbody>
               {acFlights.map((f, i) => (
                 <tr key={f.id} style={{ borderTop: '1px solid rgba(10,14,30,0.06)', background: i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)' }}>
-                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDate(f.startTs)}</td>
+                  <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
                   <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.65)' }}>
                     {f.instructorId ? `${getPilotName(pilots, f.instructorId)} ${f.instructorOnboard ? '🪑' : '📡'}` : '—'}
@@ -361,12 +367,12 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
                   <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
                   <td style={{ ...TD, color: f.maxG > 2.5 ? '#ef4444' : 'rgba(10,14,30,0.70)' }}>{f.maxG ? `${f.maxG.toFixed(1)}G` : '—'}</td>
                   <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
-                    {f.validated
+                    {!f._pending
                       ? <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
                         </span>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
                   </td>
                 </tr>
               ))}
@@ -375,7 +381,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
         </div>
       )}
       {open && acFlights.length === 0 && (
-        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>Aucun vol pour cet aéronef</div>
+        <div style={{ borderTop: '1px solid rgba(10,14,30,0.07)', padding: '20px', color: 'rgba(10,14,30,0.35)', fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>No flights for this aircraft</div>
       )}
     </div>
   )
@@ -384,7 +390,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 // ─── FlightMatrix ─────────────────────────────────────────────────────────────
 
 function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, canDelete, onDelete }) {
-  const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e supprime
+  const [confirmDelId,   setConfirmDelId]   = useState('')   // 2 temps : 1er clic arme, 2e archive
   // Désarme automatiquement après 5 s (pas de dépendance au survol → pas de course).
   useEffect(() => {
     if (!confirmDelId) return
@@ -407,8 +413,8 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     if (filterInstr)    list = list.filter(f => f.instructorId === filterInstr)
     if (filterAircraft) list = list.filter(f => acLabel(f.aircraftIdent) === filterAircraft)   // résout legacy 59DWG -> callSign
     if (filterType)     list = list.filter(f => f.flightType === filterType)
-    if (filterStatus === 'validated') list = list.filter(f =>  f.validated)
-    if (filterStatus === 'pending')   list = list.filter(f => !f.validated)
+    if (filterStatus === 'validated') list = list.filter(f => !f._pending)
+    if (filterStatus === 'pending')   list = list.filter(f =>  f._pending)
     list.sort((a, b) => {
       let va, vb
       if (sortKey === 'date')     { va = tsMillis(a.startTs); vb = tsMillis(b.startTs) }
@@ -438,34 +444,34 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     borderRadius: 5, outline: 'none', cursor: 'pointer',
   }
 
-  const pendingCount = flights.filter(f => !f.validated).length
+  const pendingCount = flights.filter(f => f._pending).length
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
         <select value={filterPilot} onChange={e => setFilterPilot(e.target.value)} style={selectStyle}>
-          <option value="">Tous les pilotes</option>
+          <option value="">All pilots</option>
           {pilots.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
         </select>
         <select value={filterInstr} onChange={e => setFilterInstr(e.target.value)} style={selectStyle}>
-          <option value="">Tous les instructeurs</option>
+          <option value="">All instructors</option>
           {instructors.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
         </select>
         <select value={filterAircraft} onChange={e => setFilterAircraft(e.target.value)} style={selectStyle}>
-          <option value="">Tous les avions</option>
+          <option value="">All aircraft</option>
           {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
         </select>
         <select value={filterType} onChange={e => setFilterType(e.target.value)} style={selectStyle}>
-          <option value="">Tous types</option>
+          <option value="">All types</option>
           {Object.entries(FLIGHT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={selectStyle}>
-          <option value="">Tous statuts</option>
-          <option value="validated">Validés</option>
-          <option value="pending">À assigner ({pendingCount})</option>
+          <option value="">All statuses</option>
+          <option value="validated">Validated</option>
+          <option value="pending">To assign ({pendingCount})</option>
         </select>
         <span style={{ color: 'rgba(10,14,30,0.45)', fontFamily: 'monospace', fontSize: 12, marginLeft: 'auto' }}>
-          {filtered.length} vol{filtered.length !== 1 ? 's' : ''}
+          {filtered.length} flight{filtered.length !== 1 ? 's' : ''}
         </span>
       </div>
 
@@ -474,29 +480,29 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
           <thead style={{ borderBottom: '1px solid rgba(10,14,30,0.10)' }}>
             <tr>
               <SortTH skey="date">DATE</SortTH>
-              <SortTH skey="aircraft">AVION</SortTH>
-              <th style={TH}>TRAJET</th>
-              <th style={TH}>PILOTE</th>
-              <th style={TH}>RÔLE</th>
-              <th style={TH}>INSTRUCTEUR</th>
-              <th style={TH}>PRÉSENCE</th>
-              <SortTH skey="duration">DURÉE</SortTH>
+              <SortTH skey="aircraft">AIRCRAFT</SortTH>
+              <th style={TH}>ROUTE</th>
+              <th style={TH}>PILOT</th>
+              <th style={TH}>ROLE</th>
+              <th style={TH}>INSTRUCTOR</th>
+              <th style={TH}>PRESENCE</th>
+              <SortTH skey="duration">DURATION</SortTH>
               <th style={TH}>TYPE</th>
               <th style={TH}>ALT MAX</th>
-              <th style={TH}>STATUT</th>
+              <th style={TH}>STATUS</th>
               <th style={TH}></th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>Aucun vol correspondant</td></tr>
+              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', padding: '32px', color: 'rgba(10,14,30,0.35)' }}>No matching flights</td></tr>
             )}
             {filtered.map((f, i) => (
               <tr key={f.id} style={{
                 borderTop: '1px solid rgba(10,14,30,0.07)',
-                background: !f.validated ? 'rgba(245,166,35,0.02)' : i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)',
+                background: f._pending ? 'rgba(245,166,35,0.02)' : i % 2 === 0 ? 'transparent' : 'rgba(10,14,30,0.02)',
               }}>
-                <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDate(f.startTs)}</td>
+                <td style={{ ...TD, color: 'rgba(10,14,30,0.75)', fontSize: 11 }}>{formatDateTime(f.startTs)}</td>
                 <td style={{ ...TD, color: '#0a0e1e' }} title={f.aircraftIdent || ''}>{acLabel(f.aircraftIdent)}</td>
                 {/* Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
                     moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol. */}
@@ -510,33 +516,33 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
                 <td style={TD}>{getPilotName(pilots, f.pilotId)}</td>
                 <td style={TD}>
                   {f.pilotRole === 'student'
-                    ? <span style={{ color: '#60a5fa', fontSize: 11 }}>🎓 ÉLÈVE</span>
+                    ? <span style={{ color: '#60a5fa', fontSize: 11 }}>🎓 STUDENT</span>
                     : f.pilotRole === 'pilot'
-                    ? <span style={{ color: 'rgba(10,14,30,0.70)', fontSize: 11 }}>✈ PILOTE</span>
+                    ? <span style={{ color: 'rgba(10,14,30,0.70)', fontSize: 11 }}>✈ PILOT</span>
                     : <span style={{ color: 'rgba(10,14,30,0.35)', fontSize: 11 }}>—</span>}
                 </td>
                 <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.instructorId ? getPilotName(pilots, f.instructorId) : '—'}</td>
                 <td style={{ ...TD, color: 'rgba(10,14,30,0.60)', fontSize: 11 }}>
-                  {f.instructorId ? (f.instructorOnboard ? '🪑 à bord' : '📡 au sol') : '—'}
+                  {f.instructorId ? (f.instructorOnboard ? '🪑 on board' : '📡 on ground') : '—'}
                 </td>
                 <td style={TD}>{formatDuration(f.duration)}</td>
                 <td style={TD}><TypeBadge type={f.flightType} /></td>
                 <td style={{ ...TD, color: 'rgba(10,14,30,0.70)' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} ft` : '—'}</td>
-                <td style={TD}><ValidBadge validated={f.validated} /></td>
+                <td style={TD}><ValidBadge validated={!f._pending} /></td>
                 <td style={{ ...TD, textAlign: 'right', paddingRight: 16 }}>
                   <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
-                    {f.validated
+                    {!f._pending
                       ? <>
                           <button onClick={() => onReplay(f.id)} style={REPLAY_BTN}>▶ REPLAY</button>
-                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Modifier l'attribution">✏ ÉDITER</button>
+                          <button onClick={() => onAssign(f)} style={EDIT_BTN} title="Edit assignment">✏ Edit</button>
                         </>
-                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ ASSIGNER</button>}
+                      : <button onClick={() => onAssign(f)} style={ASSIGN_BTN}>✏ Assign</button>}
                     {canDelete && (
                       confirmDelId === f.id
                         ? <button onClick={() => { onDelete(f.id); setConfirmDelId('') }}
-                                  style={DEL_CONFIRM_BTN}>CONFIRMER ?</button>
-                        : <button onClick={() => setConfirmDelId(f.id)} title="Supprimer définitivement"
-                                  style={DEL_BTN}>SUPPR</button>
+                                  style={DEL_CONFIRM_BTN}>Confirm?</button>
+                        : <button onClick={() => setConfirmDelId(f.id)} title="Remove this flight from the logbook"
+                                  style={DEL_BTN}>Delete</button>
                     )}
                   </span>
                 </td>
@@ -549,18 +555,126 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
   )
 }
 
+// ─── CsvImportCard ────────────────────────────────────────────────────────────
+// Import d'un CSV G3X depuis le Logbook (instructor/admin/super_admin).
+// Upload Storage flights/{uid}/{timestamp}_{nom}.csv puis doc /flights non validé :
+// le vol arrive par onSnapshot dans la file « To assign » et s'attribue avec la
+// modale existante. Inspiré de UploadZone (ReplayPage), mais sans assignation inline.
+// Composant top-level : jamais déclaré dans LogbookPage (sinon remount à chaque rendu).
+function CsvImportCard({ clubId }) {
+  const [dragging,  setDragging]  = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [progress,  setProgress]  = useState(0)
+  const [error,     setError]     = useState('')
+  const [info,      setInfo]      = useState('')
+  const inputRef = useRef(null)
+
+  const processFile = async (file) => {
+    if (uploading) return
+    setError(''); setInfo('')
+    if (!file || !file.name.toLowerCase().endsWith('.csv')) { setError('Please select a G3X CSV file'); return }
+    const user = auth.currentUser
+    if (!user)   { setError('You must be signed in to import a flight'); return }
+    if (!clubId) { setError('No club selected'); return }
+    setUploading(true); setProgress(0)
+    try {
+      // Stats extraites si le CSV est lisible ; un échec de parsing n'empêche pas l'import
+      // (le fichier brut reste exploitable), mais on le signale.
+      let stats = null
+      try { stats = parseG3XCSV(await file.text()).stats }
+      catch (e) { console.warn('[Logbook import] CSV parse:', e) }
+
+      const path = `flights/${user.uid}/${Date.now()}_${file.name}`
+      const task = uploadBytesResumable(ref(storage, path), file)
+      await new Promise((resolve, reject) => {
+        task.on('state_changed',
+          snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+          reject,
+          resolve,
+        )
+      })
+
+      await addDoc(collection(db, 'flights'), {
+        clubId,
+        csvStoragePath: path,
+        fileName:       file.name,
+        source:         'dashboard-import',
+        validated:      false,
+        uploadedBy:     user.email || null,
+        createdAt:      serverTimestamp(),
+        uploadedAt:     serverTimestamp(),   // (21/09) champ historique lu par le reste de l'app
+        aircraftIdent:  '',
+        ...(stats ? {
+          startTs:     stats.startTs,
+          endTs:       stats.endTs,
+          duration:    stats.duration,     // champ lu par tout le Logbook (secondes)
+          durationSec: stats.duration,
+          maxAlt:      stats.maxAlt,
+          maxSpd:      stats.maxSpd,
+          maxG:        stats.maxG,
+          maxRpm:      stats.maxRpm,
+          bounds:      stats.bounds,
+        } : {}),
+      })
+      setInfo(stats
+        ? `${file.name} imported — now in the To assign queue`
+        : `${file.name} imported without flight data (CSV not recognised) — now in the To assign queue`)
+    } catch (e) {
+      console.error('[Logbook import]', e)
+      setError('Import failed: ' + e.message)
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div style={{ ...CARD_STYLE, border: '1px solid rgba(10,14,30,0.12)', padding: '14px 20px', marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 10, letterSpacing: 1.5 }}>IMPORT CSV</div>
+        <div
+          onClick={() => !uploading && inputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]) }}
+          style={{
+            flex: 1, minWidth: 220,
+            border: `1px dashed ${dragging ? '#F5A623' : 'rgba(10,14,30,0.2)'}`,
+            background: dragging ? 'rgba(245,166,35,0.06)' : 'transparent',
+            borderRadius: 6, padding: '10px 14px', textAlign: 'center',
+            color: 'rgba(10,14,30,0.55)', fontFamily: 'monospace', fontSize: 12,
+            cursor: uploading ? 'wait' : 'pointer', transition: 'all 0.15s',
+          }}
+        >
+          {uploading ? `Uploading… ${progress}%` : 'Drop a Garmin G3X CSV here'}
+        </div>
+        <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }}
+          onChange={e => processFile(e.target.files[0])} />
+        <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} style={{ ...ASSIGN_BTN, cursor: uploading ? 'wait' : 'pointer' }}>
+          Choose file
+        </button>
+      </div>
+      {error && <div style={{ color: '#ef4444', fontFamily: 'monospace', fontSize: 11, marginTop: 8 }}>⚠ {error}</div>}
+      {info  && <div style={{ color: '#22c55e', fontFamily: 'monospace', fontSize: 11, marginTop: 8 }}>✓ {info}</div>}
+    </div>
+  )
+}
+
 // ─── LogbookPage ──────────────────────────────────────────────────────────────
 
 export default function LogbookPage({ role }) {
-  const { clubId } = useClub()
+  const { clubId, club } = useClub()
   const canDelete = role === 'admin' || role === 'super_admin'
+  const canImport = IMPORT_ROLES.includes(role)
   const [tab,          setTab]          = useState('pilots')
   const [pilots,       setPilots]       = useState([])
   const [aircraft,     setAircraft]     = useState([])
-  const [flights,      setFlights]      = useState([])
-  const [loading,      setLoading]      = useState(true)
+  const [rawFlights,   setRawFlights]   = useState([])
+  const [refsLoading,    setRefsLoading]    = useState(true)
+  const [flightsLoading, setFlightsLoading] = useState(true)
   const [assignFlight, setAssignFlight] = useState(null)
   const navigate = useNavigate()
+  const loading = refsLoading || flightsLoading
 
   const [loadError, setLoadError] = useState(null)
 
@@ -578,62 +692,89 @@ export default function LogbookPage({ role }) {
     return ident => (ident ? (byIdent.get(ident) || ident) : '—')
   }, [aircraft])
 
-  // Charge pilots/aircraft/flights scopés sur le club courant.
+  // Pilots/aircraft : lecture one-shot scopée club, archivés exclus.
   // Vols legacy ESP32 (champ club_id snake_case) ne s'affichent pas — backfill
   // requis pour les voir dans le carnet.
   useEffect(() => {
-    if (!clubId) { setPilots([]); setAircraft([]); setFlights([]); setLoading(false); return }
+    if (!clubId) { setPilots([]); setAircraft([]); setRefsLoading(false); return }
+    let cancelled = false
     async function load() {
-      setLoading(true)
+      setRefsLoading(true)
       setLoadError(null)
       try {
-        const [pilotsSnap, aircraftSnap, flightsSnap] = await Promise.all([
+        const [pilotsSnap, aircraftSnap] = await Promise.all([
           getDocs(query(collection(db, 'pilots'),   where('clubId', '==', clubId))),
           getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
-          getDocs(query(collection(db, 'flights'),  where('clubId', '==', clubId))),
         ])
-        const p = pilotsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true)
-        const a = aircraftSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true)
-        const f = flightsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-        console.log('[Logbook] club:', clubId, 'pilots:', p.length, 'aircraft:', a.length, 'flights:', f.length)
-        setPilots(p)
-        setAircraft(a)
-        setFlights(f)
+        if (cancelled) return
+        setPilots(pilotsSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true))
+        setAircraft(aircraftSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true))
       } catch (e) {
         console.error('Logbook load error:', e)
-        setLoadError(e.message)
+        if (!cancelled) setLoadError(e.message)
       } finally {
-        setLoading(false)
+        if (!cancelled) setRefsLoading(false)
       }
     }
     load()
+    return () => { cancelled = true }
   }, [clubId])
 
-  // ── Sort state ───────────────────────────────────────────────────────────────
-  const [sortPilots,   setSortPilots]   = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
-  const [sortAircraft, setSortAircraft] = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
+  // Flights : temps réel (import, attribution, archivage apparaissent sans recharger).
+  // Les vols archivés (soft delete) sont exclus ICI, donc de toutes les listes/stats.
+  useEffect(() => {
+    if (!clubId) { setRawFlights([]); setFlightsLoading(false); return }
+    setFlightsLoading(true)
+    const unsub = onSnapshot(
+      query(collection(db, 'flights'), where('clubId', '==', clubId)),
+      snap => {
+        setRawFlights(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(f => f.archived !== true))
+        setFlightsLoading(false)
+      },
+      err => {
+        console.error('Logbook flights listener:', err)
+        setLoadError(err.message)
+        setFlightsLoading(false)
+      },
+    )
+    return unsub
+  }, [clubId])
 
-  const handleAssigned = useCallback((flightId, updates) => {
-    setFlights(prev => prev.map(f => f.id === flightId ? { ...f, ...updates } : f))
-  }, [])
+  // _pending = vol dans la file « To assign » (règle needsAssignment : vols
+  // propriétaire déjà attribués exclus). Calculé une fois, lu par tous les rendus.
+  const flights = useMemo(
+    () => rawFlights.map(f => ({ ...f, _pending: needsAssignment(f, aircraft) })),
+    [rawFlights, aircraft],
+  )
+
+  // ── Sort state ─ un état par onglet (Instructors indépendant de Pilots) ──────
+  const [sortPilots,      setSortPilots]      = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
+  const [sortInstructors, setSortInstructors] = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
+  const [sortAircraft,    setSortAircraft]    = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
+
+  // La modale a déjà écrit en base ; onSnapshot rafraîchit la liste. Rien à faire ici.
+  const handleAssigned = useCallback(() => {}, [])
 
   const handleReplay = useCallback(id => navigate(`/replay/${id}`), [navigate])
   const handleAssign = useCallback(f => setAssignFlight(f), [])
 
-  // Suppression définitive (admin) — efface le doc Firestore ; la Cloud Function
-  // onFlightDeleted nettoie les CSV Storage. Retire la ligne de l'état local.
+  // Suppression DOUCE (admin) — jamais de deleteDoc : archived=true + traçabilité.
+  // Le CSV Storage est conservé ; onSnapshot retire la ligne des listes.
   const handleDelete = useCallback(async (id) => {
     try {
-      await deleteDoc(doc(db, 'flights', id))
-      setFlights(prev => prev.filter(f => f.id !== id))
+      await updateDoc(doc(db, 'flights', id), {
+        archived:   true,
+        archivedAt: serverTimestamp(),
+        archivedBy: auth.currentUser?.email || null,
+      })
     } catch (e) {
-      console.error('Delete flight:', e)
-      alert('Suppression refusée : ' + e.message)
+      console.error('Archive flight:', e)
+      alert('Delete refused: ' + e.message)
     }
   }, [])
 
   const totalSeconds  = useMemo(() => flights.reduce((s, f) => s + (f.duration || 0), 0), [flights])
-  const pendingCount  = useMemo(() => flights.filter(f => !f.validated).length, [flights])
+  const pendingCount  = useMemo(() => flights.filter(f => f._pending).length, [flights])
   const instructors   = useMemo(() => pilots.filter(p => p.isInstructor === true), [pilots])
   const regularPilots = useMemo(() => pilots, [pilots])
 
@@ -644,7 +785,7 @@ export default function LogbookPage({ role }) {
       const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
       return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
-    if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => a.lastName.localeCompare(b.lastName))
+    if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
     if (sortPilots === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
     if (sortPilots === 'hours')      return [...withStats].sort((a, b) => b._totalSecs - a._totalSecs)
     return withStats
@@ -656,11 +797,11 @@ export default function LogbookPage({ role }) {
       const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
       return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
-    if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => a.lastName.localeCompare(b.lastName))
-    if (sortPilots === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
-    if (sortPilots === 'hours')      return [...withStats].sort((a, b) => b._totalSecs - a._totalSecs)
+    if (sortInstructors === 'alpha')      return [...withStats].sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
+    if (sortInstructors === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
+    if (sortInstructors === 'hours')      return [...withStats].sort((a, b) => b._totalSecs - a._totalSecs)
     return withStats
-  }, [instructors, flights, sortPilots])
+  }, [instructors, flights, sortInstructors])
 
   const sortedAircraft = useMemo(() => {
     const withStats = aircraft.map(ac => {
@@ -669,7 +810,7 @@ export default function LogbookPage({ role }) {
       const last = acFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
       return { ...ac, _totalSecs: acFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
     })
-    if (sortAircraft === 'alpha')      return [...withStats].sort((a, b) => (a.callSign || a.registration).localeCompare(b.callSign || b.registration))
+    if (sortAircraft === 'alpha')      return [...withStats].sort((a, b) => (a.callSign || a.registration || '').localeCompare(b.callSign || b.registration || ''))
     if (sortAircraft === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
     if (sortAircraft === 'hours')      return [...withStats].sort((a, b) => b._totalSecs - a._totalSecs)
     return withStats
@@ -678,7 +819,7 @@ export default function LogbookPage({ role }) {
   // ── Sort bar component ────────────────────────────────────────────────────────
   const SortBar = ({ value, onChange, options }) => (
     <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center' }}>
-      <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.2, marginRight: 4 }}>TRIER PAR</span>
+      <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.2, marginRight: 4 }}>SORT BY</span>
       {options.map(opt => (
         <button key={opt.key} onClick={() => onChange(opt.key)} style={{
           background: value === opt.key ? 'rgba(10,14,30,0.08)' : 'transparent',
@@ -693,15 +834,17 @@ export default function LogbookPage({ role }) {
     </div>
   )
 
-  const PILOT_SORTS    = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Dernier vol' }, { key: 'hours', label: 'Heures ↓' }]
-  const AIRCRAFT_SORTS = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Dernière sortie' }, { key: 'hours', label: 'Heures ↓' }]
+  const PILOT_SORTS    = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
+  const AIRCRAFT_SORTS = [{ key: 'alpha', label: 'A→Z' }, { key: 'lastFlight', label: 'Last flight' }, { key: 'hours', label: 'Hours ↓' }]
 
   const TABS = [
-    { key: 'pilots',      label: `👤 PILOTES (${regularPilots.length})` },
-    { key: 'instructors', label: `🎓 INSTRUCTEURS (${instructors.length})` },
-    { key: 'aircraft',    label: `✈ AVIONS (${aircraft.length})` },
-    { key: 'matrix',      label: pendingCount > 0 ? `⚠ TOUS LES VOLS  ${pendingCount} en attente` : '☰ TOUS LES VOLS' },
+    { key: 'pilots',      label: `👤 Pilots (${regularPilots.length})` },
+    { key: 'instructors', label: `🎓 Instructors (${instructors.length})` },
+    { key: 'aircraft',    label: `✈ Aircraft (${aircraft.length})` },
+    { key: 'matrix',      label: pendingCount > 0 ? `⚠ All flights  ${pendingCount} to assign` : '☰ All flights' },
   ]
+
+  const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: '#f0f2f8', fontFamily: 'monospace' }}>
@@ -709,9 +852,9 @@ export default function LogbookPage({ role }) {
 
         <div style={{ marginBottom: 28 }}>
           <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 10, letterSpacing: 2.5, marginBottom: 6 }}>
-            ULM BAISY-THY · EBBY · {new Date().getFullYear()}
+            {clubLine}
           </div>
-          <h1 style={{ color: '#0a0e1e', fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: 1 }}>CARNET DE ROUTE</h1>
+          <h1 style={{ color: '#0a0e1e', fontSize: 22, fontWeight: 700, margin: 0, letterSpacing: 1 }}>Logbook</h1>
         </div>
 
         {loadError && (
@@ -720,7 +863,7 @@ export default function LogbookPage({ role }) {
             borderRadius: 8, padding: '12px 16px', marginBottom: 20,
             color: '#ef4444', fontFamily: 'monospace', fontSize: 12,
           }}>
-            ❌ Erreur chargement Firestore : {loadError}
+            ❌ Could not load the logbook: {loadError}
           </div>
         )}
 
@@ -730,19 +873,21 @@ export default function LogbookPage({ role }) {
             borderRadius: 8, padding: '12px 16px', marginBottom: 20,
             color: '#F5A623', fontFamily: 'monospace', fontSize: 12,
           }}>
-            ⚠ Firestore accessible mais collections vides — ouvre la console (F12) pour les logs
+            No data for this club yet.
           </div>
         )}
 
         {!loading && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 24 }}>
-            <StatCard label="PILOTES"              value={regularPilots.length} />
-            <StatCard label="INSTRUCTEURS"        value={instructors.length} />
-            <StatCard label="AVIONS"              value={aircraft.length} />
-            <StatCard label="VOLS TOTAL"          value={flights.length} />
-            <StatCard label="HEURES TOTALES"      value={formatDuration(totalSeconds)} accent />
+            <StatCard label="PILOTS"              value={regularPilots.length} />
+            <StatCard label="INSTRUCTORS"         value={instructors.length} />
+            <StatCard label="AIRCRAFT"            value={aircraft.length} />
+            <StatCard label="TOTAL FLIGHTS"       value={flights.length} />
+            <StatCard label="TOTAL HOURS"         value={formatDuration(totalSeconds)} accent />
           </div>
         )}
+
+        {canImport && <CsvImportCard clubId={clubId} />}
 
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, border: '1px solid rgba(10,14,30,0.12)', borderRadius: 8, overflow: 'hidden', width: 'fit-content' }}>
           {TABS.map((t, i) => (
@@ -761,7 +906,7 @@ export default function LogbookPage({ role }) {
 
         {loading ? (
           <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 80, fontSize: 13 }}>
-            Chargement du carnet de route…
+            Loading logbook…
           </div>
         ) : (
           <>
@@ -769,16 +914,16 @@ export default function LogbookPage({ role }) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedPilots.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>Aucun pilote dans le club</div>}
+                  {sortedPilots.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No pilots in this club</div>}
                   {sortedPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}
             {tab === 'instructors' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
+                <SortBar value={sortInstructors} onChange={setSortInstructors} options={PILOT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedInstructors.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>Aucun instructeur — vérifier isInstructor dans ADMIN</div>}
+                  {sortedInstructors.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No instructors — check the instructor flag in Admin</div>}
                   {sortedInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
@@ -787,7 +932,7 @@ export default function LogbookPage({ role }) {
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortAircraft} onChange={setSortAircraft} options={AIRCRAFT_SORTS} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {sortedAircraft.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>Aucun avion dans le club</div>}
+                  {sortedAircraft.length === 0 && <div style={{ color: 'rgba(10,14,30,0.35)', textAlign: 'center', paddingTop: 48 }}>No aircraft in this club</div>}
                   {sortedAircraft.map(ac => <AircraftCard key={ac.id} ac={ac} flights={flights} pilots={pilots} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>

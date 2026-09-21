@@ -1,12 +1,12 @@
 // src/components/logbook/FlightAssignModal.jsx
-// Le rôle du vol est auto-dérivé du profil pilote (pilots.role)
-// Student → section instructeur obligatoire
-// Pilot/Instructor/Admin → SOLO, pas d'instructeur
+// Le rôle du vol est auto-dérivé du profil pilote via isStudent() (logbookUtils) :
+// licence === 'student' → élève → section instructeur obligatoire
+// tout le reste (y compris licence absente) → breveté → SOLO, pas d'instructeur
 
 import { useState, useMemo } from 'react'
 import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../../firebase/config'
-import { formatDate, formatDuration, deriveFlightType, FLIGHT_TYPES } from '../../utils/logbookUtils'
+import { formatDateTime, formatDuration, deriveFlightType, isStudent as pilotIsStudent, ownerPilotIdFor, FLIGHT_TYPES } from '../../utils/logbookUtils'
 
 export default function FlightAssignModal({ flight, pilots, aircraft, onSave, onClose }) {
   // callSign = identifiant canonique. Résout un aircraftIdent legacy (ancienne registration
@@ -15,11 +15,8 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
     const a = aircraft.find(x => x.callSign === cur || x.registration === cur)
     return a ? (a.callSign || a.registration) : cur
   }
-  // Avion 'owner' → son propriétaire (pilote) = pilote par défaut du vol.
-  const ownerFor = (cs) => {
-    const a = aircraft.find(x => x.callSign === cs || x.registration === cs)
-    return (a && a.ownership === 'owner' && a.ownerPilotId) ? a.ownerPilotId : ''
-  }
+  // Avion 'owner' → son propriétaire (pilote) = pilote par défaut du vol (règle partagée).
+  const ownerFor = (cs) => ownerPilotIdFor(aircraft, cs)
   const initIdent = resolveIdent(flight.aircraftIdent || '')
   const [aircraftIdent, setAircraftIdent] = useState(initIdent)
   const [pilotId,           setPilotId]           = useState(flight.pilotId || ownerFor(initIdent))
@@ -33,13 +30,17 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
   // Édition d'un vol DÉJÀ validé (réattribution) vs première assignation.
   const isEdit = !!flight.validated
 
-  // Statut de vol = champ licence du profil (pas le rôle plateforme)
-  // licence='pilot' → breveté → SOLO
-  // licence='student' ou absent → en formation → instructor requis
+  // Statut de vol = champ licence du profil (pas le rôle plateforme), règle unique
+  // isStudent() de logbookUtils : 'student' → élève (instructeur requis), sinon breveté.
   const selectedPilot = useMemo(() => pilots.find(p => p.id === pilotId), [pilots, pilotId])
-  const isLicensed    = selectedPilot?.licence === 'pilot'
-  const pilotRole     = isLicensed ? 'pilot' : 'student'
-  const isStudent     = !isLicensed
+  // VOL PROPRIÉTAIRE : avion owner piloté par son propriétaire → pilot, solo, sans
+  // instructeur, quelle que soit la licence du profil. Si un autre pilote est choisi à
+  // la main (cas rare), la règle normale isStudent() s'applique.
+  const ownerId       = ownerFor(aircraftIdent)
+  const isOwnerFlight = !!ownerId && pilotId === ownerId
+  const isStudent     = !isOwnerFlight && pilotIsStudent(selectedPilot)
+  const isLicensed    = !isStudent
+  const pilotRole     = isStudent ? 'student' : 'pilot'
 
   // Instructeurs = pilots avec isInstructor=true
   const instructors = pilots.filter(p => p.isInstructor === true)
@@ -71,7 +72,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
       onSave(flight.id, updates)
       onClose()
     } catch (e) {
-      setError('Erreur : ' + e.message)
+      setError('Error: ' + e.message)
       setSaving(false)
     }
   }
@@ -116,36 +117,41 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
           <div style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 2, marginBottom: 6 }}>
-            {isEdit ? 'ÉDITER LE VOL' : 'ASSIGNATION VOL'}
+            {isEdit ? 'Edit flight' : 'Assign flight'}
           </div>
           <div style={{ color: '#0a0e1e', fontSize: 15, fontWeight: 700 }}>
             {flight.fileName || flight.id}
           </div>
           <div style={{ color: 'rgba(10,14,30,0.5)', fontSize: 12, marginTop: 4 }}>
-            {formatDate(flight.startTs)} · {formatDuration(flight.duration)}
+            {formatDateTime(flight.startTs)} · {formatDuration(flight.duration)}
             {flight.maxAlt ? ` · ${Math.round(flight.maxAlt)} ft max` : ''}
             {flight.maxSpd ? ` · ${Math.round(flight.maxSpd * 1.852)} km/h max` : ''}
           </div>
         </div>
 
-        {/* Aéronef */}
+        {/* Aircraft */}
         <div style={{ marginBottom: 18 }}>
-          <label style={lbl}>AÉRONEF</label>
-          <select value={aircraftIdent} onChange={e => { const cs = e.target.value; setAircraftIdent(cs); const o = ownerFor(cs); if (o && !pilotId) setPilotId(o) }} style={sel}>
-            <option value="">Sélectionner un avion…</option>
+          <label style={lbl}>AIRCRAFT</label>
+          <select value={aircraftIdent} onChange={e => { const cs = e.target.value; setAircraftIdent(cs); const o = ownerFor(cs); if (o) { setPilotId(o); setInstructorId('') } }} style={sel}>
+            <option value="">Select an aircraft…</option>
             {aircraft.map(a => { const cs = a.callSign || a.registration; return (
               <option key={a.id} value={cs}>
                 {cs} — {a.typeDesig || a.type}
               </option>
             )})}
           </select>
+          {ownerId && (
+            <div style={{ color: 'rgba(10,14,30,0.55)', fontSize: 11, marginTop: 6 }}>
+              Owner aircraft — pilot set to the owner
+            </div>
+          )}
         </div>
 
         {/* Pilote */}
         <div style={{ marginBottom: 18 }}>
-          <label style={lbl}>PILOTE AUX COMMANDES</label>
+          <label style={lbl}>PILOT AT THE CONTROLS</label>
           <select value={pilotId} onChange={e => { setPilotId(e.target.value); setInstructorId('') }} style={sel}>
-            <option value="">Sélectionner un pilote…</option>
+            <option value="">Select a pilot…</option>
             {pilots.map(p => (
               <option key={p.id} value={p.id}>
                 {p.firstName} {p.lastName}
@@ -163,17 +169,17 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             background: 'rgba(10,14,30,0.03)', border: '1px solid rgba(10,14,30,0.08)',
             borderRadius: 8, padding: '10px 14px', marginBottom: 18,
           }}>
-            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>STATUT VOL</span>
+            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHT STATUS</span>
             {isLicensed ? (
               <span style={{ color: '#22c55e', fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
-                ✈ PILOT{selectedPilot.isInstructor ? ' · INSTRUCTEUR' : ''}
+                ✈ PILOT{selectedPilot.isInstructor ? ' · INSTRUCTOR' : ''}
               </span>
             ) : (
               <span style={{ color: '#60a5fa', fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
-                🎓 STUDENT — instructor requis
+                🎓 STUDENT — instructor required
               </span>
             )}
-            <span style={{ marginLeft: 'auto', color: 'rgba(10,14,30,0.3)', fontSize: 10 }}>depuis profil</span>
+            <span style={{ marginLeft: 'auto', color: 'rgba(10,14,30,0.3)', fontSize: 10 }}>from profile</span>
           </div>
         )}
 
@@ -185,9 +191,9 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             borderRadius: 8, padding: '16px', marginBottom: 18,
           }}>
             <div style={{ marginBottom: 14 }}>
-              <label style={lbl}>INSTRUCTEUR</label>
+              <label style={lbl}>INSTRUCTOR</label>
               <select value={instructorId} onChange={e => setInstructorId(e.target.value)} style={sel}>
-                <option value="">Sélectionner un instructeur…</option>
+                <option value="">Select an instructor…</option>
                 {instructors.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}
@@ -196,14 +202,14 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
               </select>
               {instructors.length === 0 && (
                 <div style={{ color: '#F5A623', fontSize: 11, marginTop: 6 }}>
-                  Aucun instructeur — vérifier les rôles dans ADMIN
+                  No instructor — check roles in Admin
                 </div>
               )}
             </div>
-            <label style={{ ...lbl, marginBottom: 8 }}>PRÉSENCE INSTRUCTEUR</label>
+            <label style={{ ...lbl, marginBottom: 8 }}>INSTRUCTOR PRESENCE</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <RadioBtn label="🪑 À BORD"  active={instructorOnboard === true}  onClick={() => setInstructorOnboard(true)} />
-              <RadioBtn label="📡 AU SOL"  active={instructorOnboard === false} onClick={() => setInstructorOnboard(false)} />
+              <RadioBtn label="🪑 ON BOARD"  active={instructorOnboard === true}  onClick={() => setInstructorOnboard(true)} />
+              <RadioBtn label="📡 ON GROUND"  active={instructorOnboard === false} onClick={() => setInstructorOnboard(false)} />
             </div>
           </div>
         )}
@@ -215,7 +221,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             background: 'rgba(10,14,30,0.03)', border: '1px solid rgba(10,14,30,0.08)',
             borderRadius: 6, padding: '10px 14px', marginBottom: 22,
           }}>
-            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>TYPE DE VOL</span>
+            <span style={{ color: 'rgba(10,14,30,0.4)', fontSize: 10, letterSpacing: 1.5 }}>FLIGHT TYPE</span>
             <span style={{ color: ft.color, fontFamily: 'monospace', fontSize: 13, fontWeight: 700 }}>
               {ft.label.toUpperCase()}
             </span>
@@ -232,7 +238,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             color: 'rgba(10,14,30,0.5)', fontFamily: 'monospace',
             fontSize: 12, padding: '8px 18px', borderRadius: 6, cursor: 'pointer',
           }}>
-            ANNULER
+            Cancel
           </button>
           <button onClick={handleSave} disabled={!canSave || saving} type="button" style={{
             background: canSave && !saving ? '#0a0e1e' : 'rgba(10,14,30,0.06)',
@@ -243,7 +249,7 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
             cursor: canSave && !saving ? 'pointer' : 'not-allowed',
             letterSpacing: 0.5, transition: 'all 0.15s',
           }}>
-            {saving ? '…' : (isEdit ? '✓ ENREGISTRER' : '✓ VALIDER LE VOL')}
+            {saving ? '…' : (isEdit ? '✓ Save' : '✓ Validate flight')}
           </button>
         </div>
       </div>

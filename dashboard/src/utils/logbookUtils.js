@@ -18,6 +18,8 @@
 //
 //   validated       : boolean       ← admin has assigned pilot+aircraft (default false)
 //   clubId          : string
+//   archived        : boolean       ← soft delete (never deleteDoc) + archivedAt, archivedBy
+//   source          : 'dashboard-import' | …  ← origin of the doc (Logbook CSV import)
 //
 //   fileName, csvStoragePath, csvUrl, startTs, endTs
 //   duration (seconds), maxAlt (ft), maxSpd (kt), maxG, maxRpm, bounds
@@ -69,15 +71,32 @@ export function icaoFlag(icao) {
   return countryFlag(icaoCountry(icao))
 }
 
-export function formatDate(ts, short = false) {
-  if (!ts) return '—'
+/**
+ * Single date format across the Logbook: « 21 Sep 2026 » (en-GB, UTC).
+ * UTC because every timestamp in the system (CSV, FDR, Firestore) is UTC — a local
+ * rendering would shift a late-evening flight to the next day.
+ * Mois en dur : toLocaleDateString('en-GB', {month:'short'}) donne « Sept » avec le
+ * CLDR récent (Chrome, Node) — on veut « Sep » partout, quel que soit le navigateur.
+ */
+const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+export function formatDate(ts) {
+  if (ts == null || ts === '') return '—'
   try {
     const d = ts?.toDate ? ts.toDate() : new Date(ts)
-    if (short) return d.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    return (
-      d.toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
-      ' ' + d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })
-    )
+    if (isNaN(d.getTime())) return '—'
+    return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS_EN[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+  } catch { return '—' }
+}
+
+/** « 21 Sep 2026 · 14:32 UTC » — same date format plus the UTC time. */
+export function formatDateTime(ts) {
+  if (ts == null || ts === '') return '—'
+  try {
+    const d = ts?.toDate ? ts.toDate() : new Date(ts)
+    if (isNaN(d.getTime())) return '—'
+    const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+    return `${formatDate(ts)} · ${time} UTC`
   } catch { return '—' }
 }
 
@@ -100,6 +119,39 @@ export function sortByDateDesc(arr) {
   return [...arr].sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))
 }
 
+/**
+ * RÈGLE UNIQUE de dérivation du statut d'un pilote pour un vol.
+ * Un pilote est élève UNIQUEMENT si son profil porte licence === 'student'.
+ * Absence du champ licence → breveté (pilot) : c'est le cas majoritaire en base et
+ * l'ancien défaut inverse (pas de licence → élève) réclamait un instructeur à tort.
+ * Seul un élève exige un instructeur à l'assignation.
+ */
+export function isStudent(pilot) {
+  return pilot?.licence === 'student'
+}
+
+/**
+ * VOLS PROPRIÉTAIRE — avion ownership === 'owner' avec ownerPilotId : piloté par son
+ * propriétaire. Renvoie l'id du pilote propriétaire de l'avion identifié par `ident`
+ * (callSign canonique OU registration legacy), '' sinon.
+ */
+export function ownerPilotIdFor(aircraft, ident) {
+  if (!ident) return ''
+  const a = (aircraft || []).find(x => x.callSign === ident || x.registration === ident)
+  return (a && a.ownership === 'owner' && a.ownerPilotId) ? a.ownerPilotId : ''
+}
+
+/**
+ * Un vol est « To assign » s'il n'est pas validé, SAUF vol propriétaire dont le pilote
+ * est déjà renseigné (attribution automatique : rien à demander). Un vol propriétaire
+ * sans pilotId (import) reste dans la file ; la modale le pré-remplit.
+ */
+export function needsAssignment(flight, aircraft) {
+  if (flight.validated) return false
+  if (flight.pilotId && ownerPilotIdFor(aircraft, flight.aircraftIdent)) return false
+  return true
+}
+
 // Derive flightType from assignment fields
 export function deriveFlightType(pilotRole, instructorId, instructorOnboard) {
   if (!pilotRole) return null
@@ -113,13 +165,13 @@ export function deriveFlightType(pilotRole, instructorId, instructorOnboard) {
 
 export const FLIGHT_TYPES = {
   solo:            { label: 'Solo',              short: 'SOLO',   color: '#22c55e' },
-  dual:            { label: 'Double commande',   short: 'DBL CMD', color: '#F5A623' },
-  solo_supervised: { label: 'Solo supervisé',    short: 'SUPERVISÉ', color: '#60a5fa' },
-  rental:          { label: 'Location',          short: 'LOCATION', color: '#a78bfa' },
+  dual:            { label: 'Dual',              short: 'DUAL',   color: '#F5A623' },
+  solo_supervised: { label: 'Supervised solo',   short: 'SUPERVISED', color: '#60a5fa' },
+  rental:          { label: 'Rental',            short: 'RENTAL', color: '#a78bfa' },
   // Pas un vol : démarrage/roulage/artefact d'enregistrement (jamais décollé). Marqué à
   // l'import pour rester filtrable et supprimable en lot, sans polluer les totaux d'heures.
   // deriveFlightType ne le produit jamais — il n'est posé que par un import explicite.
-  ground:          { label: 'Sol / roulage',     short: 'SOL',    color: '#6b7c8d' },
+  ground:          { label: 'Ground / taxi',     short: 'GROUND', color: '#6b7c8d' },
 }
 
 export function getPilotName(pilots, id) {

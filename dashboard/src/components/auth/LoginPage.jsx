@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { signInWithPopup, signInWithRedirect } from 'firebase/auth'
 import { auth, provider } from '../../firebase/config'
+import { AirKiLockup } from '../ui/AirKiMark'
 
 export default function LoginPage() {
   const [error, setError] = useState('')
@@ -34,24 +35,26 @@ export default function LoginPage() {
     <div style={{
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
-      height: '100vh', background: '#0a0f1e',
-      color: 'white', fontFamily: 'monospace',
+      height: '100vh', background: 'var(--ink)',   // (21/09) encre AirKi — plus de bleu nuit (règle « pas de navy »)
+      color: '#FFFFFF', fontFamily: 'var(--font-sans)',
     }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✈️ AeroTrace</h1>
-      <p style={{ color: '#888', marginBottom: '2rem' }}>Instructor Dashboard</p>
+      <div style={{ marginBottom: '2rem' }}>
+        {/* lockup 64 px avec baseline « Not alone in the sky » (affichée à partir de 60 px, règle de marque) */}
+        <AirKiLockup size={64} color="#FFFFFF" baseline />
+      </div>
       <button
         onClick={handleLogin}
         disabled={busy}
         style={{
-          padding: '12px 32px', fontSize: '1rem',
-          background: busy ? '#3b5da8' : '#1a73e8', color: 'white',
-          border: 'none', borderRadius: '8px', cursor: busy ? 'default' : 'pointer',
+          padding: '11px 22px', fontSize: 14, fontWeight: 500, fontFamily: 'var(--font-sans)',
+          background: '#FFFFFF', color: 'var(--ink)', opacity: busy ? 0.7 : 1,   // primaire sur encre = blanc / texte encre
+          border: 'none', borderRadius: 4, cursor: busy ? 'default' : 'pointer',
         }}
       >
-        {busy ? 'Connexion…' : 'Se connecter avec Google'}
+        {busy ? 'Signing in…' : 'Continue with Google'}
       </button>
       {error && (
-        <div style={{ color: '#ef4444', fontSize: 12, marginTop: 18, maxWidth: 360, textAlign: 'center', lineHeight: 1.5 }}>
+        <div style={{ color: '#FFFFFF', fontSize: 12, marginTop: 18, maxWidth: 360, textAlign: 'center', lineHeight: 1.5 }}>
           {error}
         </div>
       )}

@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { collection, addDoc, getDocs, getDoc, doc, onSnapshot, query, orderBy, serverTimestamp, where } from 'firebase/firestore'
+import { collection, getDoc, doc, onSnapshot, query, where } from 'firebase/firestore'
 import { useClub } from '../contexts/ClubContext'
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
-import { db, storage, auth } from '../firebase/config'
+import { ref, getDownloadURL } from 'firebase/storage'
+import { db, storage } from '../firebase/config'
 import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
-import { deriveFlightType, FLIGHT_TYPES } from '../utils/logbookUtils'
 import SixPack from '../components/ui/SixPack'
 import ReplayMap from '../components/map/ReplayMap'
 import FlightCharts from '../components/replay/FlightCharts'
@@ -54,182 +53,6 @@ function fmtUTC(ts) {
 
 function fmtDate(ts) {
   return new Date(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
-}
-
-// ─── Upload + parse flight CSV ────────────────────────────────────────────────
-// Ne crée PAS le doc Firestore — appelle onUploaded avec les données brutes
-// L'écriture se fait après assignation pilote/avion dans AssignAfterUpload
-function UploadZone({ onUploaded }) {
-  const [dragging, setDragging]   = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [progress, setProgress]   = useState(0)
-  const [error, setError]         = useState(null)
-  const inputRef = useRef(null)
-
-  const processFile = async (file) => {
-    if (!file || !file.name.endsWith('.csv')) return setError('Please select a G3X CSV file')
-    setUploading(true); setError(null)
-    try {
-      const text   = await file.text()
-      const parsed = parseG3XCSV(text)
-      const path   = `flights/${auth.currentUser.uid}/${Date.now()}_${file.name}`
-      const uploadTask = uploadBytesResumable(ref(storage, path), file)
-      uploadTask.on('state_changed',
-        snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-        err  => { setError(err.message); setUploading(false) },
-        async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref)
-          onUploaded({ parsed, path, url, fileName: file.name })
-          setUploading(false)
-        }
-      )
-    } catch (e) { setError(e.message); setUploading(false) }
-  }
-
-  return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDragOver={e => { e.preventDefault(); setDragging(true) }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]) }}
-      style={{
-        border: `2px dashed ${dragging ? C.amber : C.border}`,
-        borderRadius: 12, padding: '32px 24px', textAlign: 'center',
-        cursor: 'pointer', transition: 'all 0.2s',
-        background: dragging ? C.amber10 : 'transparent',
-      }}
-    >
-      <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }}
-        onChange={e => processFile(e.target.files[0])} />
-
-      {uploading ? (
-        <div>
-          <div style={{ fontFamily: C.mono, fontSize: 11, color: C.amber, marginBottom: 12 }}>
-            UPLOADING & PARSING... {progress}%
-          </div>
-          <div style={{ height: 4, background: C.border, borderRadius: 2 }}>
-            <div style={{ height: '100%', width: `${progress}%`, background: C.amber,
-              borderRadius: 2, transition: 'width 0.2s' }} />
-          </div>
-        </div>
-      ) : (
-        <>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>✈</div>
-          <div style={{ fontFamily: C.mono, fontSize: 11, color: C.text, marginBottom: 6 }}>
-            DROP GARMIN G3X CSV HERE
-          </div>
-          <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>
-            or click to browse
-          </div>
-          {error && (
-            <div style={{ marginTop: 12, fontFamily: C.mono, fontSize: 10, color: C.red }}>
-              ⚠ {error}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-// ─── Assignation post-upload ──────────────────────────────────────────────────
-const RadioBtn = ({ label, active, onClick }) => (
-  <button onClick={onClick} type="button" style={{ flex: 1, padding: '4px 0', background: active ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${active ? 'rgba(245,166,35,0.5)' : 'rgba(255,255,255,0.08)'}`, color: active ? '#F5A623' : 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>{label}</button>
-)
-
-function AssignAfterUpload({ uploadData, pilots, aircraft, onSaved, onCancel }) {
-  const { parsed, path, url, fileName } = uploadData
-  const [aircraftIdent,     setAircraftIdent]     = useState(parsed.airframe?.aircraft_ident || '')
-  const [pilotId,           setPilotId]           = useState('')
-  const [instructorId,      setInstructorId]      = useState('')
-  const [instructorOnboard, setInstructorOnboard] = useState(true)
-  const [saving,            setSaving]            = useState(false)
-
-  const selectedPilot  = pilots.find(p => p.id === pilotId)
-  const isStudent      = selectedPilot?.licence === 'student'
-  const pilotRole      = isStudent ? 'student' : 'pilot'
-  const instructors    = pilots.filter(p => p.isInstructor === true)
-  const flightType     = deriveFlightType(pilotRole, isStudent ? instructorId : null, instructorOnboard)
-  const ft             = flightType ? FLIGHT_TYPES[flightType] : null
-  const canSave        = aircraftIdent && pilotId && (!isStudent || instructorId)
-
-  const sel = { background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.1)', color: '#0a0e1e', fontFamily: 'monospace', fontSize: 11, padding: '5px 8px', borderRadius: 4, width: '100%', outline: 'none', cursor: 'pointer' }
-  const lbl = { display: 'block', color: 'rgba(0,0,0,0.45)', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 }
-
-  const handleSave = async () => {
-    if (!canSave || saving) return
-    setSaving(true)
-    try {
-      const flightDoc = await addDoc(collection(db, 'flights'), {
-        fileName, csvStoragePath: path, csvUrl: url,
-        aircraftIdent, pilotId, pilotRole,
-        clubId: selectedPilot?.clubId ?? null,
-        instructorId:      isStudent ? instructorId      : null,
-        instructorOnboard: isStudent ? instructorOnboard : null,
-        flightType, validated: true,
-        startTs: parsed.stats.startTs, endTs: parsed.stats.endTs,
-        duration: parsed.stats.duration, maxAlt: parsed.stats.maxAlt,
-        maxSpd: parsed.stats.maxSpd, maxG: parsed.stats.maxG,
-        maxRpm: parsed.stats.maxRpm, bounds: parsed.stats.bounds,
-        uploadedAt: serverTimestamp(),
-      })
-      onSaved({ ...parsed, flightId: flightDoc.id })
-    } catch (e) { console.error(e) }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <div style={{ padding: '10px 8px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-      <div style={{ color: '#F5A623', fontFamily: 'monospace', fontSize: 9, letterSpacing: 1.5, marginBottom: 10 }}>ASSIGNER CE VOL</div>
-      <div style={{ marginBottom: 10 }}>
-        <span style={lbl}>AÉRONEF</span>
-        <select value={aircraftIdent} onChange={e => setAircraftIdent(e.target.value)} style={sel}>
-          <option value="">Sélectionner…</option>
-          {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
-        </select>
-      </div>
-      <div style={{ marginBottom: 10 }}>
-        <span style={lbl}>PILOTE</span>
-        <select value={pilotId} onChange={e => { setPilotId(e.target.value); setInstructorId('') }} style={sel}>
-          <option value="">Sélectionner…</option>
-          {pilots.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}</option>)}
-        </select>
-      </div>
-      {selectedPilot && (
-        <div style={{ color: isStudent ? '#60a5fa' : '#22c55e', fontFamily: 'monospace', fontSize: 10, marginBottom: 10 }}>
-          {isStudent ? '🎓 STUDENT — instructor requis' : '✈ PILOT — vol solo'}
-        </div>
-      )}
-      {isStudent && pilotId && (
-        <div style={{ background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 6, padding: '8px', marginBottom: 10 }}>
-          <div style={{ marginBottom: 8 }}>
-            <span style={lbl}>INSTRUCTEUR</span>
-            <select value={instructorId} onChange={e => setInstructorId(e.target.value)} style={sel}>
-              <option value="">Sélectionner…</option>
-              {instructors.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}{p.trigram ? ` (${p.trigram})` : ''}</option>)}
-            </select>
-          </div>
-          <span style={lbl}>PRÉSENCE</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <RadioBtn label="🪑 À BORD"  active={instructorOnboard === true}  onClick={() => setInstructorOnboard(true)} />
-            <RadioBtn label="📡 AU SOL" active={instructorOnboard === false} onClick={() => setInstructorOnboard(false)} />
-          </div>
-        </div>
-      )}
-      {ft && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '4px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: 4 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: ft.color }} />
-          <span style={{ color: ft.color, fontFamily: 'monospace', fontSize: 10 }}>{ft.label.toUpperCase()}</span>
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button onClick={onCancel} style={{ flex: 1, padding: '5px 0', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace', fontSize: 10, borderRadius: 4, cursor: 'pointer' }}>ANNULER</button>
-        <button onClick={handleSave} disabled={!canSave || saving} style={{ flex: 2, padding: '5px 0', background: canSave && !saving ? 'rgba(245,166,35,0.15)' : 'rgba(255,255,255,0.04)', border: `1px solid ${canSave && !saving ? 'rgba(245,166,35,0.4)' : 'rgba(255,255,255,0.06)'}`, color: canSave && !saving ? '#F5A623' : 'rgba(255,255,255,0.2)', fontFamily: 'monospace', fontSize: 10, fontWeight: 700, borderRadius: 4, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
-          {saving ? '…' : '✓ VALIDER'}
-        </button>
-      </div>
-    </div>
-  )
 }
 
 // ─── Flight list item ─────────────────────────────────────────────────────────
@@ -393,8 +216,11 @@ function DataStrip({ frame }) {
 }
 
 // ─── Main REPLAY page ─────────────────────────────────────────────────────────
-export default function ReplayPage({ user }) {
+// Loop = relecture seule. L'import CSV et l'attribution pilote/avion vivent dans le Logbook.
+export default function ReplayPage({ role }) {
   const { flightId }  = useParams()
+  const navigate      = useNavigate()
+  const canLogbook    = role === 'instructor' || role === 'admin' || role === 'super_admin'
   const { clubId }    = useClub()
   const [flights,      setFlights]      = useState([])
   const [selected,     setSelected]     = useState(null)
@@ -402,10 +228,6 @@ export default function ReplayPage({ user }) {
   const [currentTs,    setCurrentTs]    = useState(0)
   const [playing,      setPlaying]      = useState(false)
   const [speed,        setSpeed]        = useState(1)
-  const [showUpload,   setShowUpload]   = useState(false)
-  const [pendingUpload, setPendingUpload] = useState(null)
-  const [pilots,       setPilots]       = useState([])
-  const [aircraft,     setAircraft]     = useState([])
   const [sideOpen,     setSideOpen]     = useState(true)
   const [is3D,         setIs3D]         = useState(false)
   const animRef     = useRef(null)
@@ -448,24 +270,10 @@ export default function ReplayPage({ user }) {
     if (!clubId) { setFlights([]); return }
     const q = query(collection(db, 'flights'), where('clubId', '==', clubId))
     return onSnapshot(q, snap => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(f => f.archived !== true)   // soft-delete : archivés masqués
       docs.sort((a, b) => (b.startTs || 0) - (a.startTs || 0))
       setFlights(docs)
     })
-  }, [clubId])
-
-  // ── Charger pilots + aircraft du club courant pour AssignAfterUpload ─────
-  useEffect(() => {
-    if (!clubId) { setPilots([]); setAircraft([]); return }
-    async function load() {
-      const [ps, as] = await Promise.all([
-        getDocs(query(collection(db, 'pilots'),   where('clubId', '==', clubId))),
-        getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
-      ])
-      setPilots(ps.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.archived !== true))
-      setAircraft(as.docs.map(d => ({ id: d.id, ...d.data() })).filter(a => a.archived !== true))
-    }
-    load()
   }, [clubId])
 
   // ── Auto-load depuis URL /replay/:flightId (vient du Logbook) ─────────────
@@ -504,13 +312,16 @@ export default function ReplayPage({ user }) {
 
   const handlePlayPause = () => { lastTimeRef.current = null; setPlaying(p => !p) }
   const handleSeek = (ts) => { lastTimeRef.current = null; setCurrentTs(ts); setPlaying(false) }
-  const handleUploaded = (data) => { setPendingUpload(data); setShowUpload(false) }
-  const handleSaved = (data) => { setParsed(data); setCurrentTs(data.frames[0].ts); setPlaying(false); setPendingUpload(null) }
 
   const currentFrame = parsed ? getFrameAtTime(parsed.frames, currentTs) : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bg, overflow: 'hidden' }}>
+
+      {/* Titre de page — « Loop » : texte seul, Semibold, encre (règle de marque 10) */}
+      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}`, background: C.panel, flexShrink: 0 }}>
+        <h1 style={{ margin: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>Loop</h1>
+      </div>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
@@ -531,36 +342,22 @@ export default function ReplayPage({ user }) {
 
           {sideOpen && (
             <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-              {/* Upload button */}
-              <button onClick={() => setShowUpload(p => !p)} style={{
-                width: '100%', padding: '6px 10px', marginBottom: 10,
-                background: C.amber10, border: `1px solid ${C.amber20}`,
-                borderRadius: 6, color: C.amber, fontFamily: C.mono,
-                fontSize: 9, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.08em',
-              }}>
-                + IMPORT CSV
-              </button>
-
-              {showUpload && (
-                <div style={{ marginBottom: 12 }}>
-                  <UploadZone onUploaded={handleUploaded} />
-                </div>
-              )}
-
-              {pendingUpload && (
-                <AssignAfterUpload
-                  uploadData={pendingUpload}
-                  pilots={pilots}
-                  aircraft={aircraft}
-                  onSaved={handleSaved}
-                  onCancel={() => setPendingUpload(null)}
-                />
+              {/* Import / attribution : dans le Logbook */}
+              {canLogbook && (
+                <button onClick={() => navigate('/logbook', { state: selected ? { flightId: selected.id } : null })} style={{
+                  width: '100%', padding: '6px 10px', marginBottom: 10,
+                  background: C.amber10, border: `1px solid ${C.amber20}`,
+                  borderRadius: 6, color: C.amber, fontFamily: C.mono,
+                  fontSize: 9, fontWeight: 700, cursor: 'pointer', letterSpacing: '0.08em',
+                }}>
+                  Open in logbook
+                </button>
               )}
 
               {/* Flight list */}
-              {flights.length === 0 && !showUpload && !pendingUpload && (
+              {flights.length === 0 && (
                 <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid, textAlign: 'center', padding: 16 }}>
-                  No flights yet.<br/>Import a G3X CSV.
+                  No flights yet.{canLogbook && <><br/>Import flights from the logbook.</>}
                 </div>
               )}
               {flights.map(f => (
@@ -580,7 +377,7 @@ export default function ReplayPage({ user }) {
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexDirection: 'column', gap: 16 }}>
               <div style={{ fontSize: 32 }}>▶</div>
-              <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>SELECT A FLIGHT OR IMPORT CSV</div>
+              <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>SELECT A FLIGHT TO REPLAY</div>
               <div style={{ fontFamily: C.mono, fontSize: 9, color: C.mid }}>
                 Garmin G3X format supported
               </div>

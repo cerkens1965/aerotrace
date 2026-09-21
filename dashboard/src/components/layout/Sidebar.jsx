@@ -11,7 +11,7 @@ import { useClub } from '../../contexts/ClubContext'
 import { APP_VERSION, APP_CHANNEL, BUILD_DATE } from '../../version'
 import { AirKiLockup } from '../ui/AirKiMark'
 
-const ROLE_LABELS = { super_admin: 'Super admin', admin: 'Admin', instructor: 'Instructor', user: 'Member' }
+const ROLE_LABELS = { super_admin: 'Super admin', admin: 'Admin', instructor: 'Instructor', user: 'Pilot' }
 
 // Navigation visible selon rôle. Les libellés sont des mots, jamais des capitales (règle de marque).
 function getNav(role) {
@@ -20,7 +20,7 @@ function getNav(role) {
     { path: '/replay', label: 'Loop' },     // Loop = texte seul, Semibold — jamais coloré, jamais avec le monogramme
   ]
   if (role === 'instructor' || role === 'admin' || role === 'super_admin') {
-    nav.splice(1, 0, { path: '/en-vol', label: 'In flight' })
+    nav.splice(1, 0, { path: '/in-flight', label: 'In flight' })
     nav.push({ path: '/logbook', label: 'Logbook' })
   }
   if (role === 'admin' || role === 'super_admin') {

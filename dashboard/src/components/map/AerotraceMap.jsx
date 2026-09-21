@@ -4,7 +4,6 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase/config'
-import useSafeSky from '../../hooks/useSafeSky'
 import { useClub } from '../../contexts/ClubContext'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
@@ -70,8 +69,8 @@ const BASEMAPS = [
 
 const AIRPORT_TYPES = [
   { id: 'fixed', label: 'ADEP / ULM / MIL' },
-  { id: 'heli',  label: 'HÉLIPAD' },
-  { id: 'sea',   label: 'HYDRAVION' },
+  { id: 'heli',  label: 'HELIPAD' },
+  { id: 'sea',   label: 'SEAPLANE' },
 ]
 
 const LAYERS = [
@@ -199,13 +198,66 @@ function SliderTrack({ value, max = 30, color, onChange }) {
   )
 }
 
+// Poll du trafic SafeSky, local à la carte LIVE : même requête, même intervalle et mêmes
+// conversions (m→ft, m/s→kt) que hooks/useSafeSky (laissé intact), avec en plus le suivi
+// d'échec pour la bannière « Traffic unavailable » et un indicateur « premier poll terminé ».
+// failures = nombre d'échecs consécutifs (réseau, HTTP non-OK, JSON invalide) ; 0 après un succès.
+function useTrafficPoll(bounds) {
+  const [traffic, setTraffic]   = useState([])
+  const [failures, setFailures] = useState(0)
+  const [ready, setReady]       = useState(false)
+  const { latMin, lonMin, latMax, lonMax } = bounds ?? {}
+
+  useEffect(() => {
+    if (latMin == null) return
+    let stop = false
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `/safesky/traffic?lat_min=${latMin}&lon_min=${lonMin}&lat_max=${latMax}&lon_max=${lonMax}`
+        )
+        if (!res.ok) throw new Error(`SafeSky ${res.status}`)
+        const data = await res.json()
+        if (stop) return
+        // ⚠️ API REST SafeSky /traffic = altitude en MÈTRES et ground_speed en m/s → ft et kt ici.
+        if (data.nearby_traffic) setTraffic(data.nearby_traffic.map(t =>
+          ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude,
+             ground_speed: t.ground_speed != null ? t.ground_speed * 1.94384 : t.ground_speed })))
+        setFailures(0)
+      } catch (error) {
+        if (stop) return
+        console.error('SafeSky fetch error:', error)
+        setFailures(n => n + 1)
+      } finally {
+        if (!stop) setReady(true)
+      }
+    }
+    poll()
+    const t = setInterval(poll, 3000)
+    return () => { stop = true; clearInterval(t) }
+  }, [latMin, lonMin, latMax, lonMax])
+
+  return { traffic, failures, ready }
+}
+
+// Pastille d'état discrète en haut de carte (chargement, trafic indisponible, flotte au sol).
+const statusPill = {
+  display: 'flex', alignItems: 'center', gap: 6,
+  background: 'rgba(5,8,20,0.82)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10,
+  padding: '5px 10px', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.05em', color: '#fff',
+  whiteSpace: 'nowrap',
+}
+const statusDot = (c) => ({ width: 6, height: 6, borderRadius: '50%', background: c, flexShrink: 0 })
+
 export default function AerotraceMap({ flyTo = null }) {
   const { clubId } = useClub()
   const mapContainer = useRef(null)
   const map = useRef(null)
   const markersRef = useRef({})
   const [mapBounds, setMapBounds] = useState(null)
-  const traffic = useSafeSky(mapBounds)
+  const { traffic, failures: trafficFailures, ready: trafficReady } = useTrafficPoll(mapBounds)
+  const [fleetLoaded, setFleetLoaded] = useState(false)   // 1re lecture Firestore de la flotte terminée
+  const [bcnReady, setBcnReady]       = useState(false)   // 1er poll des balises flotte terminé
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
   const [fleetRole, setFleetRole] = useState(new Map())  // callSign -> 'club' | 'owner' (balises AeroTrace)
   const [fleetBcn, setFleetBcn]   = useState({})         // callSign -> balise FlyADSL (avions HORS flux radar)
@@ -238,7 +290,8 @@ export default function AerotraceMap({ flyTo = null }) {
   // Flotte du club courant (highlight carte) : club = ROUGE, propriétaire = BLEU.
   // Filtré par clubId pour que super_admin voie la flotte du club sélectionné.
   useEffect(() => {
-    if (!clubId) { setFleetOwn(new Map()); return }
+    if (!clubId) { setFleetOwn(new Map()); setFleetLoaded(true); return }
+    setFleetLoaded(false)
     const q = query(collection(db, 'aircraft'), where('clubId', '==', clubId))
     getDocs(q)
       .then(snap => {
@@ -257,6 +310,7 @@ export default function AerotraceMap({ flyTo = null }) {
         setFleetOwn(m); setFleetRole(roles)
       })
       .catch(err => console.error('[AerotraceMap] aircraft load:', err))
+      .finally(() => setFleetLoaded(true))
   }, [clubId])
 
   // Surlignage de zone : filtre des couches HL piloté par l'état (réappliqué au changement de fond,
@@ -280,13 +334,14 @@ export default function AerotraceMap({ flyTo = null }) {
   // l'affiche en marqueur dédié (dédupliqué si le radar voit déjà ce callsign).
   useEffect(() => {
     const signs = [...fleetRole.keys()]
-    if (!signs.length) { setFleetBcn({}); return }
+    if (!signs.length) { setFleetBcn({}); setBcnReady(true); return }
     let stop = false
     const poll = async () => {
       try {
         const res = await fetch(`/safesky/fleet?call_signs=${signs.join(',')}`)
         if (res.ok) { const d = await res.json(); if (!stop) setFleetBcn(d.beacons ?? {}) }
       } catch { /* best-effort */ }
+      finally { if (!stop) setBcnReady(true) }
     }
     poll()
     const t = setInterval(poll, 5000)
@@ -310,6 +365,28 @@ export default function AerotraceMap({ flyTo = null }) {
     _fleetBeacon: true,
   })).filter(a => (a.altitude || 0) >= altRange[0] && (a.altitude || 0) <= altRange[1])
   const allTargets = [...filteredTraffic, ...beaconTargets]
+
+  // ── États visibles (bannière trafic, chargement flotte, flotte au sol) ──────────────
+  // Avions de la flotte du club EN VOL : trafic SafeSky (viewport, non filtré par altitude)
+  // reconnu par hex/callsign + balises FlyADSL fraîches. En vol = pas GROUNDED et > 50 ft
+  // (même seuil que useFleet). Dédupliqué par callsign/hex.
+  const fleetAirborne = new Set()
+  traffic.forEach(ac => {
+    const own = fleetOwn.get((ac.id || '').toUpperCase()) || fleetRole.get((ac.call_sign || '').toUpperCase())
+    if (own && String(ac.status || '').toUpperCase() !== 'GROUNDED' && (ac.altitude || 0) > 50)
+      fleetAirborne.add((ac.call_sign || ac.id || '').toUpperCase())
+  })
+  Object.values(fleetBcn ?? {}).forEach(b => {
+    if (!b || b.latitude == null) return
+    const sign = (b.call_sign || '').toUpperCase()
+    const fresh = (Date.now() / 1000 - (b.timestamp ?? 0)) < 180
+    const altFt = b.altitude != null ? b.altitude * 3.28084 : 0
+    if (fresh && fleetRole.get(sign) && String(b.flight_state || '').toUpperCase() !== 'GROUNDED' && altFt > 50)
+      fleetAirborne.add(sign)
+  })
+  const trafficDown  = trafficFailures >= 2    // 2 échecs consécutifs (~6 s) → évite le clignotement sur un raté isolé
+  const fleetLoading = !!clubId && (!fleetLoaded || !trafficReady || (fleetRole.size > 0 && !bcnReady))
+  const fleetEmpty   = !fleetLoading && !trafficDown && fleetAirborne.size === 0
 
   const toggleLayer = (id) => {
     const next = { ...visible, [id]: !visible[id] }
@@ -496,9 +573,9 @@ export default function AerotraceMap({ flyTo = null }) {
 
       o.bodyHtml = `
           <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : (isSharer ? ` <span style="color:${SAFESKY_CLR};">● SafeSky (partage)</span>` : ` <span style="color:${RADIO_CLR};">● Radio</span>`)}<br/>
-            Type: ${ac._fleetBeacon ? 'Balise AeroTrace' : ac.beacon_type}<br/>
-            Src: ${ac._fleetBeacon ? 'ADS-L (AeroTrace)' : (ac.transponder_type || 'réseau SafeSky')}<br/>
+            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : (isSharer ? ` <span style="color:${SAFESKY_CLR};">● SafeSky (sharing)</span>` : ` <span style="color:${RADIO_CLR};">● Radio</span>`)}<br/>
+            Type: ${ac._fleetBeacon ? 'AeroTrace beacon' : ac.beacon_type}<br/>
+            Src: ${ac._fleetBeacon ? 'ADS-L (AeroTrace)' : (ac.transponder_type || 'SafeSky network')}<br/>
             Alt: ${ac.altitude} ft<br/>
             Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
             Hdg: ${ac.course}°<br/>
@@ -559,21 +636,36 @@ export default function AerotraceMap({ flyTo = null }) {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
+      {(trafficDown || fleetLoading || fleetEmpty) && (
+        <div role="status" aria-live="polite" style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 10,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, pointerEvents: 'none' }}>
+          {trafficDown && (
+            <div style={statusPill}><span style={statusDot('#F5A623')} />Traffic unavailable, retrying…</div>
+          )}
+          {fleetLoading && (
+            <div style={statusPill}><span style={statusDot('#9A9A94')} />Loading fleet…</div>
+          )}
+          {fleetEmpty && (
+            <div style={statusPill}><span style={statusDot('#9A9A94')} />No aircraft in flight</div>
+          )}
+        </div>
+      )}
+
       {aspItems && (
         <div style={{ position: 'absolute', left: 12, bottom: 24, zIndex: 10, width: 280, maxHeight: '42vh', overflowY: 'auto',
                       background: 'rgba(5,8,20,0.88)', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.9)' }}>ESPACES AÉRIENS</span>
+            <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.9)' }}>AIRSPACES</span>
             <span onClick={() => { setAspItems(null); setAspHl(null) }}
                   style={{ cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 15, lineHeight: 1, padding: '0 3px' }}>×</span>
           </div>
           {aspItems.map((it, i) => (
             <div key={i} onClick={() => setAspHl(aspHl === it.name ? null : it.name)}
-                 title="Cliquer pour surligner la zone sur la carte"
+                 title="Click to highlight the area on the map"
                  style={{ margin: '5px 0', padding: '3px 6px 3px 8px', borderLeft: `3px solid ${it.color}`, borderRadius: 3, cursor: 'pointer',
                           background: aspHl === it.name ? 'rgba(255,255,255,0.10)' : 'transparent' }}>
               <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
-                {it.name} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>({it.typ}{it.cls ? ` · classe ${it.cls}` : ''})</span>
+                {it.name} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>({it.typ}{it.cls ? ` · class ${it.cls}` : ''})</span>
               </div>
               <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.8)' }}>{it.lo} → {it.up}</div>
             </div>
