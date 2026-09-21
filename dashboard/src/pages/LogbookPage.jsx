@@ -25,7 +25,7 @@ import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import RedeemInvite from '../components/auth/RedeemInvite'
 import {
   T, labelStyle, valueStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Icon,
+  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Icon, Chip,
 } from '../components/ui'
 import {
   formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
@@ -58,18 +58,6 @@ function TypeBadge({ type }) {
 
 function ValidBadge({ validated }) {
   return <StatusDot tone={validated ? 'ok' : 'caution'} text={validated ? 'VALIDATED' : 'TO ASSIGN'} style={{ whiteSpace: 'nowrap' }} />
-}
-
-// Puce texte bordée (licences, propriété avion).
-function Chip({ children }) {
-  return (
-    <span style={{
-      fontFamily: T.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', lineHeight: 1.2,
-      color: T.graphite, border: T.border, borderRadius: T.radius.sm, padding: '2px 6px', whiteSpace: 'nowrap',
-    }}>
-      {children}
-    </span>
-  )
 }
 
 /**

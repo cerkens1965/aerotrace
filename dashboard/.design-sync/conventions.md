@@ -25,7 +25,7 @@ The same values in JS: `window.AirKi.T` (`T.ink`, `T.paper`, `T.card`, `T.graphi
 
 ## Components (read `components/general/<Name>/<Name>.prompt.md` before use)
 
-`Button` (primary / secondary / ghost / danger, `onInk` on dark panels, `confirm` = two-step click), `MetricCard`, `StatusDot`, `DataTable`, `Tabs`, `Drawer` (forms and detail panels open as a right drawer, not a modal), `EmptyState`, `Banner` (info / caution / ok), `Skeleton`, `Icon` (20 names, 1.5 px strokes), `AirKiMark`, `AirKiLockup`.
+`Button` (primary / secondary / ghost / danger, `onInk` on dark panels, `confirm` = two-step click), `MetricCard`, `StatusDot`, `DataTable`, `Tabs`, `Drawer` (forms and detail panels open as a right drawer, not a modal), `EmptyState`, `Banner` (info / caution / ok), `Skeleton`, `Icon` (20 names, 1.5 px strokes), `AirKiMark`, `AirKiLockup`. Forms: `Field` (mono caps label + control + hint), `Input` and `Select` (onChange receives the value; `mono` for registrations, hex, codes; `onInk` on dark panels), `Chip` (bordered mono tag: licences, CLUB / OWNER, ARCHIVED, versions; `tone` adds a status dot), `Toggle` (pressed / unpressed button; several side by side = segmented choice). For a bespoke field use `fieldStyle({ mono, onInk })`.
 
 ## Example
 

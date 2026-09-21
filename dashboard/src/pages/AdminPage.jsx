@@ -13,7 +13,7 @@ import { photoFrame } from '../components/aircraft/photoFrame'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon, Input, Select, Chip, Toggle,
 } from '../components/ui'
 
 // (21/09) Recherche Admin : filtre texte insensible à la casse et aux accents sur plusieurs champs.
@@ -65,6 +65,7 @@ const EMPTY_AIRCRAFT = {
 }
 
 // ─── Reusable form components (déclarés au niveau module : pas de remontage) ──
+// (22/09) Input, Select, Chip, Toggle viennent de la bibliothèque (components/ui) ; restent ici Label, Hint, ReadOnly, Section.
 const fieldBase = {
   width: '100%', boxSizing: 'border-box', height: 34,
   background: T.card, border: T.border, borderRadius: T.radius.sm,
@@ -79,25 +80,6 @@ const Hint = ({ children }) => (
   <div style={{ fontFamily: T.sans, fontSize: 12, lineHeight: 1.4, color: T.graphite, marginTop: 4 }}>{children}</div>
 )
 
-const Input = ({ value, onChange, placeholder, type = 'text', maxLength, mono = false }) => (
-  <input
-    type={type} value={value} onChange={e => onChange(e.target.value)}
-    placeholder={placeholder} maxLength={maxLength} className="ak-focus"
-    style={{ ...fieldBase, fontFamily: mono ? T.mono : T.sans, fontVariantNumeric: mono ? 'tabular-nums' : undefined }}
-  />
-)
-
-const Select = ({ value, onChange, options }) => (
-  <select
-    value={value} onChange={e => onChange(e.target.value)} className="ak-focus"
-    style={{ ...fieldBase, fontFamily: T.sans, cursor: 'pointer' }}
-  >
-    {options.map(o => (
-      <option key={o.value} value={o.value}>{o.label}</option>
-    ))}
-  </select>
-)
-
 // Champ en lecture seule (club courant, rôle super_admin).
 const ReadOnly = ({ children, mono = false }) => (
   <div style={{
@@ -106,31 +88,6 @@ const ReadOnly = ({ children, mono = false }) => (
   }}>
     {children}
   </div>
-)
-
-// Puce bordée (badges STUDENT / PILOT / FI / ARCHIVED / OWNER / CLUB, ratings).
-const Chip = ({ children, strong = false, title }) => (
-  <span title={title} style={{
-    display: 'inline-flex', alignItems: 'center', height: 20, padding: '0 6px',
-    border: `1px solid ${strong ? T.ink : T.rule}`, borderRadius: T.radius.sm,
-    fontFamily: T.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.06em',
-    color: strong ? T.ink : T.graphite, background: T.card, whiteSpace: 'nowrap',
-  }}>{children}</span>
-)
-
-// Bascule segmentée / puce sélectionnable (aria-pressed) : actif = encre, texte blanc.
-const Toggle = ({ active, onClick, children, mono = false, style }) => (
-  <button
-    type="button" aria-pressed={active} onClick={onClick} className="ak-focus"
-    style={{
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-      height: 28, padding: '0 10px', borderRadius: T.radius.sm, cursor: 'pointer',
-      border: `1px solid ${active ? T.ink : T.rule}`, background: active ? T.ink : T.card,
-      color: active ? T.white : T.graphite,
-      fontFamily: mono ? T.mono : T.sans, fontSize: mono ? 11 : 13, fontWeight: mono ? 500 : 600,
-      letterSpacing: mono ? '0.04em' : '-0.01em', whiteSpace: 'nowrap', ...style,
-    }}
-  >{children}</button>
 )
 
 // Section de tiroir : titre mono + filet au-dessus (sauf la première).

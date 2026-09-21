@@ -15,10 +15,10 @@ node .ds-sync/resync.mjs --config .design-sync/config.json --node-modules ./node
 ```
 
 ## Known render warns
-- none (12/12 clean after the column card modes).
+- none (17/17 clean).
 
 ## Re-sync risks
 - `dtsPropsFor` is hand-maintained: a new or renamed prop in a component is invisible to the design agent until added here.
 - `conventions.md` names tokens (`--ink`…, `T.*`) and components; the next run must re-validate those names against the fresh bundle.
-- Components still missing from the library (Input, Select, Chip, Segmented) exist only as local copies in AdminPage / FleetPage — once factored into `src/components/ui`, add them to `componentSrcMap`, `dtsPropsFor` and author previews.
+- (22/09) Field, Input, Select (exported from Input.jsx), Chip, Toggle added to the library and synced (17 components). `fieldStyle()` in tokens.js is the shared field style for bespoke inputs. Still local: Admin `Label`/`Hint`/`ReadOnly`/`Section`, Fleet `Section`, SelectClub ink inputs.
 - Fonts depend on Google Fonts at runtime (network).

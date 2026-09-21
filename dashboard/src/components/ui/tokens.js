@@ -49,3 +49,12 @@ export const headingStyle = (fontSize = 18, color = T.ink) => ({
 export const monoStyle = (fontSize = 13, color = T.ink) => ({
   fontFamily: T.mono, fontSize, fontVariantNumeric: 'tabular-nums', color,
 })
+
+// (22/09) Style de base d'un champ de saisie (Input, Select, champs particuliers) : 34 px, bord 1 px, rayon 4.
+// onInk = sur panneau encre (texte blanc, bord #2C2C2C) ; mono = chiffres / identifiants (Geist Mono tabulaire).
+export const fieldStyle = ({ onInk = false, mono = false } = {}) => ({
+  width: '100%', boxSizing: 'border-box', height: 34, padding: '0 10px', outline: 'none',
+  background: onInk ? T.ink : T.card, color: onInk ? T.white : T.ink,
+  border: onInk ? T.borderDark : T.border, borderRadius: T.radius.sm,
+  fontFamily: mono ? T.mono : T.sans, fontSize: 13, fontVariantNumeric: mono ? 'tabular-nums' : undefined,
+})

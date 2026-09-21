@@ -6,7 +6,7 @@ import { db, storage, auth, functions } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner,
+  Button, MetricCard, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Chip, Field, fieldStyle,
 } from '../components/ui'
 
 // ─── FleetPage — état firmware de la flotte de boîtiers (ATC) + écrans (ATV) ────
@@ -97,20 +97,6 @@ function unitInfo(dev, published) {
   return { atcLatest, atcUpToDate, ota, atvLatest, atvVerStr, upToDate: atcUpToDate && atvUpToDate }
 }
 
-// Puce mono bordée (bandeau VERSIONS, badges de version).
-function Chip({ children, title, tone, muted }) {
-  return (
-    <span title={title} style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 8px',
-      border: T.border, borderRadius: T.radius.sm, background: T.card, whiteSpace: 'nowrap',
-      ...monoStyle(11, muted ? T.etch : T.ink), fontWeight: 500,
-    }}>
-      {tone && <StatusDot tone={tone} size={6} />}
-      {children}
-    </span>
-  )
-}
-
 // Badge version : point vert si à jour, puce « → vN » (point ambre) si en retard,
 // version seule si la version publiée est inconnue.
 function VerBadge({ cur, curStr, latest, fleetMax }) {
@@ -133,17 +119,6 @@ function VerBadge({ cur, curStr, latest, fleetMax }) {
   )
 }
 
-// Libellé de champ + contrôle (top-level : pas de remontage à chaque rendu).
-function Field({ label, hint, children, style }) {
-  return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, ...style }}>
-      <span style={labelStyle(T.etch)}>{label}</span>
-      {children}
-      {hint && <span style={{ fontSize: 12, lineHeight: 1.4, color: T.graphite }}>{hint}</span>}
-    </label>
-  )
-}
-
 // Section du tiroir : titre Semibold 13 + filet haut.
 function Section({ title, first, children }) {
   return (
@@ -154,10 +129,7 @@ function Section({ title, first, children }) {
   )
 }
 
-const inputStyle = {
-  height: 34, padding: '0 10px', border: T.border, borderRadius: T.radius.sm, background: T.card,
-  ...monoStyle(13), width: '100%', boxSizing: 'border-box',
-}
+const inputStyle = fieldStyle({ mono: true })   // (22/09) style commun de la bibliothèque
 
 export default function FleetPage() {
   const { clubId } = useClub()

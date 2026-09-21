@@ -19,7 +19,12 @@
     "Icon": "src/components/ui/Icon.jsx",
     "AirKiMark": "src/components/ui/AirKiMark.jsx",
     "AirKiLockup": "src/components/ui/AirKiMark.jsx",
-    "SixPack": null
+    "SixPack": null,
+    "Field": "src/components/ui/Field.jsx",
+    "Input": "src/components/ui/Input.jsx",
+    "Select": "src/components/ui/Input.jsx",
+    "Chip": "src/components/ui/Chip.jsx",
+    "Toggle": "src/components/ui/Toggle.jsx"
   },
   "dtsPropsFor": {
     "Button": "variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; size?: 'sm' | 'md'; onInk?: boolean; confirm?: string; icon?: IconName | React.ReactNode; iconRight?: IconName | React.ReactNode; disabled?: boolean; type?: 'button' | 'submit' | 'reset'; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; children?: React.ReactNode; style?: React.CSSProperties; title?: string",
@@ -33,7 +38,12 @@
     "Skeleton": "width?: number | string; height?: number; radius?: number; tone?: 'rule' | 'paper'; style?: React.CSSProperties",
     "Icon": "name: 'map' | 'list' | 'plane' | 'play' | 'back' | 'chevron-right' | 'close' | 'upload' | 'download' | 'edit' | 'archive' | 'check' | 'warning' | 'refresh' | 'user' | 'settings' | 'search' | 'filter' | 'external' | 'wifi'; size?: 16 | 20 | 24 | number; title?: string; color?: string; style?: React.CSSProperties",
     "AirKiMark": "variant?: 'duo' | 'mono'; color?: string; size?: number; title?: string; style?: React.CSSProperties",
-    "AirKiLockup": "size?: number; color?: string; baseline?: boolean; variant?: 'duo' | 'mono'"
+    "AirKiLockup": "size?: number; color?: string; baseline?: boolean; variant?: 'duo' | 'mono'",
+    "Field": "label?: React.ReactNode; hint?: React.ReactNode; onInk?: boolean; children?: React.ReactNode; style?: React.CSSProperties",
+    "Input": "value?: string | number; onChange?: (value: string) => void; type?: string; mono?: boolean; onInk?: boolean; placeholder?: string; maxLength?: number; disabled?: boolean; id?: string; name?: string; autoFocus?: boolean; inputMode?: 'text' | 'numeric' | 'decimal' | 'email' | 'tel' | 'url' | 'search'; list?: string; onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void; style?: React.CSSProperties",
+    "Select": "value?: string; onChange?: (value: string) => void; options: Array<{ value: string; label: string }>; placeholder?: string; mono?: boolean; onInk?: boolean; disabled?: boolean; id?: string; style?: React.CSSProperties",
+    "Chip": "children?: React.ReactNode; tone?: 'ok' | 'caution' | 'info' | 'off'; strong?: boolean; muted?: boolean; onInk?: boolean; title?: string; style?: React.CSSProperties",
+    "Toggle": "active?: boolean; onClick?: () => void; mono?: boolean; disabled?: boolean; title?: string; children?: React.ReactNode; style?: React.CSSProperties"
   },
   "overrides": {
     "Drawer": {
