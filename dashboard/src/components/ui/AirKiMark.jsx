@@ -17,28 +17,36 @@ export default function AirKiMark({ variant = 'duo', color = '#141414', size = 2
   )
 }
 
-// Lockup horizontal : monogramme + mot-marque « AirKi » (Instrument Sans Bold, -0.04em).
-// baseline : « Not alone in the sky » à 19,5 % de la taille du mot-marque, Medium ; supprimée sous 60 px.
-// (21/09) ALIGNEMENT OPTIQUE (retour Christophe « l'équilibre n'est pas bon ») : le A du monogramme a exactement la
-// hauteur des capitales du mot (Instrument Sans Bold : capHeight 0,72 em, ascender 0,97, descender 0,25), posé sur la
-// même ligne de base et aligné sur le haut des capitales ; la baseline ne décentre plus le monogramme.
-//   hauteur visible du A = 84 % du viewBox → côté SVG = 0,72 / 0,84 × corps ≈ 0,857 × corps
-//   haut des capitales dans une ligne de hauteur 1 = 0,14 em ; le A commence à 8 % du SVG → marge haute 0,0714 em.
-//   écart visible mot ↔ monogramme ≈ 0,2 em (SVG déjà marge de 10 % à droite).
+// Lockup horizontal (22/09, correction Christophe) : le GRAND A du monogramme (ambre dans la contreforme) EST la
+// première lettre, suivi de « irKi » plus petit, COLLÉ et sur la MÊME LIGNE DE BASE → se lit comme un mot : AirKi.
+// Avant : monogramme + mot complet « AirKi » = se lisait « A AirKi ».
+// Proportions relevées sur la maquette : hauteur du A ≈ 1,55 × hauteur des capitales du texte ; écart A ↔ i ≈ 8 %
+// de la hauteur du A. K reste en capitale (règle de marque : jamais « Airki », KI = IA en allemand).
+//   size = hauteur visible du A (px). Le A occupe 84 % du viewBox (y 8 → 92) et 80 % en largeur (x 10 → 90).
+//   texte : capHeight Instrument Sans Bold 0,72 em → corps = size / (1,55 × 0,72).
+// baseline « Not alone in the sky » : 19,5 % du corps du mot, Medium ; seulement si size ≥ 60.
 export function AirKiLockup({ size = 22, color = '#141414', baseline = false, variant = 'duo' }) {
-  const mark = Math.round(size * 0.857)
-  const gap  = Math.round(size * 0.11)
+  const svg  = size / 0.84                    // côté du SVG pour un A visible de `size` px
+  const font = size / (1.55 * 0.72)           // corps de « irKi »
+  const gap  = size * 0.08
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap }}>
-      <AirKiMark variant={variant} color={color} size={mark} style={{ marginTop: Math.round(size * 0.0714) }} />
-      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
-        <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: size, letterSpacing: '-0.04em', color }}>AirKi</span>
-        {baseline && size >= 60 && (
-          <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: Math.round(size * 0.195), color, marginTop: 4 }}>
-            Not alone in the sky
-          </span>
-        )}
+    <div role="img" aria-label="AirKi" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+      {/* (22/09) Calage CALCULÉ, pas « baseline » : en flex, le navigateur aligne le bas de la boîte du SVG (marge de
+          8 % sous le A comprise) → « irKi » tombait sous le pied du A. Ici tout est aligné sur le bas du conteneur :
+          SVG remonté de 8 % (pied du A = bas) ; texte en line-height 1, Instrument Sans (ascender 0,97, descender 0,25)
+          → ligne de base à 0,86 em du haut, soit 0,14 em au-dessus du bas de la ligne → remonté de 0,14 em.
+          Approche gauche du « i » (0,055 em) retirée pour que l'écart A ↔ i soit exactement `gap`. Métriques vérifiées dans la fonte. */}
+      <div aria-hidden="true" style={{ display: 'flex', alignItems: 'flex-end' }}>
+        <AirKiMark variant={variant} color={color} size={svg} title=""
+          style={{ marginLeft: -svg * 0.10, marginRight: -svg * 0.10 + gap, marginBottom: -svg * 0.08 }} />
+        <span style={{ display: 'block', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: font, letterSpacing: '-0.04em',
+                       lineHeight: 1, marginBottom: -font * 0.14, marginLeft: -font * 0.055, color }}>irKi</span>
       </div>
+      {baseline && size >= 60 && (
+        <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: Math.round(font * 0.195), color, marginTop: Math.round(size * 0.12) }}>
+          Not alone in the sky
+        </span>
+      )}
     </div>
   )
 }

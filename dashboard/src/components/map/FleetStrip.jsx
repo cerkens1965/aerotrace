@@ -1,43 +1,45 @@
-// FleetStrip — bandeau « flotte » au-dessus de la carte Live (2026-09-21).
-// Même source que la page In flight (useFleet) → Live et In flight disent TOUJOURS la même chose.
-// Remplace « No aircraft in flight », qui se basait sur le trafic de la zone visible et pouvait être faux.
-//   ● n in flight  REG · REG   ○ n on ground   ● n not reporting
-// Clic sur une immatriculation → onLocate(lat, lon) centre la carte. Clic sur « in flight » → page In flight.
-// Survol : répartition club / owner. DS : panneau encre, bord 1 px #2C2C2C, chiffres Geist Mono, jamais de rouge.
+// FleetStrip — bandeau « flotte » au-dessus de la carte Live (21/09, redessiné 22/09 d'après Claude Design « Live »).
+// Données fournies par LivePage (useFleet, même source que In flight) → Live et In flight disent la même chose.
+//   FLEET  ● 2 IN FLIGHT  FJFVB · FJVUD  |  ● 4 ON GROUND  |  ● 1 NOT REPORTING
+// Clic immat = centre la carte ; clic « IN FLIGHT » = page In flight ; survol = répartition club / owner.
+// DS : panneau encre, bord 1 px #2C2C2C, chiffres Geist Mono, soulignement ambre au survol, jamais de rouge.
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import useFleet from '../../hooks/useFleet'
-import { T, monoStyle, labelStyle } from '../ui'
+import { T, monoStyle, labelStyle, StatusDot } from '../ui'
+import { posOf } from './fleetPos'
 
 const ident = (a) => a.callSign || a.registration || '?'
-const posOf = (a) => {
-  const l = a.liveData, f = a.fdrData
-  if (l?.lat != null && l?.lon != null) return { lat: l.lat, lon: l.lon }
-  if (f?.lat != null && f?.lon != null) return { lat: f.lat, lon: f.lon }
-  return null
-}
 const split = (list) => {
   const own = list.filter(a => a.ownership === 'owner').length
   return `${list.length - own} club · ${own} owner`
 }
-const Dot = ({ c }) => <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: c, flexShrink: 0 }} />
+const btn = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'inherit' }
+const Sep = () => <span aria-hidden="true" style={{ width: 1, height: 16, background: T.ruleDark, flexShrink: 0 }} />
 
-export default function FleetStrip({ clubId, onLocate }) {
+function RegLink({ ac, onLocate }) {
+  const [hover, setHover] = useState(false)
+  const p = posOf(ac)
+  return (
+    <button type="button" className="ak-focus" disabled={!p}
+      onClick={() => p && onLocate?.({ ...p, zoom: 12 })}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      title={p ? `Show ${ident(ac)} on the map` : `${ident(ac)}: no position yet`}
+      style={{ ...btn, ...monoStyle(12, p ? T.white : T.mutedDark), fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 5,
+               borderBottom: `1px solid ${hover && p ? T.amber : T.ruleDark}`, cursor: p ? 'pointer' : 'default' }}>
+      {ac.status === 'LTE_LOST' && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: T.amber }} />}
+      {ident(ac)}
+    </button>
+  )
+}
+
+export default function FleetStrip({ fleet = [], inFlight = [], grounded = [], unknown = [], loading, error, onLocate }) {
   const navigate = useNavigate()
-  const { fleet, inFlight, grounded, unknown, loading, error } = useFleet(clubId)
-  if (!clubId) return null
-
   const wrap = {
-    position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 11,
-    maxWidth: 'calc(100% - 24px)', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'center',
-    background: T.ink, border: `1px solid ${T.ruleDark}`, borderRadius: 6, padding: '8px 14px',
-    fontFamily: T.sans, fontSize: 13, color: T.white,
+    pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', justifyContent: 'center',
+    background: T.ink, border: `1px solid ${T.ruleDark}`, borderRadius: 6, padding: '10px 18px', maxWidth: '100%',
   }
-  const seg = { display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }
-  const num = { ...monoStyle(15, T.white), fontWeight: 500 }
-  const btn = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'inherit' }
-
-  if (loading) return <div role="status" style={wrap}><span style={labelStyle(T.mutedDark)}>FLEET</span><span style={{ color: T.mutedDark }}>Loading…</span></div>
-  if (error)   return <div role="status" style={wrap}><span style={labelStyle(T.mutedDark)}>FLEET</span><Dot c={T.amber} /><span>Fleet status unavailable</span></div>
+  if (loading) return <div role="status" style={wrap}><span style={labelStyle(T.mutedDark)}>FLEET</span><StatusDot tone="off" onInk text="LOADING…" /></div>
+  if (error)   return <div role="status" style={wrap}><span style={labelStyle(T.mutedDark)}>FLEET</span><StatusDot tone="caution" onInk text="FLEET STATUS UNAVAILABLE" /></div>
   if (!fleet.length) return null
 
   const lte = inFlight.filter(a => a.status === 'LTE_LOST').length
@@ -45,34 +47,34 @@ export default function FleetStrip({ clubId, onLocate }) {
     <div role="status" aria-live="polite" style={wrap}>
       <span style={labelStyle(T.mutedDark)}>FLEET</span>
 
-      <span style={seg} title={inFlight.length ? `${split(inFlight)}${lte ? ` · ${lte} with LTE lost` : ''}` : undefined}>
-        <Dot c={inFlight.length ? T.ok : T.etch} />
-        <button type="button" style={btn} onClick={() => navigate('/in-flight')} title="Open In flight">
-          <span style={num}>{inFlight.length}</span> in flight
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+            title={inFlight.length ? `${split(inFlight)}${lte ? ` · ${lte} with LTE lost` : ''}` : undefined}>
+        <button type="button" className="ak-focus" style={btn} onClick={() => navigate('/in-flight')} title="Open In flight">
+          <StatusDot tone={inFlight.length ? 'ok' : 'off'} onInk text={`${inFlight.length} IN FLIGHT`} />
         </button>
-        {inFlight.map(a => {
-          const p = posOf(a)
-          return (
-            <button key={a.id} type="button" disabled={!p}
-              onClick={() => p && onLocate?.({ ...p, zoom: 12 })}
-              title={p ? `Show ${ident(a)} on the map` : `${ident(a)}: no position yet`}
-              style={{ ...btn, ...monoStyle(13, p ? T.white : T.mutedDark), fontWeight: 500, textDecoration: p ? 'underline' : 'none',
-                       textUnderlineOffset: 3, textDecorationColor: T.ruleDark, cursor: p ? 'pointer' : 'default' }}>
-              {a.status === 'LTE_LOST' && <Dot c={T.amber} />} {ident(a)}
-            </button>
-          )
-        })}
+        {inFlight.length > 0 && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {inFlight.map((a, i) => (
+              <span key={a.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {i > 0 && <span aria-hidden="true" style={monoStyle(12, T.etch)}>·</span>}
+                <RegLink ac={a} onLocate={onLocate} />
+              </span>
+            ))}
+          </span>
+        )}
       </span>
 
-      <span style={seg} title={grounded.length ? split(grounded) : undefined}>
-        <Dot c={T.etch} /><span style={num}>{grounded.length}</span> on ground
+      <Sep />
+      <span title={grounded.length ? split(grounded) : undefined}>
+        <StatusDot tone="off" onInk text={`${grounded.length} ON GROUND`} />
       </span>
 
-      {unknown.length > 0 && (
-        <span style={seg} title={`${unknown.map(ident).join(' · ')} — no position or status received recently`}>
-          <Dot c={T.amber} /><span style={num}>{unknown.length}</span> not reporting
+      {unknown.length > 0 && (<>
+        <Sep />
+        <span title={`${unknown.map(ident).join(' · ')}: no position or status received recently`}>
+          <StatusDot tone="caution" onInk text={`${unknown.length} NOT REPORTING`} />
         </span>
-      )}
+      </>)}
     </div>
   )
 }

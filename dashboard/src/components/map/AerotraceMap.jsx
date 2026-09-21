@@ -5,30 +5,21 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
+import { T, labelStyle, monoStyle, Banner, Icon } from '../ui'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
 const CENTER = { lat: 50.6083, lon: 4.4650 } // EBBY
-const ALT_MAX = 35000
+const ALT_MAX = 19500   // (22/09) bande trafic 0 → FL195 ; poignée haute en butée = pas de plafond (FL195+)
 
-// Sémantique couleur carte (demande Christophe 2026-08-14) :
-//   FLOTTE EBBY (émet via ATC/AeroTrace, owner OU club) = ROUGE #ef4444
-//   TRAFIC SafeSky ambiant (tout le reste)              = BLEU VIF #1e90ff
-// CSS filter: black SVG → red #ef4444
-const FLEET_FILTER   = 'brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(1832%) hue-rotate(337deg) brightness(103%)'
-// black SVG → bleu vif (dodger) #1e90ff
-const SAFESKY_FILTER = 'brightness(0) saturate(100%) invert(39%) sepia(57%) saturate(2618%) hue-rotate(196deg) brightness(101%) contrast(101%)'
-const FLEET_CLR   = '#ef4444'
-const SAFESKY_CLR = '#1e90ff'
-// (2026-08-17, demande Christophe) BLEU = UNIQUEMENT ceux qui PARTAGENT leur position via la
-// technologie SafeSky (app / balises ADS-L). Le trafic capté par RADIO (ADS-B/Mode-S/FLARM…)
-// = GRIS : il ne « participe » pas, il est simplement vu. transponder_type fait foi.
-const RADIO_SRC    = new Set(['ADS-B', 'ADS-BI', 'ADSB', 'MODE-S', 'MODE-C', 'MLAT', 'FLARM', 'OGN'])
-const RADIO_CLR    = '#111111'
-// icône SVG radio : NOIR sur fonds clairs, BLANC sur fonds sombres (Dark + Satellite/photo) —
-// flotte (rouge) et partageurs SafeSky (bleu) inchangés quel que soit le fond (demande Christophe).
-const RADIO_FILTER_LIGHT = 'brightness(0)'
-const RADIO_FILTER_DARK  = 'brightness(0) invert(1)'
+// (22/09, Claude Design « Live ») Sémantique couleur carte :
+//   FLOTTE du club (AirKi Core, club OU owner) = avion BLANC (encre sur fond clair) dans un ANNEAU AMBRE 40 px
+//   PARTAGEURS SafeSky (app / balises ADS-L)    = BLEU info #60A5FA, 34 px
+//   TRAFIC RADIO (ADS-B / Mode-S / FLARM, capté) = ENCRE #141414 sur fond clair, blanc sur fond sombre, 34 px
+// Les icônes par type (public/icons/*.svg, noires) sont colorées par MASQUE CSS : couleur exacte, sans filtre.
+const SAFESKY_CLR = T.info
+const RADIO_SRC   = new Set(['ADS-B', 'ADS-BI', 'ADSB', 'MODE-S', 'MODE-C', 'MLAT', 'FLARM', 'OGN'])
+const isDarkMap   = (id) => id === 'dataviz-dark' || id === 'satellite'
 
 // Icône par type d'aéronef — reprend le set + la sémantique de l'écran ATV radar
 // (firmware getAircraftIcon / safeSkyUDPToIcon). SafeSky REST donne le TYPE dans
@@ -68,17 +59,17 @@ const BASEMAPS = [
 ]
 
 const AIRPORT_TYPES = [
-  { id: 'fixed', label: 'ADEP / ULM / MIL' },
-  { id: 'heli',  label: 'HELIPAD' },
-  { id: 'sea',   label: 'SEAPLANE' },
+  { id: 'fixed', label: 'Aerodromes · ULM · military' },
+  { id: 'heli',  label: 'Helipads' },
+  { id: 'sea',   label: 'Seaplane bases' },
 ]
 
 const LAYERS = [
-  { id: 'ctr',      label: 'CTR',      color: '#dc3232', rgb: '220,50,50',  hasSlider: true,  hasAltSlider: false },
-  { id: 'tma',      label: 'TMA/CTA',  color: '#1e64dc', rgb: '30,100,220', hasSlider: true,  hasAltSlider: false },
-  { id: 'danger',   label: 'DANGER',   color: '#ff8c00', rgb: '255,140,0',  hasSlider: true,  hasAltSlider: false },
-  { id: 'airports', label: 'AIRPORTS', color: '#4a7ab5', rgb: '74,122,181', hasSlider: false, hasAltSlider: false },
-  { id: 'traffic',  label: 'TRAFFIC',  color: '#00cc66', rgb: '0,204,102',  hasSlider: false, hasAltSlider: true  },
+  { id: 'ctr',      label: 'CTR',          color: '#dc3232', rgb: '220,50,50',  hasSlider: true,  hasAltSlider: false },
+  { id: 'tma',      label: 'TMA / CTA',  color: '#1e64dc', rgb: '30,100,220', hasSlider: true,  hasAltSlider: false },
+  { id: 'danger',   label: 'Danger areas',   color: '#ff8c00', rgb: '255,140,0',  hasSlider: true,  hasAltSlider: false },
+  { id: 'airports', label: 'Airports', color: '#4a7ab5', rgb: '74,122,181', hasSlider: false, hasAltSlider: false },
+  { id: 'traffic',  label: 'Traffic',  color: '#00cc66', rgb: '0,204,102',  hasSlider: false, hasAltSlider: true  },
 ]
 
 const LAYER_IDS = {
@@ -95,8 +86,8 @@ const FILL_COLORS = {
 }
 
 function formatAlt(ft) {
-  if (ft <= 0) return 'GND'
-  if (ft >= ALT_MAX) return 'FL350+'
+  if (ft <= 0) return '0'
+  if (ft >= ALT_MAX) return 'FL195+'
   return `FL${String(Math.round(ft / 100)).padStart(3, '0')}`
 }
 
@@ -150,7 +141,7 @@ function airspaceItems(feats) {
   return items
 }
 
-function addOpenAIPLayers(map, activeAirportTypes) {
+function addOpenAIPLayers(map, activeAirportTypes, dark = false) {
   if (map.getSource('openaip')) return
   map.addSource('openaip', {
     type: 'vector',
@@ -178,22 +169,94 @@ function addOpenAIPLayers(map, activeAirportTypes) {
   map.addLayer({ id: 'airspace-hl-fill', type: 'fill', source: 'openaip', 'source-layer': 'airspaces', filter: HL_NONE, paint: { 'fill-color': HL_FILL } })
   map.addLayer({ id: 'airspace-hl-line', type: 'line', source: 'openaip', 'source-layer': 'airspaces', filter: HL_NONE, paint: { 'line-color': HL_LINE, 'line-width': 4 } })
 
-  map.addLayer({ id: 'airports', type: 'circle', source: 'openaip', 'source-layer': 'airports', paint: { 'circle-radius': 5, 'circle-color': '#1a3a6b', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
-  map.addLayer({ id: 'airports-labels', type: 'symbol', source: 'openaip', 'source-layer': 'airports', layout: { 'text-field': ['get', 'icao_code'], 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top' }, paint: { 'text-color': '#1a3a6b', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } })
+  map.addLayer({ id: 'airports', type: 'circle', source: 'openaip', 'source-layer': 'airports', paint: { 'circle-radius': 4, 'circle-color': dark ? '#FFFFFF' : '#141414', 'circle-stroke-width': 1.5, 'circle-stroke-color': dark ? '#141414' : '#FFFFFF' } })
+  map.addLayer({ id: 'airports-labels', type: 'symbol', source: 'openaip', 'source-layer': 'airports', layout: { 'text-field': ['get', 'icao_code'], 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-size': 10, 'text-offset': [0, 1.4], 'text-anchor': 'top' }, paint: { 'text-color': dark ? '#FFFFFF' : '#141414', 'text-halo-color': dark ? '#141414' : '#FFFFFF', 'text-halo-width': 1.5 } })
   const f = getAirportFilter(activeAirportTypes)
   map.setFilter('airports', f)
   map.setFilter('airports-labels', f)
 }
 
-function SliderTrack({ value, max = 30, color, onChange }) {
+// ── Contrôles du panneau Layers (22/09, Claude Design « Live ») — déclarés AU NIVEAU MODULE (sinon remontés
+//    à chaque rendu et le glisser casse, cf. CLAUDE.md). Piste 4 px #2C2C2C, poignée 12 px, interrupteur 30×16.
+function Switch({ on, onClick, label, disabled }) {
   return (
-    <div style={{ position: 'relative', height: 10, display: 'flex', alignItems: 'center' }}>
-      <div style={{ position: 'absolute', width: '100%', height: 1, background: 'rgba(255,255,255,0.08)', borderRadius: 1 }} />
-      <div style={{ position: 'absolute', width: `${(value / max) * 100}%`, height: 1, background: color, borderRadius: 1 }} />
-      <div style={{ position: 'absolute', left: `calc(${(value / max) * 100}% - 4px)`, width: 8, height: 8, borderRadius: '50%', background: color, pointerEvents: 'none' }} />
-      <input type="range" min={0} max={max} step={max === ALT_MAX ? 1000 : 1} value={value}
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick} disabled={disabled} className="ak-focus"
+      style={{ all: 'unset', cursor: 'pointer', flexShrink: 0, width: 30, height: 16, boxSizing: 'border-box', borderRadius: 999, padding: '0 2px',
+               display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start', background: on ? T.amber : T.ruleDark }}>
+      <span style={{ width: 12, height: 12, borderRadius: 999, background: on ? T.ink : T.etch }} />
+    </button>
+  )
+}
+
+// Curseur simple (trame d'un espace aérien, 0-30 %).
+function SliderTrack({ value, max = 30, color, onChange, label }) {
+  const pct = (value / max) * 100
+  return (
+    <div style={{ position: 'relative', height: 12, display: 'flex', alignItems: 'center' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, height: 4, background: T.ruleDark, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 4, background: color, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: 999, background: T.white, pointerEvents: 'none' }} />
+      <input type="range" min={0} max={max} step={1} value={value} aria-label={label} className="ak-focus"
         onChange={e => onChange(Number(e.target.value))}
-        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 10, margin: 0, background: 'transparent', WebkitAppearance: 'none', appearance: 'none' }} />
+        style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 12, margin: 0 }} />
+    </div>
+  )
+}
+
+// Bande d'altitude à DEUX poignées (pointeur : la poignée la plus proche suit ; clavier : flèches ±500 ft).
+const BAND_STEP = 500
+function BandSlider({ range, onChange, disabled }) {
+  const trackRef = useRef(null)
+  const dragRef = useRef(null)
+  const toVal = (clientX) => {
+    const r = trackRef.current.getBoundingClientRect()
+    const v = Math.round(((clientX - r.left) / r.width) * ALT_MAX / BAND_STEP) * BAND_STEP
+    return Math.max(0, Math.min(ALT_MAX, v))
+  }
+  const setIdx = (idx, v) => onChange(idx === 0 ? [Math.min(v, range[1] - 1000), range[1]] : [range[0], Math.max(v, range[0] + 1000)])
+  const down = (e) => {
+    if (disabled) return
+    const v = toVal(e.clientX)
+    dragRef.current = Math.abs(v - range[0]) <= Math.abs(v - range[1]) ? 0 : 1
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setIdx(dragRef.current, v)
+  }
+  const move = (e) => { if (dragRef.current != null) setIdx(dragRef.current, toVal(e.clientX)) }
+  const up = () => { dragRef.current = null }
+  const key = (idx) => (e) => {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? BAND_STEP : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -BAND_STEP : 0
+    if (!d) return
+    e.preventDefault()
+    setIdx(idx, Math.max(0, Math.min(ALT_MAX, range[idx] + d)))
+  }
+  const l = (range[0] / ALT_MAX) * 100, r = (range[1] / ALT_MAX) * 100
+  const thumb = (idx, pct) => (
+    <div role="slider" tabIndex={disabled ? -1 : 0} className="ak-focus" onKeyDown={key(idx)}
+      aria-label={idx === 0 ? 'Traffic band floor' : 'Traffic band ceiling'}
+      aria-valuemin={0} aria-valuemax={ALT_MAX} aria-valuenow={range[idx]} aria-valuetext={formatAlt(range[idx])}
+      style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, top: 0, width: 12, height: 12, borderRadius: 999,
+               background: disabled ? T.etch : T.white, cursor: disabled ? 'default' : 'grab' }} />
+  )
+  return (
+    <div ref={trackRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+      style={{ position: 'relative', height: 12, touchAction: 'none', cursor: disabled ? 'default' : 'pointer' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 4, height: 4, background: T.ruleDark, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: `${l}%`, width: `${r - l}%`, top: 4, height: 4, background: disabled ? T.ruleDark : T.etch, borderRadius: 999 }} />
+      {thumb(0, l)}{thumb(1, r)}
+    </div>
+  )
+}
+
+// Symbole avion de la légende (même dessin que le mock Claude Design).
+const LEGEND_PLANE = 'M0,-7 L1.2,-1.5 L7,1.6 L7,3 L1.2,2.4 L0.9,6 L3,8 L3,9 L0,8.2 L-3,9 L-3,8 L-0.9,6 L-1.2,2.4 L-7,3 L-7,1.6 L-1.2,-1.5 Z'
+function LegendRow({ color, ring, text, muted, outline }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <svg width="22" height="22" viewBox="-13 -13 26 26" aria-hidden="true" style={{ display: 'block' }}>
+        {ring && <circle cx="0" cy="0" r="11" fill="none" stroke={T.amber} strokeWidth="1.5" />}
+        <path d={LEGEND_PLANE} fill={color} stroke={outline || 'none'} strokeWidth={outline ? 1 : 0} />
+      </svg>
+      <span style={{ fontFamily: T.sans, fontSize: 12, color: muted ? T.etch : T.white }}>{text}</span>
     </div>
   )
 }
@@ -206,6 +269,7 @@ function useTrafficPoll(bounds) {
   const [traffic, setTraffic]   = useState([])
   const [failures, setFailures] = useState(0)
   const [ready, setReady]       = useState(false)
+  const [nonce, setNonce]       = useState(0)    // (22/09) « Retry now » de la bannière → relance immédiate
   const { latMin, lonMin, latMax, lonMax } = bounds ?? {}
 
   useEffect(() => {
@@ -235,27 +299,20 @@ function useTrafficPoll(bounds) {
     poll()
     const t = setInterval(poll, 3000)
     return () => { stop = true; clearInterval(t) }
-  }, [latMin, lonMin, latMax, lonMax])
+  }, [latMin, lonMin, latMax, lonMax, nonce])
 
-  return { traffic, failures, ready }
+  return { traffic, failures, ready, retry: () => setNonce(n => n + 1) }
 }
 
-// Pastille d'état discrète en haut de carte (chargement, trafic indisponible, flotte au sol).
-const statusPill = {
-  display: 'flex', alignItems: 'center', gap: 6,
-  background: 'rgba(5,8,20,0.82)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 10,
-  padding: '5px 10px', fontSize: 10, fontFamily: 'monospace', letterSpacing: '0.05em', color: '#fff',
-  whiteSpace: 'nowrap',
-}
-const statusDot = (c) => ({ width: 6, height: 6, borderRadius: '50%', background: c, flexShrink: 0 })
-
-export default function AerotraceMap({ flyTo = null }) {
+// (22/09) Props : flyTo {lat,lon,zoom} · onTrafficState(bool trafic indisponible) · topCenter = nœud posé en haut
+// au centre (bandeau FLEET de LivePage), la bannière « Traffic unavailable » se place juste dessous.
+export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter = null }) {
   const { clubId } = useClub()
   const mapContainer = useRef(null)
   const map = useRef(null)
   const markersRef = useRef({})
   const [mapBounds, setMapBounds] = useState(null)
-  const { traffic, failures: trafficFailures } = useTrafficPoll(mapBounds)
+  const { traffic, failures: trafficFailures, retry: retryTraffic } = useTrafficPoll(mapBounds)
   const [, setFleetLoaded] = useState(false)   // 1re lecture Firestore de la flotte terminée
   const [, setBcnReady] = useState(false)   // 1er poll des balises flotte terminé
   const [fleetOwn, setFleetOwn] = useState(new Map())   // icao24(hex) -> 'club' | 'owner' (flotte du club courant)
@@ -279,7 +336,14 @@ export default function AerotraceMap({ flyTo = null }) {
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
   const [activeAirports, setActiveAirports] = useState(['fixed'])
   const [altRange, setAltRange] = useState([0, ALT_MAX])
-  const [panelOpen, setPanelOpen] = useState({ layers: true, map: false })
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try { return { layers: localStorage.getItem('ak_live_layers') !== '0', map: false } } catch { return { layers: true, map: false } }
+  })
+  useEffect(() => { try { localStorage.setItem('ak_live_layers', panelOpen.layers ? '1' : '0') } catch { /* ignore */ } }, [panelOpen.layers])
+  const [showLegend, setShowLegend] = useState(true)
+  // Réf. à jour des couches/trames : réappliquées après un changement de fond (setStyle recrée les couches).
+  const layerStateRef = useRef({})
+  useEffect(() => { layerStateRef.current = { visible, opacity } }, [visible, opacity])
   const [mapReady, setMapReady] = useState(false)
 
   useEffect(() => {
@@ -369,6 +433,7 @@ export default function AerotraceMap({ flyTo = null }) {
   // ── (21/09) État « flotte » : désormais dans FleetStrip (page Live, source useFleet = même que In flight).
   //    La carte ne garde que l'alerte trafic.
   const trafficDown  = trafficFailures >= 2    // 2 échecs consécutifs (~6 s) → évite le clignotement sur un raté isolé
+  useEffect(() => { onTrafficState?.(trafficDown) }, [trafficDown, onTrafficState])
 
   const toggleLayer = (id) => {
     const next = { ...visible, [id]: !visible[id] }
@@ -401,14 +466,24 @@ export default function AerotraceMap({ flyTo = null }) {
     if (!map.current) return
     setActiveBasemap(styleId)
     map.current.setStyle(`https://api.maptiler.com/maps/${styleId}/style.json?key=${MAPTILER_KEY}`)
-    map.current.once('styledata', () => addOpenAIPLayers(map.current, activeAirports))
+    map.current.once('styledata', () => {
+      addOpenAIPLayers(map.current, activeAirports, isDarkMap(styleId))
+      // (22/09) avant : après un changement de fond, les couches masquées réapparaissaient et la trame revenait au défaut.
+      const { visible: v, opacity: o } = layerStateRef.current
+      Object.entries(LAYER_IDS).forEach(([id, lids]) => lids.forEach(lid => {
+        if (map.current.getLayer(lid)) map.current.setLayoutProperty(lid, 'visibility', v[id] ? 'visible' : 'none')
+      }))
+      Object.entries(o).forEach(([id, val]) => {
+        if (map.current.getLayer(`airspace-${id}-fill`)) map.current.setPaintProperty(`airspace-${id}-fill`, 'fill-color', FILL_COLORS[id](val / 100))
+      })
+    })
   }, [activeAirports])
 
   useEffect(() => {
     if (map.current) return
     map.current = new maplibregl.Map({
       container: mapContainer.current,
-      style: `https://api.maptiler.com/maps/dataviz-light/style.json?key=${MAPTILER_KEY}`,
+      style: `https://api.maptiler.com/maps/${activeBasemap}/style.json?key=${MAPTILER_KEY}`,
       center: [CENTER.lon, CENTER.lat],
       zoom: 9,
     })
@@ -425,7 +500,7 @@ export default function AerotraceMap({ flyTo = null }) {
     }
 
     map.current.on('load', () => {
-      addOpenAIPLayers(map.current, activeAirports)
+      addOpenAIPLayers(map.current, activeAirports, isDarkMap(activeBasemap))
       updateBounds()
       setMapReady(true)
     })
@@ -443,7 +518,10 @@ export default function AerotraceMap({ flyTo = null }) {
       setAspItems(airspaceItems(feats))
     })
     map.current.on('moveend', updateBounds)
-    return () => { map.current?.remove(); map.current = null }
+    // (22/09) le panneau In flight se replie / se déplie → la carte change de largeur sans resize de fenêtre.
+    const ro = new ResizeObserver(() => map.current?.resize())
+    ro.observe(mapContainer.current)
+    return () => { ro.disconnect(); map.current?.remove(); map.current = null }
   }, [])
 
   // Marqueurs trafic — RÉCONCILIÉS EN PLACE (pas de teardown/recreate à chaque poll).
@@ -470,19 +548,19 @@ export default function AerotraceMap({ flyTo = null }) {
       const isFleet  = !!own                                       // membre flotte EBBY = émet via ATC
       const isOwner  = own === 'owner'                             // conservé pour le popup (owner/club)
 
-      // Flotte EBBY = ROUGE · PARTAGEURS SafeSky (app/ADS-L) = BLEU · trafic RADIO (ADS-B/
-      // Mode-S/FLARM, simplement capté) = GRIS. Un type inconnu/vide = réseau → bleu.
+      // (22/09) Flotte = avion blanc (encre sur fond clair) dans un anneau ambre · partageurs SafeSky = bleu info ·
+      // radio (ADS-B / Mode-S / FLARM, simplement capté) = gris etch. Un type inconnu/vide = réseau → bleu.
       const isSharer   = ac._fleetBeacon || !RADIO_SRC.has(String(ac.transponder_type || '').toUpperCase())
-      const darkMap    = activeBasemap === 'dataviz-dark' || activeBasemap === 'satellite'
-      const iconFilter = isFleet ? FLEET_FILTER : (isSharer ? SAFESKY_FILTER : (darkMap ? RADIO_FILTER_DARK : RADIO_FILTER_LIGHT))
-      // (2026-08-15, demande Christophe) SEULE L'ICÔNE porte la couleur (rouge flotte / bleu trafic) ;
-      // le label reste BLANC sur fond noir = lisibilité maximale sur tout fond de carte.
-      const labelClr   = '#fff'
-      const labelBdr   = '1px solid rgba(255,255,255,0.25)'
+      const darkMap    = isDarkMap(activeBasemap)
+      const fg         = darkMap ? T.white : T.ink
+      // (22/09, Christophe) radio = quasi-noir sur fond clair (blanc sur fond sombre), plus grand : le gris etch se perdait.
+      const symClr     = isFleet || !isSharer ? fg : SAFESKY_CLR
+      const callClr    = symClr
+      const altClr     = isFleet || !isSharer ? (darkMap ? T.mutedDark : T.graphite) : T.etch
       const iconSrc    = `/icons/${iconForBeacon(ac.beacon_type)}.svg`
       const rot        = ac.course || 0
       const callTxt    = ac.call_sign || ac.id
-      const altTxt     = `${ac.altitude || 0} ft`
+      const altTxt     = `${ac.altitude || 0}`
       seen.add(ac.id)
 
       // (2026-08-17) ANCRAGE SUR L'HEURE DU FIX (last_update radar / timestamp balise), plus sur
@@ -504,20 +582,25 @@ export default function AerotraceMap({ flyTo = null }) {
       let o = markersRef.current[ac.id]
       if (!o) {
         const el = document.createElement('div')
-        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;cursor:pointer;'
-        const img = document.createElement('img')
-        img.style.cssText = 'width:32px;height:32px;transform-origin:center center;'
+        el.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;'
+        const sym = document.createElement('div')          // boîte du symbole (26 px, 40 px avec anneau flotte)
+        sym.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;'
+        const ring = document.createElement('div')
+        ring.style.cssText = `position:absolute;inset:0;border-radius:50%;border:1.5px solid ${T.amber};box-sizing:border-box;`
+        const img = document.createElement('div')          // icône par type, colorée par masque CSS
+        img.style.cssText = 'transform-origin:center center;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;'
+        sym.append(ring, img)
         const lbl = document.createElement('div')
-        lbl.style.cssText = 'margin-top:2px;background:rgba(0,0,0,0.72);border-radius:4px;padding:1px 5px;text-align:center;white-space:nowrap;font-family:monospace;line-height:1.2;'
-        const callEl = document.createElement('div'); callEl.style.cssText = 'font-size:10px;font-weight:700;'
-        const altEl  = document.createElement('div'); altEl.style.cssText  = 'font-size:9px;font-weight:400;'
-        lbl.append(callEl, altEl); el.append(img, lbl)
+        lbl.style.cssText = 'text-align:center;white-space:nowrap;font-family:var(--font-mono);font-size:11px;font-weight:500;line-height:1.3;font-variant-numeric:tabular-nums;'
+        const callEl = document.createElement('div')
+        const altEl  = document.createElement('div')
+        lbl.append(callEl, altEl); el.append(sym, lbl)
         const popup = new maplibregl.Popup({ offset: 25 })
         const marker = new maplibregl.Marker({ element: el })
           .setLngLat([dispLon, dispLat])
           .setPopup(popup)
           .addTo(map.current)
-        o = { marker, img, lbl, callEl, altEl, sig: '', bodyHtml: '' }
+        o = { marker, sym, ring, img, lbl, callEl, altEl, sig: '', bodyHtml: '' }
         markersRef.current[ac.id] = o
         // (photo popup) fetch à l'OUVERTURE seulement : fiche club d'abord, sinon planespotters
         // (hex si l'id en est un, sinon immat). Résultat mémorisé → réouvertures instantanées.
@@ -542,26 +625,35 @@ export default function AerotraceMap({ flyTo = null }) {
       }
 
       // MAJ visuelle SEULEMENT si un attribut a changé (le src ne bouge pas → pas de reload SVG)
-      const sig = `${iconSrc}|${iconFilter}|${rot}|${labelClr}|${labelBdr}|${callTxt}|${altTxt}`
+      const sig = `${iconSrc}|${symClr}|${isFleet}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
-        if (o.img.getAttribute('src') !== iconSrc) o.img.setAttribute('src', iconSrc)
-        o.img.style.filter = iconFilter
+        const box = isFleet ? 44 : 34, icon = isFleet ? 28 : 34
+        o.sym.style.width = o.sym.style.height = `${box}px`
+        o.ring.style.display = isFleet ? 'block' : 'none'
+        o.img.style.width = o.img.style.height = `${icon}px`
+        o.img.style.webkitMaskImage = o.img.style.maskImage = `url(${iconSrc})`
+        o.img.style.background = symClr
         o.img.style.transform = `rotate(${rot}deg)`
-        o.lbl.style.border = labelBdr
-        o.callEl.style.color = labelClr; o.callEl.textContent = callTxt
-        o.altEl.style.color  = labelClr; o.altEl.textContent  = altTxt
+        o.callEl.style.color = callClr; o.callEl.textContent = callTxt
+        o.altEl.style.color  = altClr;  o.altEl.textContent  = altTxt
         o.sig = sig
       }
 
+      const srcLine = isFleet ? `Club fleet · AirKi Core · ${isOwner ? 'owner' : 'club'}`
+        : isSharer ? 'SafeSky user' : `Radio traffic · ${ac.transponder_type || 'ADS-B'}`
+      const dotClr = isFleet ? T.amber : (isSharer ? SAFESKY_CLR : T.ink)
       o.bodyHtml = `
-          <div style="font-family:monospace;font-size:12px;line-height:1.6;">
-            <b>${callTxt}</b>${isFleet ? ` <span style="color:${FLEET_CLR};">● EBBY FLEET · ${isOwner ? 'owner' : 'club'}</span>` : (isSharer ? ` <span style="color:${SAFESKY_CLR};">● SafeSky (sharing)</span>` : ` <span style="color:${RADIO_CLR};">● Radio</span>`)}<br/>
-            Type: ${ac._fleetBeacon ? 'AeroTrace beacon' : ac.beacon_type}<br/>
-            Src: ${ac._fleetBeacon ? 'ADS-L (AeroTrace)' : (ac.transponder_type || 'SafeSky network')}<br/>
-            Alt: ${ac.altitude} ft<br/>
-            Spd: ${Math.round(ac.ground_speed * 1.852)} km/h<br/>
-            Hdg: ${ac.course}°<br/>
-            Status: ${ac.status}
+          <div style="font-family:var(--font-sans);font-size:12px;line-height:1.5;color:${T.ink};min-width:170px;">
+            <div style="font-family:var(--font-mono);font-size:15px;font-weight:500;">${callTxt}</div>
+            <div style="display:flex;align-items:center;gap:6px;color:${T.graphite};margin-bottom:6px;">
+              <span style="width:8px;height:8px;border-radius:999px;background:${dotClr};flex-shrink:0;"></span>${srcLine}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;">
+              <div><div style="font-size:10px;letter-spacing:0.08em;color:${T.etch};">ALT FT</div><div style="font-size:14px;">${ac.altitude ?? '−−−'}</div></div>
+              <div><div style="font-size:10px;letter-spacing:0.08em;color:${T.etch};">GS KT</div><div style="font-size:14px;">${ac.ground_speed != null ? Math.round(ac.ground_speed) : '−−−'}</div></div>
+              <div><div style="font-size:10px;letter-spacing:0.08em;color:${T.etch};">HDG</div><div style="font-size:14px;">${ac.course != null ? String(Math.round(ac.course) % 360).padStart(3, '0') : '−−−'}</div></div>
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.08em;color:${T.etch};margin-top:6px;">${String(ac._fleetBeacon ? 'ADS-L beacon' : (ac.beacon_type || '')).toUpperCase()}${ac.status ? ` · ${String(ac.status).toUpperCase()}` : ''}</div>
           </div>`
       o.marker.getPopup().setHTML(popupPhotoHtml(popupPhotoRef.current[ac.id]) + o.bodyHtml)
     })
@@ -607,142 +699,148 @@ export default function AerotraceMap({ flyTo = null }) {
     return () => clearInterval(t)
   }, [])
 
-  const panel = { background: 'rgba(5,8,20,0.82)', borderRadius: 10, border: '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }
-  const titleStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', cursor: 'pointer', userSelect: 'none' }
-  const titleText = { fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.15em', color: 'rgba(255,255,255,0.9)' }
-  const triangle = (open) => (
-    <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
+  // ── Habillage (22/09, Claude Design « Live ») : panneaux encre, bord 1 px #2C2C2C, rayon 6, aucune ombre.
+  const inkPanel = { background: T.ink, border: `1px solid ${T.ruleDark}`, borderRadius: 6 }
+  const rowText = (on) => ({ fontFamily: T.sans, fontSize: 12, color: on ? T.white : T.mutedDark })
+  const bandCount = allTargets.length
+  const chevron = (open) => (
+    <span style={{ display: 'flex', color: T.etch, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={16} /></span>
   )
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: T.ink }}>
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
-      {trafficDown && (
-        <div role="status" aria-live="polite" style={{ position: 'absolute', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 10, pointerEvents: 'none' }}>
-          <div style={statusPill}><span style={statusDot('#F5A623')} />Traffic unavailable, retrying…</div>
-        </div>
-      )}
-
-      {aspItems && (
-        <div style={{ position: 'absolute', left: 12, bottom: 24, zIndex: 10, width: 280, maxHeight: '42vh', overflowY: 'auto',
-                      background: 'rgba(5,8,20,0.88)', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 10px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <span style={{ fontSize: 10, fontWeight: 700, fontFamily: 'monospace', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.9)' }}>AIRSPACES</span>
-            <span onClick={() => { setAspItems(null); setAspHl(null) }}
-                  style={{ cursor: 'pointer', color: 'rgba(255,255,255,0.6)', fontSize: 15, lineHeight: 1, padding: '0 3px' }}>×</span>
+      {/* Haut, centre : bandeau FLEET (LivePage) + bannière trafic indisponible */}
+      <div style={{ position: 'absolute', top: 20, left: 252, right: 60, zIndex: 11, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
+        {topCenter}
+        {trafficDown && (
+          <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
+            <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
+              SafeSky and the ADS-B feed did not answer. Club aircraft with an AirKi Core are still shown.
+            </Banner>
           </div>
-          {aspItems.map((it, i) => (
-            <div key={i} onClick={() => setAspHl(aspHl === it.name ? null : it.name)}
-                 title="Click to highlight the area on the map"
-                 style={{ margin: '5px 0', padding: '3px 6px 3px 8px', borderLeft: `3px solid ${it.color}`, borderRadius: 3, cursor: 'pointer',
-                          background: aspHl === it.name ? 'rgba(255,255,255,0.10)' : 'transparent' }}>
-              <div style={{ fontSize: 12, color: '#fff', fontWeight: 700 }}>
-                {it.name} <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 400 }}>({it.typ}{it.cls ? ` · class ${it.cls}` : ''})</span>
-              </div>
-              <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'rgba(255,255,255,0.8)' }}>{it.lo} → {it.up}</div>
-            </div>
-          ))}
-        </div>
-      )}
+        )}
+      </div>
 
-      <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', flexDirection: 'column', gap: 4, zIndex: 10, minWidth: 172 }}>
+      {/* Haut, gauche : LAYERS */}
+      <div style={{ ...inkPanel, position: 'absolute', left: 20, top: 20, width: 212, zIndex: 10, maxHeight: 'calc(100% - 40px)', overflowY: 'auto' }}>
+        <button type="button" className="ak-focus" onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))} aria-expanded={panelOpen.layers}
+          title={panelOpen.layers ? 'Collapse layers' : 'Show layers'}
+          style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                   padding: '10px 12px', borderBottom: panelOpen.layers ? `1px solid ${T.ruleDark}` : 'none' }}>
+          <span style={labelStyle(T.mutedDark)}>LAYERS</span>
+          {chevron(panelOpen.layers)}
+        </button>
 
-        {/* AIP LAYERS */}
-        <div style={panel}>
-          <div style={titleStyle} onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))}>
-            <span style={titleText}>AIP LAYERS</span>
-            {triangle(panelOpen.layers)}
-          </div>
-          {panelOpen.layers && (
-            <div style={{ padding: '0 8px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {LAYERS.map(layer => {
+        {panelOpen.layers && (
+          <div style={{ padding: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {LAYERS.filter(l => l.id !== 'traffic').map(layer => {
                 const on = visible[layer.id]
-                const hasContent = on && (layer.hasSlider || layer.hasAltSlider || layer.id === 'airports')
                 return (
-                  <div key={layer.id}>
-                    <div onClick={() => toggleLayer(layer.id)} style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '4px 6px', borderRadius: hasContent ? '6px 6px 0 0' : 6,
-                      background: on ? `rgba(${layer.rgb},0.1)` : 'rgba(255,255,255,0.02)',
-                      borderLeft: `2px solid ${on ? layer.color : 'rgba(255,255,255,0.07)'}`,
-                      cursor: 'pointer', userSelect: 'none',
-                    }}>
-                      <span style={{ fontSize: 9, fontWeight: 500, fontFamily: 'monospace', letterSpacing: '0.05em', color: on ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)' }}>
-                        {layer.label}
+                  <div key={layer.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div onClick={() => toggleLayer(layer.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: 2, border: `1.5px solid ${on ? layer.color : T.etch}`, background: on ? `rgba(${layer.rgb},${Math.max(0.15, (opacity[layer.id] ?? 0) / 30)})` : 'transparent' }} />
+                        <span style={rowText(on)}>{layer.label}</span>
                       </span>
-                      <span style={{ fontSize: 8, color: on ? layer.color : 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
-                        {layer.hasSlider && on && `${opacity[layer.id]}%`}
-                        {layer.hasAltSlider && on && `${filteredTraffic.length} ✈ · ${formatAlt(altRange[0])}·${formatAlt(altRange[1])}`}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                        {layer.hasSlider && on && <span style={monoStyle(11, T.mutedDark)}>{opacity[layer.id]}%</span>}
+                        <Switch on={on} onClick={() => toggleLayer(layer.id)} label={`Show ${layer.label}`} />
                       </span>
                     </div>
-
                     {layer.hasSlider && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '4px 6px 5px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
-                        <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} onChange={v => handleOpacity(layer.id, v)} />
-                      </div>
+                      <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} label={`${layer.label} shading`} onChange={v => handleOpacity(layer.id, v)} />
                     )}
-
                     {layer.id === 'airports' && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 18 }}>
                         {AIRPORT_TYPES.map(t => {
                           const checked = activeAirports.includes(t.id)
                           return (
-                            <div key={t.id} onClick={() => toggleAirportType(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-                              <div style={{ width: 8, height: 8, borderRadius: 2, border: `1.5px solid ${checked ? layer.color : 'rgba(255,255,255,0.2)'}`, background: checked ? layer.color : 'transparent', flexShrink: 0, transition: 'all 0.15s' }} />
-                              <span style={{ fontSize: 9, fontFamily: 'monospace', color: checked ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.6)' }}>{t.label}</span>
-                            </div>
+                            <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
+                              <input type="checkbox" className="ak-focus" checked={checked} onChange={() => toggleAirportType(t.id)}
+                                style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 10, height: 10, borderRadius: 2, cursor: 'pointer',
+                                         border: `1.5px solid ${checked ? T.white : T.etch}`, background: checked ? T.white : 'transparent' }} />
+                              <span style={{ ...rowText(checked), fontSize: 11 }}>{t.label}</span>
+                            </label>
                           )
                         })}
-                      </div>
-                    )}
-
-                    {layer.hasAltSlider && on && (
-                      <div onClick={e => e.stopPropagation()} style={{ padding: '5px 6px 6px', background: 'rgba(5,8,20,0.7)', borderLeft: `2px solid ${layer.color}`, borderRadius: '0 0 6px 6px' }}>
-                        {[0, 1].map(idx => (
-                          <div key={idx} style={{ marginBottom: idx === 0 ? 5 : 0 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                              <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.55)', fontFamily: 'monospace' }}>{idx === 0 ? 'MIN' : 'MAX'}</span>
-                              <span style={{ fontSize: 8, color: layer.color, fontFamily: 'monospace' }}>{formatAlt(altRange[idx])}</span>
-                            </div>
-                            <SliderTrack value={altRange[idx]} max={ALT_MAX} color={layer.color}
-                              onChange={v => setAltRange(prev => idx === 0
-                                ? [Math.min(v, prev[1] - 1000), prev[1]]
-                                : [prev[0], Math.max(v, prev[0] + 1000)])} />
-                          </div>
-                        ))}
                       </div>
                     )}
                   </div>
                 )
               })}
             </div>
-          )}
-        </div>
 
-        {/* MAP */}
-        <div style={panel}>
-          <div style={titleStyle} onClick={() => setPanelOpen(p => ({ ...p, map: !p.map }))}>
-            <span style={titleText}>MAP</span>
-            {triangle(panelOpen.map)}
-          </div>
-          {panelOpen.map && (
-            <div style={{ padding: '0 8px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {BASEMAPS.map(bm => (
-                <div key={bm.id} onClick={() => changeBasemap(bm.id)} style={{
-                  padding: '4px 6px', borderRadius: 6, cursor: 'pointer',
-                  background: activeBasemap === bm.id ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  borderLeft: `2px solid ${activeBasemap === bm.id ? 'rgba(255,255,255,0.4)' : 'transparent'}`,
-                }}>
-                  <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 500, letterSpacing: '0.05em', color: activeBasemap === bm.id ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.55)' }}>
-                    {bm.label.toUpperCase()}
-                  </span>
-                </div>
-              ))}
+            {/* Trafic : interrupteur + bande d'altitude */}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.ruleDark}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={labelStyle(T.mutedDark)}>TRAFFIC BAND</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={monoStyle(11, trafficDown || !visible.traffic ? T.mutedDark : T.white)}>{trafficDown ? '−−−' : `${bandCount} AC`}</span>
+                  <Switch on={visible.traffic} onClick={() => toggleLayer('traffic')} label="Show traffic" />
+                </span>
+              </div>
+              <BandSlider range={altRange} onChange={setAltRange} disabled={trafficDown || !visible.traffic} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+                <span style={monoStyle(11, trafficDown ? T.mutedDark : T.white)}>{formatAlt(altRange[0])}</span>
+                <span style={monoStyle(11, trafficDown ? T.mutedDark : T.white)}>{formatAlt(altRange[1])}</span>
+              </div>
             </div>
-          )}
-        </div>
 
+            {/* Fond de carte */}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.ruleDark}` }}>
+              <div style={{ ...labelStyle(T.mutedDark), marginBottom: 8 }}>MAP</div>
+              <div role="radiogroup" aria-label="Map type" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {BASEMAPS.map(bm => {
+                  const on = activeBasemap === bm.id
+                  return (
+                    <button key={bm.id} type="button" role="radio" aria-checked={on} className="ak-focus" onClick={() => changeBasemap(bm.id)}
+                      style={{ all: 'unset', cursor: 'pointer', padding: '3px 8px', borderRadius: 4, fontFamily: T.sans, fontSize: 11,
+                               border: `1px solid ${on ? T.white : T.ruleDark}`, color: on ? T.white : T.mutedDark }}>
+                      {bm.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bas, gauche : espaces aériens sous le clic */}
+      {aspItems && (
+        <div style={{ ...inkPanel, position: 'absolute', left: 20, bottom: 36, zIndex: 10, width: 280, maxHeight: '42vh', overflowY: 'auto', padding: '10px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={labelStyle(T.mutedDark)}>AIRSPACES</span>
+            <button type="button" className="ak-focus" onClick={() => { setAspItems(null); setAspHl(null) }} title="Close"
+              style={{ all: 'unset', cursor: 'pointer', display: 'flex', color: T.etch }}><Icon name="close" size={16} /></button>
+          </div>
+          {aspItems.map((it, i) => (
+            <div key={i} onClick={() => setAspHl(aspHl === it.name ? null : it.name)} title="Click to highlight the area on the map"
+                 style={{ margin: '6px 0', padding: '4px 8px', borderLeft: `3px solid ${it.color}`, borderRadius: 3, cursor: 'pointer',
+                          background: aspHl === it.name ? '#1E1E1E' : 'transparent' }}>
+              <div style={{ fontFamily: T.sans, fontSize: 12, color: T.white, fontWeight: 600 }}>
+                {it.name} <span style={{ color: T.mutedDark, fontWeight: 400 }}>({it.typ}{it.cls ? ` · class ${it.cls}` : ''})</span>
+              </div>
+              <div style={monoStyle(11, T.mutedDark)}>{it.lo} – {it.up}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Bas, droite : LÉGENDE (repliable) */}
+      <div style={{ ...inkPanel, position: 'absolute', right: 16, bottom: 36, zIndex: 10, padding: showLegend ? '12px 14px' : '8px 12px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <button type="button" className="ak-focus" onClick={() => setShowLegend(v => !v)} aria-expanded={showLegend} title={showLegend ? 'Hide legend' : 'Show legend'}
+          style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span style={labelStyle(T.mutedDark)}>LEGEND</span>{chevron(showLegend)}
+        </button>
+        {showLegend && (<>
+          <LegendRow ring color={T.white} text="Club fleet · AirKi Core" />
+          <LegendRow color={trafficDown ? T.etch : SAFESKY_CLR} text={trafficDown ? 'SafeSky user · feed down' : 'SafeSky user'} muted={trafficDown} />
+          <LegendRow color={trafficDown ? T.etch : T.ink} outline={trafficDown ? null : T.white} text={trafficDown ? 'Radio traffic · feed down' : 'Radio traffic · ADS-B / FLARM'} muted={trafficDown} />
+        </>)}
       </div>
     </div>
   )

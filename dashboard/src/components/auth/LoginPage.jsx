@@ -41,7 +41,7 @@ export default function LoginPage() {
       {/* (21/09) bloc unique : le bouton prend EXACTEMENT la largeur du lockup (même axe gauche/droite), groupe
           remonté de 6 vh pour un centrage optique (un bloc parfaitement centré paraît trop bas). */}
       <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', gap: 44, marginBottom: '6vh' }}>
-        <AirKiLockup size={64} color="#FFFFFF" baseline />
+        <AirKiLockup size={76} color="#FFFFFF" baseline />
         <button
           onClick={handleLogin}
           disabled={busy}

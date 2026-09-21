@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { collection, getDocs, query, where } from 'firebase/firestore'
-import { db } from '../firebase/config'
 import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import useFleet from '../hooks/useFleet'
+import useOwnerNames, { ownerOf } from '../hooks/useOwnerNames'
 import { useClub } from '../contexts/ClubContext'
 import {
   T, labelStyle, monoStyle, StatusDot, Button, Banner, Skeleton,
@@ -45,8 +43,6 @@ function liveFigures(ac) {
   }
 }
 const ident = (ac) => ac.callSign || ac.registration || '−−−'
-// (21/09) Étiquettes CLUB / OWNER conservées ; pour un avion privé, le nom du propriétaire s'ajoute.
-const ownerOf = (ac, owners) => (ac.ownership === 'owner' && ac.ownerPilotId) ? (owners[ac.ownerPilotId] || null) : null
 
 function Figure({ label, value }) {
   return (
@@ -146,13 +142,7 @@ export default function EnVolPage() {
   const { fleet, loading, error } = useFleet(clubId)
   const navigate = useNavigate()
   const handleLocate = (lat, lon) => navigate('/live', { state: { flyTo: { lat, lon, zoom: 13 } } })
-  const [owners, setOwners] = useState({})   // pilotId → « Prénom Nom » (propriétaires d'avions privés)
-  useEffect(() => {
-    if (!clubId) return
-    getDocs(query(collection(db, 'pilots'), where('clubId', '==', clubId)))
-      .then(snap => { const m = {}; snap.docs.forEach(d => { const p = d.data(); m[d.id] = [p.firstName, p.lastName].filter(Boolean).join(' ') || p.trigram || '' }); setOwners(m) })
-      .catch(err => console.warn('[InFlight] owners:', err?.message || err))
-  }, [clubId])
+  const owners = useOwnerNames(clubId)   // pilotId → nom (propriétaires d'avions privés)
 
   const byName = (a, b) => ident(a).localeCompare(ident(b))
   const inFlight = fleet.filter(a => a.status === 'IN_FLIGHT' || a.status === 'LTE_LOST')

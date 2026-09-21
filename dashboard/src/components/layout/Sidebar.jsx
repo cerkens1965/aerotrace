@@ -11,6 +11,10 @@ import { auth } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
 import { APP_VERSION, APP_CHANNEL, BUILD_DATE } from '../../version'
 import { AirKiLockup } from '../ui/AirKiMark'
+import Icon from '../ui/Icon'
+import { ensureAirKiStyles } from '../ui/styles'
+
+ensureAirKiStyles()
 
 const ROLE_LABELS = { super_admin: 'Super admin', admin: 'Admin', instructor: 'Instructor', user: 'Pilot' }
 
@@ -18,15 +22,15 @@ const ROLE_LABELS = { super_admin: 'Super admin', admin: 'Admin', instructor: 'I
 function getNav(role) {
   // Pilote (user) : Live + Logbook. Loop (/replay) n'est plus dans le menu — lecteur d'un vol,
   // ouvert depuis le Logbook ; l'entrée Logbook reste active pendant la lecture (voir isActive).
-  const nav = [{ path: '/live', label: 'Live' }]
+  const nav = [{ path: '/live', label: 'Live', icon: 'map' }]
   if (role === 'instructor' || role === 'admin' || role === 'super_admin') {
-    nav.push({ path: '/in-flight', label: 'In flight' })
+    nav.push({ path: '/in-flight', label: 'In flight', icon: 'plane' })
   }
-  nav.push({ path: '/logbook', label: 'Logbook' })
+  nav.push({ path: '/logbook', label: 'Logbook', icon: 'list' })
   if (role === 'admin' || role === 'super_admin') {
-    nav.push({ path: '/fleet', label: 'Fleet' })
-    nav.push({ path: '/admin', label: 'Admin' })
-    nav.push({ path: '/dev',   label: 'Dev' })
+    nav.push({ path: '/fleet', label: 'Fleet', icon: 'archive' })
+    nav.push({ path: '/admin', label: 'Admin', icon: 'settings' })
+    nav.push({ path: '/dev',   label: 'Dev', icon: 'search' })
   }
   return nav
 }
@@ -46,13 +50,15 @@ const S = {
     fontFamily: 'var(--font-sans)',
   },
   head: { padding: '18px 16px 14px', borderBottom: '1px solid var(--rule-dark)' },
-  nav: { display: 'flex', flexDirection: 'column', gap: 2, padding: '10px 8px', flex: 1 },
+  // (22/09, Claude Design « Live ») lignes pleine largeur, icône 18 px + libellé 13 px ; active = fond #1E1E1E,
+  // filet ambre 2 px à gauche, blanc ; inactive = #9A9A94 (blanc au survol).
+  nav: { display: 'flex', flexDirection: 'column', gap: 2, padding: '10px 0', flex: 1 },
   item: (active) => ({
-    display: 'flex', alignItems: 'center', height: 32, padding: '0 10px',
-    borderRadius: 4, border: '1px solid transparent', cursor: 'pointer',
-    background: active ? '#FFFFFF' : 'transparent',
-    color: active ? 'var(--ink)' : '#FFFFFF',
-    fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13, letterSpacing: '-0.01em',
+    display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px 9px 14px',
+    border: 'none', borderLeft: `2px solid ${active ? 'var(--amber)' : 'transparent'}`, borderRadius: 0, cursor: 'pointer',
+    background: active ? '#1E1E1E' : 'transparent',
+    color: active ? '#FFFFFF' : 'var(--muted-dark)',
+    fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 13,
     textAlign: 'left', width: '100%',
   }),
   foot: { padding: '12px 16px 14px', borderTop: '1px solid var(--rule-dark)', display: 'flex', flexDirection: 'column', gap: 8 },
@@ -86,8 +92,8 @@ export default function Sidebar({ user, role }) {
         {nav.map(item => {
           const active = isActive(item.path, location.pathname)
           return (
-            <button key={item.path} onClick={() => navigate(item.path)} style={S.item(active)} aria-current={active ? 'page' : undefined}>
-              {item.label}
+            <button key={item.path} className="ak-focus ak-nav" onClick={() => navigate(item.path)} style={S.item(active)} aria-current={active ? 'page' : undefined}>
+              <Icon name={item.icon} size={18} />{item.label}
             </button>
           )
         })}

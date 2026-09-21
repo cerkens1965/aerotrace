@@ -9,6 +9,7 @@ const CSS = `
 @keyframes ak-skeleton { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .ak-skeleton { animation: ak-skeleton 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ak-skeleton { animation: none; } }
+.ak-nav:not([aria-current]):hover { color: #FFFFFF !important; }
 .ak-drawer { width: 440px; }
 @media (max-width: 600px) { .ak-drawer { width: 100%; } }
 `

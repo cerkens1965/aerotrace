@@ -25,6 +25,7 @@ export default function useFleet(clubId) {
   const [fleetBcn,  setFleetBcn]  = useState({})   // FlyADSL /beacons/search par callsign — réseau + monde entier
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
+  const [updatedAt, setUpdatedAt] = useState(null)   // (22/09) dernier poll réussi (Live : « UPDATED … UTC »)
   const timerRef = useRef(null)
 
   // ── 1. Flotte Firestore ────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ export default function useFleet(clubId) {
         ({ ...t, altitude: t.altitude != null ? Math.round(t.altitude * 3.28084) : t.altitude,
            ground_speed: t.ground_speed != null ? t.ground_speed * 1.94384 : t.ground_speed })) : []   // ⚠️ ground_speed aussi en SI (m/s) → kt, cohérent avec le chemin beacon
       setSafesky(tr)
+      setUpdatedAt(Date.now())
     } catch (err) {
       console.warn('[useFleet] SafeSky poll failed:', err.message)
     }
@@ -90,7 +92,7 @@ export default function useFleet(clubId) {
         const res = await fetch(`/safesky/fleet?call_signs=${signs.join(',')}`)
         if (!res.ok) throw new Error(`fleet ${res.status}`)
         const data = await res.json()
-        if (!stop) setFleetBcn(data.beacons ?? {})
+        if (!stop) { setFleetBcn(data.beacons ?? {}); setUpdatedAt(Date.now()) }
       } catch (err) { console.warn('[useFleet] fleet beacons poll failed:', err.message) }
     }
     poll()
@@ -184,5 +186,6 @@ export default function useFleet(clubId) {
     unknown:  fleet.filter(a => a.status === 'UNKNOWN'),
     loading,
     error,
+    updatedAt,
   }
 }
