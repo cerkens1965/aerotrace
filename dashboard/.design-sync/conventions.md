@@ -15,7 +15,7 @@ No provider or theme wrapper. Link `styles.css` once: it defines the colour toke
 - Status colours: green `#22C55E` confirms, amber is transient, grey `#8D9096` is off. **No red anywhere**, including errors and destructive actions.
 - Words in Instrument Sans (`var(--font-sans)`); every figure, time, registration, code and technical label in Geist Mono (`var(--font-mono)`).
 - Page ground is paper `#F4F2ED`; cards are white with a 1 px `#DDD9D2` border; metric panels are ink `#141414` with white figures and `#9A9A94` labels.
-- In the dashboard, the unit is always written **AKC** and the cockpit display **AKV** (e.g. "Club fleet · AKC", "AKC ONLY", "NO AKC LINKED") — never "AirKi Core" / "AirKi View" in this app. "Loop" = flight replay, plain text.
+- In the dashboard, the unit is always written **AKcore** and the cockpit display **AKview**, with exactly that casing even inside capital labels (e.g. "Club fleet · AKcore", "AKcore ONLY", "NO AKcore LINKED") — never "AirKi Core" / "AirKi View" / "AKC" / "AKV" in running copy. "Loop" = flight replay, plain text.
 - UI text is English (UK). Dates as `21 Sep 2026 · 14:32 UTC`; speeds in kt, altitudes in ft, durations `HH:MM`; missing value `−−−`.
 
 ## Tokens

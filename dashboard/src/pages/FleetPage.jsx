@@ -438,7 +438,7 @@ export default function FleetPage() {
           <span style={labelStyle(T.etch)}>FIRMWARE · ADMIN</span>
         </div>
         <p style={{ fontSize: 14, lineHeight: 1.5, color: T.graphite, margin: '6px 0 0', maxWidth: 720 }}>
-          Firmware status of each AKC unit and its AKV display. Updated whenever
+          Firmware status of each AKcore unit and its AKview display. Updated whenever
           the unit reaches WiFi (post-flight upload or end of an update).
         </p>
 
