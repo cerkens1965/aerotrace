@@ -127,7 +127,7 @@ function AirborneCard({ ac, owner, now, onLocate }) {
     statusText = `LTE LOST · ${Math.max(1, Math.round(silent / 60000))} MIN`
     const lastAlt = f?.alt != null ? `${Math.round(f.alt * 3.28084)} FT` : null
     const lastGs = f?.spd != null ? `${Math.round(f.spd)} KT` : null
-    source = `AIRKI CORE ONLY${lastAlt || lastGs ? ` · LAST ${[lastAlt, lastGs].filter(Boolean).join(' / ')}` : ''}${f?.lastSeen ? `, ${mmss(silent)} AGO` : ''}`
+    source = `AKC ONLY${lastAlt || lastGs ? ` · LAST ${[lastAlt, lastGs].filter(Boolean).join(' / ')}` : ''}${f?.lastSeen ? `, ${mmss(silent)} AGO` : ''}`
   } else {
     statusText = 'IN FLIGHT · LIVE'
     const a = l?.altitude ?? (f?.alt != null ? f.alt * 3.28084 : null)
@@ -137,7 +137,7 @@ function AirborneCard({ ac, owner, now, onLocate }) {
     if (s != null) gs = String(Math.round(s))
     if (h != null) hdg = String(Math.round(h) % 360).padStart(3, '0')
     const age = l?.fixTs ? Math.max(0, Math.round((now - l.fixTs) / 1000)) : null
-    source = l ? `SAFESKY NETWORK${age != null ? ` · ${age} S AGO` : ''}` : 'AIRKI CORE'
+    source = l ? `SAFESKY NETWORK${age != null ? ` · ${age} S AGO` : ''}` : 'AKC'
   }
   const since = startMs(ac) ? hhmm(now - startMs(ac)) : MISSING
   return (
@@ -235,7 +235,7 @@ export default function EnVolPage() {
     const keys = [ac.callSign, ac.registration].map(k => String(k || '').toUpperCase()).filter(Boolean)
     const t = Math.max(ac.fdrData?.lastSeen || 0, ...keys.map(k => boxSeen[k] || 0))
     if (t) return `LAST SIGNAL ${dayLabel(t, now)} · ${utcHM(t)} UTC`
-    return keys.some(k => k in boxSeen) ? 'NO SIGNAL RECEIVED' : 'NO AIRKI CORE LINKED'
+    return keys.some(k => k in boxSeen) ? 'NO SIGNAL RECEIVED' : 'NO AKC LINKED'
   }
 
   const refreshing = { tone: 'off', text: 'Refreshing' }

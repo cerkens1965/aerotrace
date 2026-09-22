@@ -639,7 +639,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         o.sig = sig
       }
 
-      const srcLine = isFleet ? `Club fleet · AirKi Core · ${isOwner ? 'owner' : 'club'}`
+      const srcLine = isFleet ? `Club fleet · AKC · ${isOwner ? 'owner' : 'club'}`
         : isSharer ? 'SafeSky user' : `Radio traffic · ${ac.transponder_type || 'ADS-B'}`
       const dotClr = isFleet ? T.amber : (isSharer ? SAFESKY_CLR : T.ink)
       o.bodyHtml = `
@@ -717,7 +717,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         {trafficDown && (
           <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
             <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
-              SafeSky and the ADS-B feed did not answer. Club aircraft with an AirKi Core are still shown.
+              SafeSky and the ADS-B feed did not answer. Club aircraft fitted with an AKC are still shown.
             </Banner>
           </div>
         )}
@@ -837,7 +837,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
           <span style={labelStyle(T.mutedDark)}>LEGEND</span>{chevron(showLegend)}
         </button>
         {showLegend && (<>
-          <LegendRow ring color={T.white} text="Club fleet · AirKi Core" />
+          <LegendRow ring color={T.white} text="Club fleet · AKC" />
           <LegendRow color={trafficDown ? T.etch : SAFESKY_CLR} text={trafficDown ? 'SafeSky user · feed down' : 'SafeSky user'} muted={trafficDown} />
           <LegendRow color={trafficDown ? T.etch : T.ink} outline={trafficDown ? null : T.white} text={trafficDown ? 'Radio traffic · feed down' : 'Radio traffic · ADS-B / FLARM'} muted={trafficDown} />
         </>)}
