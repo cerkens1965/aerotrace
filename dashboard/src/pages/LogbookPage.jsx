@@ -16,6 +16,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { collection, getDocs, query, where, doc, updateDoc, addDoc, deleteDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { sortOptions } from '../utils/sortOptions'
 import { ref, uploadBytesResumable } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV } from '../utils/csvParser'
@@ -580,10 +581,10 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
 
   const toggle = (active, onClick, label) => <Toggle mono active={active} onClick={onClick}>{label}</Toggle>
   const selectOpts = {
-    pilots: pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() })),
-    instr: instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() })),
-    ac: aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } }),
-    types: Object.entries(FLIGHT_TYPES).map(([k, v]) => ({ value: k, label: v.label })),
+    pilots: sortOptions(pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() }))),
+    instr: sortOptions(instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() }))),
+    ac: sortOptions(aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } })),
+    types: sortOptions(Object.entries(FLIGHT_TYPES).map(([k, v]) => ({ value: k, label: v.label }))),
     status: [{ value: '', label: 'Any status' }, { value: 'validated', label: 'Validated' }, { value: 'pending', label: `To assign (${pendingAll})` }],
   }
 

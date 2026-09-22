@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { collection, setDoc, updateDoc, doc, getDoc, serverTimestamp, getDocs, writeBatch } from 'firebase/firestore'
+import { compareText } from '../utils/sortOptions'
 import { db } from '../firebase/config'
 import { useClub } from '../contexts/ClubContext'
 import { AirKiLockup } from '../components/ui/AirKiMark'
@@ -245,7 +246,7 @@ export default function SelectClubPage() {
               aria-label="Target club"
               style={inputStyle}>
               <option value="">Pick target club…</option>
-              {activeClubs.map(c => (
+              {[...activeClubs].sort((a, b) => compareText(a.code, b.code)).map(c => (
                 <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
               ))}
             </select>

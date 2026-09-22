@@ -4,6 +4,7 @@ import {
   collection, getDocs, addDoc, updateDoc, setDoc, deleteDoc,
   doc, serverTimestamp, query, where,
 } from 'firebase/firestore'
+import { sortOptions, compareText } from '../utils/sortOptions'
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
@@ -116,7 +117,7 @@ const TypeDesigInput = ({ value, onChange }) => {
         style={{ ...fieldBase, fontFamily: T.mono }}
       />
       <datalist id="ac-type-desig-list">
-        {AIRCRAFT_TYPES.map(t => (
+        {[...AIRCRAFT_TYPES].sort((a, b) => compareText(a.code, b.code)).map(t => (
           <option key={t.code} value={t.code}>{`${t.name} · ${CAT_LABEL[t.cat] || t.cat}`}</option>
         ))}
       </datalist>
@@ -516,8 +517,8 @@ function AircraftForm({ form, setForm, error, pilots = [] }) {
             <Select
               value={form.ownerPilotId || ''}
               onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
-              options={[{ value: '', label: 'Select owner…' },
-                ...pilots.filter(p => !p.archived || p.id === form.ownerPilotId).map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))]}
+              options={sortOptions([{ value: '', label: 'Select owner…' },
+                ...pilots.filter(p => !p.archived || p.id === form.ownerPilotId).map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))])}
             />
           </div>
         )}

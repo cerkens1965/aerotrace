@@ -7,6 +7,7 @@
 // Écriture en un seul lot Firestore (writeBatch, ≤ 500 vols) : tout ou rien.
 import { useMemo, useState } from 'react'
 import { doc, writeBatch } from 'firebase/firestore'
+import { sortOptions } from '../../utils/sortOptions'
 import { db } from '../../firebase/config'
 import { Drawer, Button, Banner, StatusDot, Field, Select, Toggle, T, labelStyle, monoStyle } from '../ui'
 import { formatDuration, deriveFlightType, isStudent as pilotIsStudent, ownerPilotIdFor, sumDuration, tsMillis, FLIGHT_TYPES } from '../../utils/logbookUtils'
@@ -105,13 +106,13 @@ export default function BulkAssignDrawer({ flights, pilots, aircraft, onDone, on
         {missingAc > 0 && (
           <Field label="AIRCRAFT FOR FLIGHTS WITHOUT ONE" hint={`${missingAc} selected flight${missingAc === 1 ? ' has' : 's have'} no aircraft. The others keep their own.`}>
             <Select mono value={fallbackAc} placeholder="Choose an aircraft…" onChange={setFallbackAc}
-              options={aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } })} />
+              options={sortOptions(aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } }))} />
           </Field>
         )}
 
         <Field label="PILOT AT THE CONTROLS" hint="Applied to every selected flight.">
           <Select value={pilotId} placeholder="Choose a pilot…" onChange={v => { setPilotId(v); setInstructorId('') }}
-            options={pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + (pilotIsStudent(p) ? ' · student' : ' · licensed') }))} />
+            options={sortOptions(pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + (pilotIsStudent(p) ? ' · student' : ' · licensed') })))} />
         </Field>
 
         {pilot && (
@@ -126,7 +127,7 @@ export default function BulkAssignDrawer({ flights, pilots, aircraft, onDone, on
         {anyStudent && (<>
           <Field label="INSTRUCTOR">
             <Select value={instructorId} placeholder="Choose an instructor…" onChange={setInstructorId}
-              options={instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + ' · FI' }))} />
+              options={sortOptions(instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + ' · FI' })))} />
           </Field>
           {instructors.length === 0 && <StatusDot tone="caution" text="NO INSTRUCTOR · CHECK ROLES IN ADMIN" />}
           <Field label="INSTRUCTOR PRESENCE" hint="Same for every selected flight. Open one flight on its own to set it differently.">

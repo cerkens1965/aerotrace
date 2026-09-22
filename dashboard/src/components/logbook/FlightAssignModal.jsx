@@ -11,6 +11,7 @@
 
 import { useState, useMemo } from 'react'
 import { doc, updateDoc } from 'firebase/firestore'
+import { sortOptions } from '../../utils/sortOptions'
 import { db } from '../../firebase/config'
 import { Drawer, Button, Banner, StatusDot, Field, Select, Toggle, T, labelStyle, monoStyle } from '../ui'
 import { formatDateTime, formatDuration, deriveFlightType, isStudent as pilotIsStudent, ownerPilotIdFor, FLIGHT_TYPES, tsMillis } from '../../utils/logbookUtils'
@@ -102,9 +103,9 @@ export default function FlightAssignModal({ flight, pilots, aircraft, onSave, on
     </div>
   )
 
-  const acOptions = aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } })
-  const pilotOptions = pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + (pilotIsStudent(p) ? ' · student' : ' · licensed') }))
-  const instrOptions = instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + ' · FI' }))
+  const acOptions = sortOptions(aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } }))
+  const pilotOptions = sortOptions(pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + (pilotIsStudent(p) ? ' · student' : ' · licensed') })))
+  const instrOptions = sortOptions(instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() + ' · FI' })))
 
   return (
     <Drawer closeOnOverlay={false} open onClose={onClose}
