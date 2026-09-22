@@ -152,10 +152,10 @@ function PeriodRow({ level, open, onToggle, title, meta }) {
   return (
     <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus" onClick={onToggle}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
-      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: level === 0 ? '10px 16px' : '8px 16px 8px 36px', borderTop: T.border,
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: level === 0 ? '10px 16px' : level === 1 ? '8px 16px 8px 36px' : '7px 16px 7px 56px', borderTop: T.border,
                background: level === 0 ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
       <Icon name="chevron-right" size={14} color={T.graphite} style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
-      <span style={{ ...labelStyle(T.ink), fontSize: level === 0 ? 12 : 11 }}>{title}</span>
+      <span style={{ ...labelStyle(level === 2 ? T.graphite : T.ink), fontSize: level === 0 ? 12 : level === 1 ? 11 : 10 }}>{title}</span>
       <span style={labelStyle(T.etch)}>{meta}</span>
     </div>
   )
@@ -178,6 +178,7 @@ function FlightsByPeriod({ flights, columns }) {
   }, [flights])
   const [openY, setOpenY] = useState(() => new Set(tree[0] ? [tree[0].key] : []))
   const [openM, setOpenM] = useState(() => new Set(tree[0]?.months[0] ? [tree[0].months[0].key] : []))
+  const [openD, setOpenD] = useState(() => new Set())   // (22/09, Christophe) jours FERMÉS par défaut : une ligne + totaux
   const flip = (setter, k) => setter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
   return (
     <div>
@@ -189,12 +190,10 @@ function FlightsByPeriod({ flights, columns }) {
               <PeriodRow level={1} open={openM.has(M.key)} onToggle={() => flip(setOpenM, M.key)}
                 title={M.key.startsWith('0000') ? 'NO DATE' : `${MONTH_NAMES[Number(M.key.slice(5, 7)) - 1]} ${M.key.slice(0, 4)}`} meta={periodMeta(M.flights)} />
               {openM.has(M.key) && M.days.map(D => (
-                <div key={D.key} style={{ borderTop: T.border }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 6px 56px' }}>
-                    <span style={{ ...labelStyle(T.graphite) }}>{D.key.startsWith('0000') ? 'NO DATE' : `${Number(D.key.slice(8, 10))} ${MONTH_NAMES[Number(D.key.slice(5, 7)) - 1]}`}</span>
-                    <span style={labelStyle(T.etch)}>{periodMeta(D.flights)}</span>
-                  </div>
-                  <DataTable columns={columns} rows={D.flights} style={NESTED_TABLE} />
+                <div key={D.key}>
+                  <PeriodRow level={2} open={openD.has(D.key)} onToggle={() => flip(setOpenD, D.key)}
+                    title={D.key.startsWith('0000') ? 'NO DATE' : `${Number(D.key.slice(8, 10))} ${MONTH_NAMES[Number(D.key.slice(5, 7)) - 1]} ${D.key.slice(0, 4)}`} meta={periodMeta(D.flights)} />
+                  {openD.has(D.key) && <DataTable columns={columns} rows={D.flights} style={NESTED_TABLE} />}
                 </div>
               ))}
             </div>
