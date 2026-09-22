@@ -22,6 +22,7 @@ import { parseG3XCSV } from '../utils/csvParser'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
+import BulkAssignDrawer from '../components/logbook/BulkAssignDrawer'
 import RedeemInvite from '../components/auth/RedeemInvite'
 import {
   T, labelStyle, valueStyle, headingStyle, monoStyle,
@@ -401,9 +402,24 @@ function QueueStat({ label, value, big }) {
 
 const iconBtn = { width: 32, padding: 0, justifyContent: 'center' }
 
-function QueueRow({ f, onAssign, onReplay }) {
+// (22/09) Case à cocher de sélection (attribution groupée) : 16 px, bord 1,5 encre, coche blanche sur encre.
+function QCheck({ checked, mixed = false, onChange, label }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(120px, 170px) minmax(0, 1fr) 60px 80px auto', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #EDE9E2' }}>
+    <input type="checkbox" className="ak-focus" aria-label={label} checked={checked}
+      ref={el => { if (el) el.indeterminate = mixed && !checked }}
+      onChange={e => onChange(e.target.checked)}
+      style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 16, height: 16, flexShrink: 0, cursor: 'pointer', borderRadius: 3,
+               border: `1.5px solid ${checked || mixed ? T.ink : T.etch}`, background: checked ? T.ink : mixed ? '#EDE9E2' : T.card,
+               backgroundImage: checked ? "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5 L6.5 11.5 L12.5 4.5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E\")" : 'none',
+               backgroundSize: 'contain' }} />
+  )
+}
+
+function QueueRow({ f, onAssign, onReplay, sel }) {
+  const on = sel.has(f.id)
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '16px 84px minmax(120px, 170px) minmax(0, 1fr) 60px 80px auto', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #EDE9E2', background: on ? '#FBFAF7' : undefined }}>
+      <QCheck checked={on} onChange={v => sel.set([f.id], v)} label={`Select the ${utcTime(f.startTs)} flight`} />
       <span style={monoStyle(12, T.ink)}>{utcTime(f.startTs)}</span>
       <span style={monoStyle(12, T.ink)}><Route f={f} /></span>
       <StatusDot tone="caution" text="TO ASSIGN" />
@@ -417,7 +433,7 @@ function QueueRow({ f, onAssign, onReplay }) {
   )
 }
 
-function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onReview }) {
+function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onReview, sel }) {
   const [shown, setShown] = useState(QUEUE_PAGE)
   const hours = sumDuration(queue)
   if (queue.length <= 3) {
@@ -467,6 +483,8 @@ function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onRevi
       {days.map(d => (
         <div key={d.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <QCheck checked={d.flights.every(f => sel.has(f.id))} mixed={d.flights.some(f => sel.has(f.id))}
+              onChange={v => sel.set(d.flights.map(f => f.id), v)} label={`Select the ${d.flights.length} flights of ${dayCaps(d.ts)}`} />
             <span style={{ ...labelStyle(T.ink), fontSize: 11 }}>{dayCaps(d.ts)}</span>
             <span style={labelStyle(T.etch)}>{nFlights(d.flights.length)} · {formatDuration(sumDuration(d.flights))}</span>
             <span aria-hidden="true" style={{ flex: 1, height: 1, background: '#EDE9E2' }} />
@@ -474,12 +492,14 @@ function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onRevi
           {d.groups.map(g => (
             <div key={g.key} style={{ background: T.card, border: T.border, borderRadius: T.radius.md, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#FBFAF7', flexWrap: 'wrap' }}>
+                <QCheck checked={g.flights.every(f => sel.has(f.id))} mixed={g.flights.some(f => sel.has(f.id))}
+                  onChange={v => sel.set(g.flights.map(f => f.id), v)} label={`Select the ${g.flights.length} flights of ${g.ac.label}`} />
                 {g.ac.rec ? <AircraftPhoto ac={g.ac.rec} width={40} height={30} /> : null}
                 <span style={{ ...monoStyle(13, T.ink), fontWeight: 500, letterSpacing: '0.04em' }}>{g.ac.label}</span>
                 {g.ac.rec && <Chip muted>{g.ac.rec.ownership === 'owner' ? 'OWNER' : 'CLUB'}</Chip>}
                 <span style={labelStyle(T.etch)}>{nFlights(g.flights.length)} · {formatDuration(sumDuration(g.flights))}</span>
               </div>
-              {g.flights.map(f => <QueueRow key={f.id} f={f} onAssign={onAssign} onReplay={onReplay} />)}
+              {g.flights.map(f => <QueueRow key={f.id} f={f} onAssign={onAssign} onReplay={onReplay} sel={sel} />)}
             </div>
           ))}
         </div>
@@ -493,7 +513,7 @@ function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onRevi
   )
 }
 
-function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAssign, canDelete, onDelete, autoCount }) {
+function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAssign, canDelete, onDelete, autoCount, sel }) {
   const [filterPilot,    setFilterPilot]    = useState('')
   const [filterInstr,    setFilterInstr]    = useState('')
   const [filterAircraft, setFilterAircraft] = useState('')
@@ -535,7 +555,12 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
   const setSort = k => { if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir(k === 'date' || k === 'duration' ? 'desc' : 'asc') } }
   const review = () => { setFilterStatus('pending'); setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0) }
 
+  const pendingShown = filtered.filter(f => f._pending).map(f => f.id)
   const columns = [
+    ...(pendingShown.length ? [{ key: 'sel', width: 28, label: (
+      <QCheck checked={pendingShown.every(id => sel.has(id))} mixed={pendingShown.some(id => sel.has(id))}
+        onChange={v => sel.set(pendingShown, v)} label={`Select the ${pendingShown.length} flights to assign shown`} />
+    ), render: f => (f._pending ? <QCheck checked={sel.has(f.id)} onChange={v => sel.set([f.id], v)} label="Select this flight" /> : null) }] : []),
     { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} /> },
     { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} /> },
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
@@ -564,7 +589,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <AssignQueue queue={queue} total={flights.length} autoCount={autoCount} acOf={acOf} onAssign={onAssign} onReplay={onReplay} onReview={review} />
+      <AssignQueue queue={queue} total={flights.length} autoCount={autoCount} acOf={acOf} onAssign={onAssign} onReplay={onReplay} onReview={review} sel={sel} />
 
       <section ref={tableRef} aria-label="Flights" style={{ display: 'flex', flexDirection: 'column', gap: 12, scrollMarginTop: 16 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: T.border, flexWrap: 'wrap' }}>
@@ -916,6 +941,14 @@ export default function LogbookPage({ role }) {
   // La fiche a déjà écrit en base ; onSnapshot rafraîchit la liste. On retient la dernière attribution de la
   // session pour SUGGÉRER le même pilote au vol suivant du même avion le même jour (maquette Claude Design).
   const [suggest, setSuggest] = useState(null)
+  // (22/09) Sélection multiple pour l'attribution groupée (ids de vols « to assign »). sel.set(ids, on) coche/décoche.
+  const [selIds, setSelIds] = useState(() => new Set())
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkMsg, setBulkMsg] = useState('')
+  const sel = useMemo(() => ({
+    has: id => selIds.has(id),
+    set: (ids, on) => setSelIds(prev => { const n = new Set(prev); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n }),
+  }), [selIds])
   const handleAssigned = useCallback((id, u, ctx) => {
     setSuggest({ aircraftIdent: ctx?.aircraftIdent, day: ctx?.day, pilotId: u.pilotId, instructorId: u.instructorId, instructorOnboard: u.instructorOnboard })
   }, [])
@@ -967,6 +1000,7 @@ export default function LogbookPage({ role }) {
   const pendingCount  = useMemo(() => flights.filter(f => f._pending).length, [flights])
   const autoCount     = useMemo(() => flights.filter(f => f.autoAssigned).length, [flights])
   const assignQueue   = useMemo(() => flights.filter(f => f._pending).sort((a, b) => tsMillis(a.startTs) - tsMillis(b.startTs)), [flights])
+  const selectedFlights = useMemo(() => assignQueue.filter(f => selIds.has(f.id)), [assignQueue, selIds])   // vols déjà attribués retirés d'office
   const instructors   = useMemo(() => pilots.filter(p => p.isInstructor === true), [pilots])
   const regularPilots = useMemo(() => pilots, [pilots])
 
@@ -1111,7 +1145,7 @@ export default function LogbookPage({ role }) {
               </div>
             )}
             {!isPilot && activeTab === 'matrix' && (
-              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} acOf={acOf} autoCount={autoCount} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
+              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} acOf={acOf} autoCount={autoCount} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} sel={sel} />
             )}
             {canDelete && activeTab === 'archived' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1164,7 +1198,28 @@ export default function LogbookPage({ role }) {
         )}
 
         {canImport && !loading && activeTab !== 'archived' && <div style={{ marginTop: 24 }}><CsvImportCard clubId={clubId} /></div>}
+
+        {bulkMsg && <Banner tone="ok" style={{ marginTop: 16 }} action={<Button size="sm" variant="ghost" onClick={() => setBulkMsg('')}>Dismiss</Button>}>{bulkMsg}</Banner>}
+        {!isPilot && activeTab === 'matrix' && selectedFlights.length > 0 && (
+          <div role="region" aria-label="Selection" style={{ position: 'sticky', bottom: 16, marginTop: 16, zIndex: 5, background: T.ink, borderRadius: T.radius.md,
+                        padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+              <span style={{ ...monoStyle(20, T.white), lineHeight: 1 }}>{selectedFlights.length}</span>
+              <span style={labelStyle(T.mutedDark)}>SELECTED · {formatDuration(sumDuration(selectedFlights))}</span>
+            </span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" onInk variant="ghost" onClick={() => setSelIds(new Set())}>Clear</Button>
+              <Button size="sm" onInk variant="primary" icon="check" onClick={() => setBulkOpen(true)}>Assign {selectedFlights.length} flight{selectedFlights.length === 1 ? '' : 's'}</Button>
+            </span>
+          </div>
+        )}
       </div>
+
+      {bulkOpen && selectedFlights.length > 0 && (
+        <BulkAssignDrawer flights={selectedFlights} pilots={pilots} aircraft={aircraft}
+          onClose={() => setBulkOpen(false)}
+          onDone={n => { setSelIds(new Set()); setBulkMsg(`${n} flight${n === 1 ? '' : 's'} assigned and validated.`) }} />
+      )}
 
       {assignFlight && (
         <FlightAssignModal
