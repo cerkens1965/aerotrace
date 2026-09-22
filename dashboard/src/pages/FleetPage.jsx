@@ -4,10 +4,11 @@ import { ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, storage, auth, functions } from '../firebase/config'
 import { isDurationSuspect } from '../utils/logbookUtils'
+import { matches } from '../utils/search'
 import { useClub } from '../contexts/ClubContext'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Drawer, EmptyState, Banner, Chip, Field, Input, Toggle, Skeleton,
+  Button, MetricCard, StatusDot, DataTable, Drawer, EmptyState, Banner, Chip, Field, Input, Toggle, Skeleton, SearchBox,
 } from '../components/ui'
 
 // ─── FleetPage — état firmware de la flotte de boîtiers (ATC) + écrans (ATV) ────
@@ -111,7 +112,8 @@ export default function FleetPage() {
   const [emnifyError, setEmnifyError] = useState(null)
   const [hoursByBox, setHoursByBox] = useState({})  // (2026-08-26) heures de vol du mois par boxId (docs /flights uploadés)
   const [refreshing, setRefreshing] = useState(false)
-  const [showOnly, setShowOnly] = useState(false)   // (22/09) tableau : « Needs attention » seulement
+  const [showOnly, setShowOnly] = useState(null)    // (22/09) filtre tableau : null (tous) | 'attention' | clé de problème (silent/failed/unlinked/data/update)
+  const [q, setQ] = useState('')                    // (22/09) recherche : boîtier, avion, version, canal, WiFi
   const [showPw, setShowPw] = useState(false)       // (22/09) tiroir : afficher le mot de passe WiFi
   const [now, setNow] = useState(() => Date.now())  // horloge de page (30 s) : âges « n MIN AGO », boîtiers muets
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
@@ -314,17 +316,17 @@ export default function FleetPage() {
     const info = dev._info, seen = tsMillis(dev.lastSeen || dev.updatedAt)
     const days = seen ? (now - seen) / DAY_MS : Infinity
     const reg = regOf(dev), issues = []
-    if (days >= STALE_DAYS) issues.push({ text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN', detail: seen ? `Last report ${dayUtc(seen)} · ${utc(seen)}${dev.wifiSsid ? `, on ${dev.wifiSsid}` : ''}.${dev.board === 'wrover' ? ' WROVER board, due to be retired.' : ''}` : 'No report received from this box yet.' })
-    if ((dev.otaState || '') === 'failed') issues.push({ text: 'UPDATE FAILED', detail: `AKcore ${dev.fwVersion ?? MISSING} did not move to ${info.atcLatest ?? MISSING}. It will retry at the next WiFi.` })
+    if (days >= STALE_DAYS) issues.push({ key: 'silent', text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN', detail: seen ? `Last report ${dayUtc(seen)} · ${utc(seen)}${dev.wifiSsid ? `, on ${dev.wifiSsid}` : ''}.${dev.board === 'wrover' ? ' WROVER board, due to be retired.' : ''}` : 'No report received from this box yet.' })
+    if ((dev.otaState || '') === 'failed') issues.push({ key: 'failed', text: 'UPDATE FAILED', detail: `AKcore ${dev.fwVersion ?? MISSING} did not move to ${info.atcLatest ?? MISSING}. It will retry at the next WiFi.` })
     else if (!info.upToDate) {
       const parts = []
       if (!info.atcUpToDate) parts.push(`AKcore ${dev.fwVersion ?? MISSING} → ${info.atcLatest}`)
       if (dev.atvVersion != null && typeof info.atvLatest === 'number' && dev.atvVersion < info.atvLatest) parts.push(`AKview ${dev.atvVersion} → ${info.atvLatest}`)
-      issues.push({ text: 'UPDATE AVAILABLE', detail: `${parts.join(' and ') || 'Behind its channel'}. Applies at the next WiFi.` })
+      issues.push({ key: 'update', routine: true, text: 'UPDATE AVAILABLE', detail: `${parts.join(' and ') || 'Behind its channel'}. Applies at the next WiFi.` })
     }
-    if (!reg) issues.push({ text: 'NO AIRCRAFT LINKED', detail: 'Reporting, but its flights cannot be credited to an aircraft.', action: 'Link' })
+    if (!reg) issues.push({ key: 'unlinked', text: 'NO AIRCRAFT LINKED', detail: 'Reporting, but its flights cannot be credited to an aircraft.', action: 'Link' })
     const mbh = mbhOf(dev)
-    if (mbh != null && medianMbh && mbhs.length >= 3 && mbh > 2 * medianMbh) issues.push({ text: 'HIGH DATA USE', detail: `${mbh.toFixed(1)} MB per flight hour, more than twice the fleet figure (${medianMbh.toFixed(1)}).` })
+    if (mbh != null && medianMbh && mbhs.length >= 3 && mbh > 2 * medianMbh) issues.push({ key: 'data', text: 'HIGH DATA USE', detail: `${mbh.toFixed(1)} MB per flight hour, more than twice the fleet figure (${medianMbh.toFixed(1)}).` })
     const st = days >= STALE_DAYS ? { tone: 'caution', text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN' }
       : (dev.otaState === 'failed') ? { tone: 'caution', text: 'UPDATE FAILED' }
       : dev.otaState === 'downloading' ? { tone: 'info', text: 'UPDATING…' }
@@ -333,9 +335,28 @@ export default function FleetPage() {
     return { issues, st, reg, seen }
   }
   const diagRows = rows.map(d => ({ ...d, _d: diag(d) }))
-  const attention = diagRows.filter(d => d._d.issues.length)
-  const [onlyAttention, setOnlyAttention] = [showOnly, setShowOnly]
-  const shownRows = onlyAttention ? attention : diagRows
+  // (22/09) « NEEDS ATTENTION » = anomalies seulement. Une mise à jour en attente est l'état NORMAL d'un
+  // déploiement (s'applique au prochain WiFi) → hors panneau, comptée dans la carte UP TO DATE et filtrable
+  // dans le tableau. Le panneau est AGRÉGÉ par type de problème (tient à 500 boîtiers), pas une carte par boîtier.
+  const isAlert = (d) => d._d.issues.some(i => !i.routine)
+  const attention = diagRows.filter(isAlert)
+  const ISSUE_GROUPS = [
+    { key: 'failed', label: 'UPDATE FAILED', hint: 'The update did not install. It retries at the next WiFi; if it keeps failing, the box needs a look.' },
+    { key: 'silent', label: `NOT SEEN FOR ${STALE_DAYS} DAYS OR MORE`, hint: 'No report received. Aircraft grounded, or the box has no known WiFi or 4G.' },
+    { key: 'unlinked', label: 'NO AIRCRAFT LINKED', hint: 'Reporting, but its flights cannot be credited to an aircraft.' },
+    { key: 'data', label: 'HIGH DATA USE', hint: `More than twice the fleet median MB per flight hour${medianMbh ? ` (${medianMbh.toFixed(1)})` : ''}.` },
+  ].map(g => ({ ...g, units: diagRows.filter(d => d._d.issues.some(i => i.key === g.key)) })).filter(g => g.units.length)
+  const pendingUpdate = diagRows.filter(d => d._d.issues.some(i => i.key === 'update'))
+  const CHIP_MAX = 8
+  const filterLabel = { attention: 'NEEDS ATTENTION', update: 'UPDATE PENDING', ...Object.fromEntries(ISSUE_GROUPS.map(g => [g.key, g.label])) }
+  const filteredRows = !showOnly ? diagRows
+    : showOnly === 'attention' ? attention
+    : diagRows.filter(d => d._d.issues.some(i => i.key === showOnly))
+  // (22/09) recherche texte, combinée au filtre : boîtier, avion, type, versions, canal, WiFi, état, SIM.
+  const shownRows = q.trim()
+    ? filteredRows.filter(d => matches(q, d.boxId || d.id, d._d.reg, acRecOf(d._d.reg)?.typeDesig, d.board, channelOf(d),
+        d.fwVersion, d.atvVersion, d.wifiSsid, d.wifiKnown, d._d.st.text, d.iccid))
+    : filteredRows
   const linkedCount = diagRows.filter(d => d._d.reg).length
   const totalHours = Object.values(hoursByBox).reduce((a, b) => a + b, 0)
 
@@ -479,34 +500,43 @@ export default function FleetPage() {
                 <span style={{ ...monoStyle(26, T.white), lineHeight: 1 }}>{attention.length}</span>
                 <span style={labelStyle(T.mutedDark)}>OF {devices.length} UNITS</span>
               </div>
-              {attention.length > 0 && (
-                <Button size="sm" onInk icon="filter" onClick={() => setOnlyAttention(v => !v)}>
-                  {onlyAttention ? `Show all ${devices.length} units` : `Show only these ${attention.length}`}
+                {attention.length > 0 && (
+                <Button size="sm" onInk icon="filter" onClick={() => setShowOnly(v => v === 'attention' ? null : 'attention')}>
+                  {showOnly === 'attention' ? `Show all ${devices.length} units` : `Show only these ${attention.length}`}
                 </Button>
               )}
             </div>
             {attention.length === 0 ? (
-              <StatusDot tone="ok" onInk text="EVERY UNIT IS SEEN, CURRENT AND LINKED" />
+              <StatusDot tone="ok" onInk text="EVERY UNIT IS SEEN AND LINKED" />
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
-                {attention.map(dev => (
-                  <div key={dev.id} style={{ border: `1px solid ${T.ruleDark}`, borderRadius: T.radius.md, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <div style={col(6)}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={big(17, T.white)}>{dev.boxId || dev.id}</span>
-                        <span style={monoStyle(11, T.mutedDark)}>{dev._d.reg || MISSING}</span>
+              <div style={col(0)}>
+                {ISSUE_GROUPS.map((g, gi) => (
+                  <div key={g.key} style={{ borderTop: gi ? `1px solid ${T.ruleDark}` : 'none', padding: '12px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ ...col(6), flex: '1 1 420px' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                        <span style={{ ...monoStyle(20, T.white), lineHeight: 1 }}>{g.units.length}</span>
+                        <StatusDot tone="caution" onInk text={g.label} />
                       </div>
-                      {dev._d.issues.map((it, k) => (
-                        <div key={k} style={col(3)}>
-                          <StatusDot tone="caution" onInk text={it.text} />
-                          <span style={{ fontSize: 13, lineHeight: 1.45, color: T.white }}>{it.detail}</span>
-                        </div>
-                      ))}
+                      <span style={{ fontSize: 13, lineHeight: 1.45, color: T.mutedDark }}>{g.hint}</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {g.units.slice(0, CHIP_MAX).map(dev => (
+                          <button key={dev.id} type="button" onClick={() => openConfig(dev)} title={dev._d.issues.filter(i => i.key === g.key).map(i => i.detail).join(' ')}
+                            style={{ ...monoStyle(12, T.white), background: 'transparent', border: `1px solid ${T.ruleDark}`, borderRadius: T.radius.sm, padding: '3px 8px', cursor: 'pointer' }}>
+                            {dev.boxId || dev.id}{dev._d.reg ? ` · ${dev._d.reg}` : ''}
+                          </button>
+                        ))}
+                        {g.units.length > CHIP_MAX && <span style={{ ...labelStyle(T.mutedDark), alignSelf: 'center' }}>+{g.units.length - CHIP_MAX} MORE</span>}
+                      </div>
                     </div>
-                    <Button size="sm" onInk onClick={() => openConfig(dev)}>{dev._d.issues.some(x => x.action === 'Link') && dev._d.issues.length === 1 ? 'Link' : 'Open'}</Button>
+                    <Button size="sm" onInk icon="filter" onClick={() => setShowOnly(v => v === g.key ? null : g.key)}>
+                      {showOnly === g.key ? 'Show all' : `Show these ${g.units.length}`}
+                    </Button>
                   </div>
                 ))}
               </div>
+            )}
+            {pendingUpdate.length > 0 && (
+              <span style={labelStyle(T.mutedDark)}>{pendingUpdate.length} UNIT{pendingUpdate.length === 1 ? '' : 'S'} WAITING FOR AN UPDATE · APPLIED AT THE NEXT WIFI · NOT AN ISSUE</span>
             )}
           </section>
 
@@ -514,12 +544,15 @@ export default function FleetPage() {
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: T.border, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
                 <h2 style={{ ...headingStyle(15), margin: 0 }}>Club fleet · AKcore</h2>
-                <span style={lab}>{onlyAttention ? `${attention.length} OF ${devices.length} UNITS · NEEDS ATTENTION` : `${devices.length} UNITS · ${linkedCount} AIRCRAFT LINKED · ${devices.length - linkedCount} UNASSIGNED`}</span>
+                <span style={lab}>{showOnly ? `${shownRows.length} OF ${devices.length} UNITS · ${filterLabel[showOnly] || ''}` : `${devices.length} UNITS · ${linkedCount} AIRCRAFT LINKED · ${devices.length - linkedCount} UNASSIGNED`}</span>
               </div>
+              <SearchBox value={q} onChange={setQ} width={300} count={shownRows.length} total={devices.length}
+                placeholder="Unit, aircraft, version, channel or WiFi · Esc clears" />
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={lab}>SHOW</span>
-                <Toggle mono active={!onlyAttention} onClick={() => setOnlyAttention(false)}>ALL {devices.length}</Toggle>
-                <Toggle mono active={onlyAttention} onClick={() => setOnlyAttention(true)}>NEEDS ATTENTION</Toggle>
+                <Toggle mono active={!showOnly} onClick={() => setShowOnly(null)}>ALL {devices.length}</Toggle>
+                <Toggle mono active={showOnly === 'attention' || ISSUE_GROUPS.some(g => g.key === showOnly)} onClick={() => setShowOnly('attention')}>NEEDS ATTENTION {attention.length}</Toggle>
+                <Toggle mono active={showOnly === 'update'} onClick={() => setShowOnly('update')}>UPDATE PENDING {pendingUpdate.length}</Toggle>
               </div>
             </div>
             <DataTable columns={columns} rows={shownRows} rowKey="id" onRowClick={openConfig}

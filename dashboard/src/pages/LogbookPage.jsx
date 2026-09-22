@@ -17,6 +17,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { collection, getDocs, query, where, doc, updateDoc, addDoc, deleteDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
 import { sortOptions } from '../utils/sortOptions'
+import { matches } from '../utils/search'
 import { ref, uploadBytesResumable } from 'firebase/storage'
 import { db, storage, auth } from '../firebase/config'
 import { parseG3XCSV } from '../utils/csvParser'
@@ -27,7 +28,7 @@ import BulkAssignDrawer from '../components/logbook/BulkAssignDrawer'
 import RedeemInvite from '../components/auth/RedeemInvite'
 import {
   T, labelStyle, valueStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Chip, Field, Select, Toggle, Icon,
+  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Chip, Field, Select, Toggle, Icon, SearchBox,
 } from '../components/ui'
 import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import {
@@ -622,6 +623,8 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
   const [filterType,     setFilterType]     = useState('')
   const pendingAll = flights.filter(f => f._pending).length
   const [filterStatus,   setFilterStatus]   = useState(pendingAll > 3 ? 'validated' : '')   // la file montre déjà les vols à attribuer
+  const [q,              setQ]              = useState('')     // (22/09) recherche texte sur les vols affichés
+  const [openGroups,     setOpenGroups]     = useState(() => new Set())   // (22/09) groupes repliés (comme les cartes) : on voit la liste, on ouvre ce qu'on veut
   const [groupBy,        setGroupBy]        = useState('day')    // 'day' | 'aircraft' | 'pilot' | 'none'
   const [sortKey,        setSortKey]        = useState('date')
   const [sortDir,        setSortDir]        = useState('desc')
@@ -638,13 +641,16 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     if (filterType)     list = list.filter(f => f.flightType === filterType)
     if (filterStatus === 'validated') list = list.filter(f => !f._pending)
     if (filterStatus === 'pending')   list = list.filter(f =>  f._pending)
+    if (q.trim()) list = list.filter(f => matches(q, acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig, getPilotName(pilots, f.pilotId),
+      f.instructorId ? getPilotName(pilots, f.instructorId) : '', f.depIcao, f.arrIcao, FLIGHT_TYPES[f.flightType]?.label,
+      formatDate(f.startTs), f._pending ? 'to assign' : 'validated'))
     const key = f => sortKey === 'duration' ? (f.duration || 0)
       : sortKey === 'aircraft' ? acLabel(f.aircraftIdent)
       : sortKey === 'pilot' ? getPilotName(pilots, f.pilotId)
       : tsMillis(f.startTs)
     list.sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? (sortDir === 'asc' ? -1 : 1) : va > vb ? (sortDir === 'asc' ? 1 : -1) : 0 })
     return list
-  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, sortKey, sortDir, acLabel, pilots])
+  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, q, sortKey, sortDir, acLabel, acOf, pilots])
 
   const groups = useMemo(() => {
     if (groupBy === 'none') return [{ key: 'all', title: null, rows: filtered }]
@@ -718,6 +724,9 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
           </div>
         </div>
 
+        <SearchBox value={q} onChange={setQ} count={filtered.length} total={flights.length}
+          placeholder="Aircraft, pilot, instructor, airfield, type or date · Esc clears" />
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
           <Field label="PILOT"><Select value={filterPilot} onChange={setFilterPilot} options={[{ value: '', label: 'All pilots' }, ...selectOpts.pilots]} /></Field>
           <Field label="INSTRUCTOR"><Select value={filterInstr} onChange={setFilterInstr} options={[{ value: '', label: 'All instructors' }, ...selectOpts.instr]} /></Field>
@@ -727,18 +736,30 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
         </div>
 
         {groups.length === 0 && <DataTable columns={columns} rows={[]} empty={<EmptyState text="No flights match these filters." />} />}
-        {groups.map(g => (
-          <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {g.title && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ ...labelStyle(T.ink), fontSize: 11 }}>{g.title}</span>
-                <span style={labelStyle(T.etch)}>{nFlights(g.rows.length)} · {formatDuration(sumDuration(g.rows))}{g.rows.some(f => f._pending) ? ` · ${g.rows.filter(f => f._pending).length} TO ASSIGN` : ''}</span>
-                <span aria-hidden="true" style={{ flex: 1, height: 1, background: '#EDE9E2' }} />
-              </div>
-            )}
-            <DataTable columns={columns} rows={g.rows} />
-          </div>
-        ))}
+        {groups.map(g => {
+          // Groupé (jour / avion / pilote) : une LIGNE par groupe, dépliable. À plat ou pendant une recherche : tout ouvert.
+          const open = !g.title || !!q.trim() || openGroups.has(g.key)
+          const pending = g.rows.filter(f => f._pending).length
+          return (
+            <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {g.title && (
+                <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus"
+                  onClick={() => setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n })}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n }) } }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: T.border, background: open ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
+                  <span style={{ display: 'flex', color: T.graphite, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={14} /></span>
+                  <span style={{ ...headingStyle(13), whiteSpace: 'nowrap' }}>{g.title}</span>
+                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 18 }}>
+                    {pending > 0 && <StatusDot tone="caution" text={`${pending} TO ASSIGN`} />}
+                    <span style={{ ...monoStyle(12, T.graphite), minWidth: 84, textAlign: 'right' }}>{nFlights(g.rows.length)}</span>
+                    <span style={{ ...monoStyle(14, T.ink), fontWeight: 500, minWidth: 64, textAlign: 'right' }}>{formatDuration(sumDuration(g.rows))}</span>
+                  </span>
+                </div>
+              )}
+              {open && <DataTable columns={columns} rows={g.rows} />}
+            </div>
+          )
+        })}
         <div style={labelStyle(T.etch)}>SHOWING {filtered.length} OF {flights.length}</div>
       </section>
     </div>
@@ -1036,6 +1057,7 @@ export default function LogbookPage({ role }) {
     : tab
 
   // ── Sort state ─ un état par onglet (Instructors indépendant de Pilots) ──────
+  const [qCards, setQCards] = useState('')   // (22/09) recherche des cartes Pilots / Instructors / Aircraft
   const [sortPilots,      setSortPilots]      = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
   const [sortInstructors, setSortInstructors] = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
   const [sortAircraft,    setSortAircraft]    = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
@@ -1144,6 +1166,10 @@ export default function LogbookPage({ role }) {
     return withStats
   }, [aircraft, flights, sortAircraft])
 
+  const shownPilots = useMemo(() => sortedPilots.filter(p => matches(qCards, p.firstName, p.lastName, p.trigram, p.email, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || []))), [sortedPilots, qCards])
+  const shownInstructors = useMemo(() => sortedInstructors.filter(p => matches(qCards, p.firstName, p.lastName, p.trigram, p.email, p.licence, 'fi instructor', ...(p.licences || []))), [sortedInstructors, qCards])
+  const shownAircraft = useMemo(() => sortedAircraft.filter(a => matches(qCards, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? 'owner' : 'club')), [sortedAircraft, qCards])
+
   const TABS = isPilot ? [
     { key: 'mine',        label: 'My flights', count: myFlights.length },
   ] : [
@@ -1222,27 +1248,33 @@ export default function LogbookPage({ role }) {
             {!isPilot && activeTab === 'pilots' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortPilots} onChange={setSortPilots} options={PILOT_SORTS} />
+                <SearchBox value={qCards} onChange={setQCards} style={{ marginBottom: 14 }} count={shownPilots.length} total={sortedPilots.length}
+                  placeholder="Name, trigram, e-mail or licence · Esc clears" />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {sortedPilots.length === 0 && <EmptyState text="No pilots in this club." style={EMPTY_LIST} />}
-                  {sortedPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
+                  {shownPilots.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="pilot" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}
             {!isPilot && activeTab === 'instructors' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortInstructors} onChange={setSortInstructors} options={PILOT_SORTS} />
+                <SearchBox value={qCards} onChange={setQCards} style={{ marginBottom: 14 }} count={shownInstructors.length} total={sortedInstructors.length}
+                  placeholder="Name, trigram or e-mail · Esc clears" />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {sortedInstructors.length === 0 && <EmptyState text="No instructors — check the instructor flag in Admin." style={EMPTY_LIST} />}
-                  {sortedInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
+                  {shownInstructors.map(p => <PilotCard key={p.id} pilot={p} flights={flights} pilots={pilots} mode="instructor" acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}
             {!isPilot && activeTab === 'aircraft' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <SortBar value={sortAircraft} onChange={setSortAircraft} options={AIRCRAFT_SORTS} />
+                <SearchBox value={qCards} onChange={setQCards} style={{ marginBottom: 14 }} count={shownAircraft.length} total={sortedAircraft.length}
+                  placeholder="Registration, type, hex or base · Esc clears" />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {sortedAircraft.length === 0 && <EmptyState text="No aircraft in this club." style={EMPTY_LIST} />}
-                  {sortedAircraft.map(ac => <AircraftCard key={ac.id} ac={ac} flights={flights} pilots={pilots} onReplay={handleReplay} onAssign={handleAssign} />)}
+                  {shownAircraft.map(ac => <AircraftCard key={ac.id} ac={ac} flights={flights} pilots={pilots} onReplay={handleReplay} onAssign={handleAssign} />)}
                 </div>
               </div>
             )}

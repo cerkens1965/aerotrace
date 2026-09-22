@@ -5,6 +5,7 @@ import {
   doc, serverTimestamp, query, where,
 } from 'firebase/firestore'
 import { sortOptions, compareText } from '../utils/sortOptions'
+import { matches } from '../utils/search'
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { db, storage, auth, functions } from '../firebase/config'
 import { httpsCallable } from 'firebase/functions'
@@ -14,24 +15,10 @@ import { photoFrame } from '../components/aircraft/photoFrame'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon, Input, Select, Chip, Toggle, Field, MetricCard,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Input, Select, Chip, Toggle, Field, MetricCard, SearchBox,
 } from '../components/ui'
 
-// (21/09) Recherche Admin : filtre texte insensible à la casse et aux accents sur plusieurs champs.
-const fold = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-const matches = (q, ...fields) => { const n = fold(q).trim(); if (!n) return true; const hay = fields.map(fold).join(' '); return n.split(/\s+/).every(w => hay.includes(w)) }
-function SearchBox({ value, onChange, placeholder }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <label style={{ position: 'relative', flex: '1 1 320px', maxWidth: 440 }}>
-        <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: T.etch, display: 'flex' }}><Icon name="search" size={16} /></span>
-        <input type="search" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-          className="ak-focus" onKeyDown={e => { if (e.key === 'Escape') onChange('') }}
-          style={{ ...fieldBase, width: '100%', paddingLeft: 34, fontFamily: T.sans }} />
-      </label>
-    </div>
-  )
-}
+// (22/09) Recherche : helpers partagés (utils/search) + SearchBox de la bibliothèque.
 
 // (2026-09-21, lot 02 B) Page restylée AirKi : jetons T, Tabs, Drawer, DataTable, Button, StatusDot.
 // Logique inchangée (CRUD pilotes/avions/accès, archivage, codes d'invitation, trigramme/PIN, photos, hex).
