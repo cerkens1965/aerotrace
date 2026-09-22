@@ -14,13 +14,13 @@ import { photoFrame } from '../components/aircraft/photoFrame'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon, Input, Select, Chip, Toggle,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Icon, Input, Select, Chip, Toggle, Field, MetricCard,
 } from '../components/ui'
 
 // (21/09) Recherche Admin : filtre texte insensible à la casse et aux accents sur plusieurs champs.
 const fold = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 const matches = (q, ...fields) => { const n = fold(q).trim(); if (!n) return true; const hay = fields.map(fold).join(' '); return n.split(/\s+/).every(w => hay.includes(w)) }
-function SearchBox({ value, onChange, placeholder, count, total }) {
+function SearchBox({ value, onChange, placeholder }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
       <label style={{ position: 'relative', flex: '1 1 320px', maxWidth: 440 }}>
@@ -29,7 +29,6 @@ function SearchBox({ value, onChange, placeholder, count, total }) {
           className="ak-focus" onKeyDown={e => { if (e.key === 'Escape') onChange('') }}
           style={{ ...fieldBase, width: '100%', paddingLeft: 34, fontFamily: T.sans }} />
       </label>
-      {value.trim() && <span style={{ ...monoStyle(12, T.graphite) }}>{count} / {total}</span>}
     </div>
   )
 }
@@ -147,7 +146,7 @@ const trigramConflictOf = (form, allTrigrams, isEdit) =>
   !!form && allTrigrams.filter(t => t !== (isEdit ? form._origTrigram : '')).includes((form.trigram || '').toUpperCase())
 
 // ─── Pilot form (corps du tiroir) ─────────────────────────────────────────────
-function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit }) {
+function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pilot }) {
   const toggleLicence = (lic) => {
     setForm(p => ({
       ...p,
@@ -199,40 +198,15 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit }) {
       <Section title="LICENCE & RATINGS">
         <div style={full}>
           <Label>FLYING QUALIFICATION</Label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['student', 'pilot'].map(lic => (
-              <Toggle key={lic} active={form.licence === lic} style={{ flex: 1 }}
-                onClick={() => setForm(p => ({
-                  ...p,
-                  licence: lic,
-                  isInstructor: lic === 'student' ? false : p.isInstructor,
-                }))}
-              >
-                {lic === 'student' ? 'Student' : 'Pilot'}
-              </Toggle>
-            ))}
+          {/* (22/09, Claude Design Admin) Student · Licensed · FI en bascules (FI réservé au breveté) */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Toggle active={form.licence === 'student'} onClick={() => setForm(p => ({ ...p, licence: 'student', isInstructor: false }))}>Student</Toggle>
+            <Toggle active={form.licence !== 'student'} onClick={() => setForm(p => ({ ...p, licence: 'pilot' }))}>Licensed</Toggle>
+            <Toggle mono active={!!form.isInstructor} disabled={form.licence === 'student'} title="Flight instructor: can supervise student flights"
+              onClick={() => setForm(p => ({ ...p, isInstructor: !p.isInstructor }))}>FI</Toggle>
           </div>
+          <Hint>{form.licence === 'student' ? 'A student flies with an instructor on board or on the ground.' : form.isInstructor ? 'Flight instructor: can supervise student flights.' : 'Licensed pilot: flights are solo unless an instructor is set.'}</Hint>
         </div>
-
-        {/* Is instructor — only if pilot */}
-        {form.licence === 'pilot' && (
-          <label style={{ ...full, display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer',
-            padding: '10px 12px', border: `1px solid ${form.isInstructor ? T.ink : T.rule}`, borderRadius: T.radius.sm }}>
-            <input
-              type="checkbox" checked={!!form.isInstructor} className="ak-focus"
-              onChange={() => setForm(p => ({ ...p, isInstructor: !p.isInstructor }))}
-              style={{ width: 16, height: 16, margin: '2px 0 0', accentColor: T.ink, flexShrink: 0 }}
-            />
-            <span>
-              <span style={{ display: 'block', fontFamily: T.sans, fontSize: 13, fontWeight: 600, color: T.ink }}>
-                Certified instructor (FI)
-              </span>
-              <span style={{ display: 'block', fontFamily: T.sans, fontSize: 12, color: T.graphite, marginTop: 2 }}>
-                Can supervise student flights
-              </span>
-            </span>
-          </label>
-        )}
 
         <div>
           <Label>LICENCE DATE</Label>
@@ -293,10 +267,73 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit }) {
             placeholder="••••"
             style={{ ...fieldBase, fontFamily: T.mono, fontSize: 16, letterSpacing: '0.4em', textAlign: 'center' }}
           />
-          <Hint>Used to identify the pilot on the FDR</Hint>
+          <Hint>Four digits keyed on the AKview to identify the pilot.</Hint>
+          {form.pinConflict && <StatusDot tone="caution" text="DUPLICATE PIN IN THE CLUB" style={{ marginTop: 6 }} />}
         </div>
       </Section>
+
+      <InviteSection pilot={isEdit ? pilot : null} />
     </div>
+  )
+}
+
+// (22/09, Claude Design Admin) Code d'invitation dans le tiroir : parcours 1 GENERATE → 2 COPY → 3 PILOT SIGNS IN →
+// 4 LINKED. Fonction cloud createPilotInvite (usage unique, 14 jours, révoque le code précédent). Code jamais stocké côté client.
+function InviteSection({ pilot }) {
+  const [busy, setBusy] = useState(false)
+  const [res, setRes]   = useState(null)   // { code, expiresAt } | { error }
+  const [copied, setCopied] = useState(false)
+  const linked = !!pilot?.uid
+  const gen = async () => {
+    if (busy || !pilot) return
+    setBusy(true); setRes(null); setCopied(false)
+    try { const { data } = await httpsCallable(functions, 'createPilotInvite')({ pilotId: pilot.id }); setRes(data) }
+    catch (e) { setRes({ error: e?.message || 'Could not create the code.' }) }
+    finally { setBusy(false) }
+  }
+  const copy = () => { if (res?.code) { navigator.clipboard?.writeText(res.code); setCopied(true) } }
+  const step = linked && !res?.code ? 4 : res?.code ? (copied ? 3 : 2) : 1
+  const exp = res?.expiresAt ? new Date(res.expiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : ''
+  const stepStyle = (n) => ({ ...labelStyle(n === step ? T.ink : T.etch), paddingBottom: 2, borderBottom: `1px solid ${n === step ? T.ink : 'transparent'}` })
+  return (
+    <section style={{ borderTop: T.border, paddingTop: 16, marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <span style={labelStyle(T.graphite)}>INVITATION CODE</span>
+        {pilot && <StatusDot tone={linked ? 'ok' : 'caution'} text={linked ? 'LINKED' : 'NOT LINKED'} />}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={stepStyle(1)}>1 GENERATE</span><span style={labelStyle(T.etch)}>→</span>
+        <span style={stepStyle(2)}>2 COPY</span><span style={labelStyle(T.etch)}>→</span>
+        <span style={stepStyle(3)}>3 PILOT SIGNS IN</span><span style={labelStyle(T.etch)}>→</span>
+        <span style={stepStyle(4)}>4 LINKED</span>
+      </div>
+      {!pilot ? (
+        <div style={{ background: T.paper, border: T.border, borderRadius: T.radius.md, padding: 14, fontSize: 12, color: T.graphite }}>
+          Save the pilot first, then generate a code here.
+        </div>
+      ) : res?.code ? (
+        <div style={{ background: T.ink, borderRadius: T.radius.md, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ ...monoStyle(26, T.white), letterSpacing: '0.12em', userSelect: 'all' }}>{res.code}</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" variant="primary" onInk icon={copied ? 'check' : 'download'} onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+              <Button size="sm" onInk icon="refresh" onClick={gen} disabled={busy}>Replace</Button>
+            </div>
+          </div>
+          <span style={labelStyle(T.mutedDark)}>SINGLE USE · VALID UNTIL {exp}</span>
+        </div>
+      ) : (
+        <div style={{ background: T.paper, border: T.border, borderRadius: T.radius.md, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span style={{ fontSize: 12, lineHeight: 1.5, color: T.graphite }}>
+            {linked
+              ? `Linked to ${pilot.accountEmail || 'a dashboard sign-in'}. Issue a new code only if the pilot loses access to that account.`
+              : 'A single-use code, valid 14 days. The pilot keys it in once after signing in; any sign-in works, Google or Apple.'}
+          </span>
+          <div><Button size="sm" variant={linked ? 'ghost' : 'secondary'} icon="refresh" onClick={gen} disabled={busy}>{busy ? 'Creating…' : linked ? 'Generate a new code' : 'Generate a code'}</Button></div>
+          {res?.error && <StatusDot tone="caution" text={res.error} />}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -462,7 +499,7 @@ function HexLookupField({ form, setForm }) {
   )
 }
 
-function AircraftForm({ form, setForm, error, pilots = [] }) {
+function AircraftForm({ form, setForm, error, pilots = [], typePicks = [] }) {
   return (
     <div>
       {error && <Banner tone="caution" style={{ marginBottom: 16 }}>{error}</Banner>}
@@ -489,6 +526,14 @@ function AircraftForm({ form, setForm, error, pilots = [] }) {
             value={form.typeDesig}
             onChange={v => setForm(p => ({ ...p, typeDesig: v }))}
           />
+          {typePicks.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {typePicks.map(t => (
+                <Toggle key={t} mono active={form.typeDesig === t} title={findAircraftType(t)?.name || t}
+                  onClick={() => setForm(p => ({ ...p, typeDesig: t }))}>{t}</Toggle>
+              ))}
+            </div>
+          )}
         </div>
       </Section>
 
@@ -503,23 +548,23 @@ function AircraftForm({ form, setForm, error, pilots = [] }) {
       </Section>
 
       <Section title="OWNERSHIP">
-        <div>
+        <div style={full}>
           <Label>OWNERSHIP</Label>
-          <Select
-            value={form.ownership || 'club'}
-            onChange={v => setForm(p => ({ ...p, ownership: v, ownerPilotId: v === 'club' ? '' : p.ownerPilotId }))}
-            options={[{ value: 'club', label: 'Club aircraft' }, { value: 'owner', label: 'Private (owner)' }]}
-          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Toggle active={(form.ownership || 'club') === 'club'} onClick={() => setForm(p => ({ ...p, ownership: 'club', ownerPilotId: '' }))}>Club</Toggle>
+            <Toggle active={form.ownership === 'owner'} onClick={() => setForm(p => ({ ...p, ownership: 'owner' }))}>Private owner</Toggle>
+          </div>
         </div>
         {form.ownership === 'owner' && (
           <div>
-            <Label>OWNER · PILOT</Label>
+            <Label>OWNER</Label>
             <Select
               value={form.ownerPilotId || ''}
               onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
               options={sortOptions([{ value: '', label: 'Select owner…' },
                 ...pilots.filter(p => !p.archived || p.id === form.ownerPilotId).map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))])}
             />
+            <Hint>Flights of an owner aircraft are credited to the owner automatically.</Hint>
           </div>
         )}
       </Section>
@@ -532,42 +577,6 @@ function AircraftForm({ form, setForm, error, pilots = [] }) {
 }
 
 // ─── Row pieces ───────────────────────────────────────────────────────────────
-// (2026-09-21) Code d'invitation pour relier le compte d'un pilote à sa fiche (fonction cloud createPilotInvite).
-// Usage unique, 14 jours ; un nouveau code révoque le précédent. Le code n'est affiché qu'ici, jamais stocké côté client.
-function InviteCodeButton({ pilot }) {
-  const [busy, setBusy] = useState(false)
-  const [res, setRes]   = useState(null)   // { code, expiresAt } | { error }
-  const gen = async () => {
-    if (busy) return
-    if (pilot.uid && !window.confirm(`${pilot.firstName || ''} ${pilot.lastName || ''} is already linked to an account. Create a new code to link another account?`)) return
-    setBusy(true); setRes(null)
-    try { const { data } = await httpsCallable(functions, 'createPilotInvite')({ pilotId: pilot.id }); setRes(data) }
-    catch (e) { setRes({ error: e?.message || 'Could not create the code.' }) }
-    finally { setBusy(false) }
-  }
-  const exp = res?.expiresAt ? new Date(res.expiresAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-      {res?.code && (
-        <span title={`Valid until ${exp}. Single use.`} style={{
-          ...monoStyle(12, T.ink), letterSpacing: '0.1em', border: T.border, borderRadius: T.radius.sm,
-          padding: '4px 8px', userSelect: 'all', background: T.paper,
-        }}>
-          {res.code}
-        </span>
-      )}
-      {res?.code && (
-        <Button size="sm" variant="ghost" onClick={() => navigator.clipboard?.writeText(res.code)}>Copy</Button>
-      )}
-      {res?.error && <StatusDot tone="caution" text={res.error} />}
-      <Button size="sm" onClick={gen} disabled={busy}
-        title="Create a single-use code the pilot enters after signing in (Google, Apple…)">
-        {busy ? 'Creating…' : (res?.code ? 'New code' : 'Invite code')}
-      </Button>
-    </div>
-  )
-}
-
 function AircraftThumb({ ac }) { return <AircraftPhoto ac={ac} width={56} height={36} /> }   // (21/09) composant partagé
 
 // Liste d'actions de fin de ligne.
@@ -575,12 +584,6 @@ const Actions = ({ children }) => (
   <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>{children}</div>
 )
 
-const sectionTitle = (text, count) => (
-  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-    <span style={headingStyle(15)}>{text}</span>
-    {count != null && <span style={monoStyle(12, T.etch)}>{count}</span>}
-  </div>
-)
 
 // ─── Main AdminPage ───────────────────────────────────────────────────────────
 export default function AdminPage() {
@@ -594,6 +597,7 @@ export default function AdminPage() {
   const [invites,  setInvites]  = useState([])   // (accès) invitations en attente/acceptées
   const [members,  setMembers]  = useState([])   // (accès) users rattachés à ce club
   const [loading,  setLoading]  = useState(true)
+  const [refs,     setRefs]     = useState({ pilot: {}, ac: {} })   // (22/09) vols non archivés citant chaque fiche (purge)
 
   // Form state
   const [pilotForm,    setPilotForm]    = useState(null)   // null = closed
@@ -613,7 +617,14 @@ export default function AdminPage() {
       getDocs(query(collection(db, 'aircraft'), where('clubId', '==', clubId))),
       getDocs(query(collection(db, 'invites'),  where('clubId', '==', clubId))),
       getDocs(query(collection(db, 'users'),    where('clubId', '==', clubId))),
-    ]).then(([ps, as, iv, us]) => {
+      getDocs(query(collection(db, 'flights'), where('clubId', '==', clubId))),
+    ]).then(([ps, as, iv, us, fs]) => {
+      const pr = {}, ar = {}
+      fs.docs.forEach(d => { const f = d.data(); if (f.archived) return
+        if (f.pilotId) pr[f.pilotId] = (pr[f.pilotId] || 0) + 1
+        if (f.instructorId) pr[f.instructorId] = (pr[f.instructorId] || 0) + 1
+        if (f.aircraftIdent) ar[f.aircraftIdent] = (ar[f.aircraftIdent] || 0) + 1 })
+      setRefs({ pilot: pr, ac: ar })
       const pilotDocs    = ps.docs.map(d => ({ id: d.id, ...d.data() }))
       const aircraftDocs = as.docs.map(d => ({ id: d.id, ...d.data() }))
       const inviteDocs   = iv.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -824,343 +835,306 @@ export default function AdminPage() {
   const membersShown  = members.filter(m => matches(qAccess, m.email, m.displayName, m.role))
   const invitesShown  = pendingInvites.filter(i => matches(qAccess, i.email, i.id, i.role))
 
-  // ── Colonnes ────────────────────────────────────────────────────────────────
-  const pilotColumns = [
-    { key: 'trigram', label: 'TRIG', mono: true, width: 56,
-      render: p => <span style={{ fontWeight: 500, letterSpacing: '0.08em', color: p.archived ? T.etch : undefined }}>{p.trigram || '—'}</span> },
-    { key: 'name', label: 'PILOT',
-      render: p => (
-        <div style={{ minWidth: 140 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontWeight: 600, color: p.archived ? T.etch : T.ink }}>{p.firstName} {p.lastName}</span>
-            {p.archived && <Chip>ARCHIVED</Chip>}
-          </div>
-          {p.licences?.length > 0 && (
-            <div style={{ ...monoStyle(11, T.graphite), marginTop: 2 }}>{p.licences.map(l => l.toUpperCase()).join(' · ')}</div>
-          )}
-        </div>
-      ) },
-    { key: 'qual', label: 'QUALIFICATION',
-      render: p => (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Chip>{p.licence === 'student' ? 'STUDENT' : 'PILOT'}</Chip>
-          {p.isInstructor && <Chip strong>FI</Chip>}
-        </div>
-      ) },
-    { key: 'role', label: 'ROLE', render: p => <span style={{ color: T.graphite }}>{roleLabel(p.role)}</span> },
-    { key: 'pin', label: 'PIN',
-      render: p => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={monoStyle(13, p.pin ? T.ink : T.etch)}>{p.pin ? '••••' : '—'}</span>
-          {/* PIN conflict warning — set by Cloud Function dedupPilotPin */}
-          {p.pinConflict && (
-            <span title="Another pilot in the same club has the same PIN. Edit one of them to fix it.">
-              <StatusDot tone="caution" text="PIN CONFLICT" />
-            </span>
-          )}
-        </div>
-      ) },
-    { key: 'account', label: 'ACCOUNT',
-      render: p => (
-        <span title={p.uid ? `Linked account: ${p.accountEmail || 'yes'}` : 'No dashboard account linked yet'}>
-          <StatusDot tone={p.uid ? 'ok' : 'off'} text={p.uid ? 'LINKED' : 'NOT LINKED'} />
-        </span>
-      ) },
-    { key: 'actions', label: '', align: 'right',
-      render: p => (
-        <Actions>
-          {!p.archived && <InviteCodeButton pilot={p} />}
-          <Button size="sm" icon="edit" onClick={() => openEditPilot(p)}>Edit</Button>
-          {p.archived ? (<>
-            <Button size="sm" icon="refresh" onClick={() => restorePilot(p)}>Restore</Button>
-            <Button size="sm" variant="danger" icon="close" confirm="Delete forever?"
-              title={`Delete ${p.firstName} ${p.lastName} permanently`} onClick={() => runPurge([p], purgePilotDoc, setPilots, 'pilot')}>Purge</Button>
-          </>) : (
-            <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
-              title={`Archive pilot ${p.firstName} ${p.lastName}`} onClick={() => deletePilot(p)}>Archive</Button>
-          )}
-        </Actions>
-      ) },
-  ]
+  // ── (22/09) Admin d'après Claude Design « Admin dashboard live build » ─────────────────────────────────────
+  // Métriques par onglet (ce qui manque), recherche toujours visible « n OF total », fiches actives et ARCHIVÉES
+  // séparées (bannière archive ≠ purge, « REFERRED TO BY n FLIGHTS »), tiroirs avec code d'invitation et bascules.
+  const MISSING = '−−−'
+  const lab = labelStyle(T.etch)
+  const pName = (p) => `${p.firstName || ''} ${p.lastName || ''}`.trim() || MISSING
+  const pRefs = (p) => refs.pilot[p.id] || 0
+  const aRefs = (a) => [...new Set([a.callSign, a.registration].filter(Boolean))].reduce((n, k) => n + (refs.ac[k] || 0), 0)
+  const activePilots = pilots.filter(p => !p.archived), archPilots = pilots.filter(p => p.archived)
+  const activeAc = aircraft.filter(a => !a.archived), archAc = aircraft.filter(a => a.archived)
+  const pilotsList = activePilots.filter(p => pilotsShown.includes(p))
+  const acList = activeAc.filter(a => aircraftShown.includes(a))
+  const unlinked = activePilots.filter(p => !p.uid).length
+  const dupPins = activePilots.filter(p => p.pinConflict).length
+  const fiCount = activePilots.filter(p => p.isInstructor).length
+  const noHex = activeAc.filter(a => !a.icao24).length
+  const noPhoto = activeAc.filter(a => !a.photoUrl).length
+  const noAccess = activePilots.filter(p => !p.uid && !members.some(m => (m.email || '').toLowerCase() === (p.email || '').toLowerCase())).length
+  const typePicks = [...new Set(activeAc.map(a => a.typeDesig).filter(Boolean))].sort(compareText).slice(0, 6)
+  const setNotice = (tone, text) => setPurgeMsg({ tone, text })
 
+  const openBtn = (onClick) => <Button size="sm" icon="edit" onClick={onClick}>Open</Button>
+  const pilotColumns = [
+    { key: 'trigram', label: 'TRIG', mono: true, width: 62, render: p => <span style={{ ...monoStyle(13), fontWeight: 500, letterSpacing: '0.08em' }}>{p.trigram || MISSING}</span> },
+    { key: 'name', label: 'PILOT', render: p => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{pName(p)}</span>
+        <span style={{ fontSize: 11, color: T.graphite, overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.email || '—'}</span>
+      </div>
+    ) },
+    { key: 'qual', label: 'QUALIFICATION', render: p => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Chip>{p.licence === 'student' ? 'STUDENT' : 'LICENSED'}</Chip>
+          {p.isInstructor && <Chip strong title="Flight instructor">FI</Chip>}
+        </div>
+        {p.licences?.length > 0 && <span style={{ ...lab, whiteSpace: 'nowrap' }}>{p.licences.map(l => l.toUpperCase()).join(' · ')}</span>}
+      </div>
+    ) },
+    { key: 'role', label: 'ROLE', render: p => <span style={{ fontSize: 13 }}>{roleLabel(p.role)}</span> },
+    { key: 'pin', label: 'PIN', mono: true, render: p => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <span style={monoStyle(13, p.pin ? T.ink : T.etch)}>{p.pin ? '••••' : MISSING}</span>
+        {p.pinConflict && <span title="Another pilot of the club has the same PIN: change one so the AKview tells them apart."><StatusDot tone="caution" text="DUPLICATE" /></span>}
+      </div>
+    ) },
+    { key: 'account', label: 'STATUS', render: p => (
+      <span title={p.uid ? `Linked account: ${p.accountEmail || 'yes'}` : 'No dashboard sign-in linked yet: generate an invitation code'}>
+        <StatusDot tone={p.uid ? 'ok' : 'caution'} text={p.uid ? 'LINKED' : 'NOT LINKED'} />
+      </span>
+    ) },
+    { key: 'actions', label: '', align: 'right', render: p => (
+      <Actions>
+        {openBtn(() => openEditPilot(p))}
+        <Button size="sm" variant="ghost" icon="archive" confirm="Archive?" title="Archive: reversible, flights kept"
+          onClick={() => { deletePilot(p); setNotice('info', `${pName(p)} archived. The record leaves the lists and totals; every flight already flown stays readable. Restore it at any time below.`) }}>Archive</Button>
+      </Actions>
+    ) },
+  ]
+  const archivedCols = (kind) => [
+    kind === 'pilot'
+      ? { key: 'trig', label: 'TRIG', mono: true, width: 62, render: p => <span style={monoStyle(13, T.etch)}>{p.trigram || MISSING}</span> }
+      : { key: 'photo', label: '', width: 72, render: a => <AircraftThumb ac={a} /> },
+    { key: 'name', label: kind === 'pilot' ? 'PILOT' : 'AIRCRAFT', render: r => (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.etch }}>
+        <span style={kind === 'pilot' ? { fontSize: 13 } : monoStyle(14, T.etch)}>{kind === 'pilot' ? pName(r) : (r.callSign || r.registration)}</span>
+        {kind !== 'pilot' && <span style={monoStyle(12, T.etch)}>{r.typeDesig || ''}</span>}
+        <Chip muted>ARCHIVED</Chip>
+      </div>
+    ) },
+    { key: 'ref', label: 'REFERRED TO BY', render: r => { const n = kind === 'pilot' ? pRefs(r) : aRefs(r); return <span style={lab}>{n ? `${n} FLIGHT${n === 1 ? '' : 'S'} · KEPT ON PURGE` : 'NO FLIGHT · CAN BE PURGED'}</span> } },
+    { key: 'act', label: '', align: 'right', render: r => (
+      <Actions>
+        <Button size="sm" icon="refresh" onClick={() => { (kind === 'pilot' ? restorePilot : restoreAircraft)(r); setNotice('ok', `${kind === 'pilot' ? pName(r) : (r.callSign || r.registration)} restored: back in the lists and totals.`) }}>Restore</Button>
+        <Button size="sm" variant="danger" icon="close" confirm="Delete for ever?" title="Purge: permanent"
+          onClick={() => (kind === 'pilot' ? runPurge([r], purgePilotDoc, setPilots, 'pilot') : runPurge([r], purgeAircraftDoc, setAircraft, 'aircraft'))}>Purge</Button>
+      </Actions>
+    ) },
+  ]
   const aircraftColumns = [
     { key: 'photo', label: '', width: 72, render: a => <AircraftThumb ac={a} /> },
-    { key: 'callSign', label: 'CALL SIGN', mono: true,
-      render: a => (
+    { key: 'callSign', label: 'CALL SIGN', render: a => <span style={{ ...monoStyle(14), fontWeight: 500 }}>{a.callSign || a.registration}</span> },
+    { key: 'typeDesig', label: 'TYPE', mono: true, render: a => a.typeDesig || MISSING },
+    { key: 'icao24', label: 'HEX', mono: true, render: a => <span style={{ color: a.icao24 ? T.ink : T.etch }}>{a.icao24 ? a.icao24.toUpperCase() : MISSING}</span> },
+    { key: 'homeBase', label: 'BASE', mono: true, render: a => a.homeBase || MISSING },
+    { key: 'ownership', label: 'OWNERSHIP', render: a => {
+      const isOwner = a.ownership === 'owner'
+      const owner = isOwner ? pilots.find(p => p.id === a.ownerPilotId) : null
+      return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 500, color: a.archived ? T.etch : T.ink }}>{a.callSign || a.registration}</span>
-          {a.archived && <Chip>ARCHIVED</Chip>}
+          <Chip strong={isOwner}>{isOwner ? 'OWNER' : 'CLUB'}</Chip>
+          {isOwner && <span style={{ fontSize: 13 }}>{owner ? pName(owner) : MISSING}</span>}
         </div>
-      ) },
-    { key: 'typeDesig', label: 'TYPE', mono: true,
-      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.typeDesig || '—'}</span> },
-    { key: 'homeBase', label: 'BASE', mono: true,
-      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.homeBase || '—'}</span> },
-    { key: 'icao24', label: 'ICAO24', mono: true,
-      render: a => <span style={{ color: a.archived ? T.etch : T.ink }}>{a.icao24 || '—'}</span> },
-    { key: 'ownership', label: 'OWNERSHIP',
-      render: a => {
-        const isOwner = a.ownership === 'owner'
-        const owner = isOwner ? pilots.find(p => p.id === a.ownerPilotId) : null
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Chip strong={isOwner}>{isOwner ? 'OWNER' : 'CLUB'}</Chip>
-            {isOwner && (
-              <span style={{ color: a.archived ? T.etch : T.graphite }}>
-                {owner ? `${owner.firstName} ${owner.lastName}` : '—'}
-              </span>
-            )}
-          </div>
-        )
-      } },
-    { key: 'actions', label: '', align: 'right',
-      render: a => (
-        <Actions>
-          <Button size="sm" icon="edit" onClick={() => openEditAircraft(a)}>Edit</Button>
-          {a.archived ? (<>
-            <Button size="sm" icon="refresh" onClick={() => restoreAircraft(a)}>Restore</Button>
-            <Button size="sm" variant="danger" icon="close" confirm="Delete forever?"
-              title={`Delete ${a.callSign || a.registration} permanently`} onClick={() => runPurge([a], purgeAircraftDoc, setAircraft, 'aircraft')}>Purge</Button>
-          </>) : (
-            <Button size="sm" variant="danger" icon="archive" confirm="Confirm archive"
-              title={`Archive aircraft ${a.callSign || a.registration}`} onClick={() => deleteAircraft(a)}>Archive</Button>
-          )}
-        </Actions>
-      ) },
+      )
+    } },
+    { key: 'status', label: 'STATUS', render: a => (!a.icao24 ? <StatusDot tone="caution" text="NO HEX" /> : !a.photoUrl ? <StatusDot tone="caution" text="NO PHOTO" /> : <StatusDot tone="ok" text="COMPLETE" />) },
+    { key: 'actions', label: '', align: 'right', render: a => (
+      <Actions>
+        {openBtn(() => openEditAircraft(a))}
+        <Button size="sm" variant="ghost" icon="archive" confirm="Archive?" title="Archive: reversible, flights kept"
+          onClick={() => { deleteAircraft(a); setNotice('info', `${a.callSign || a.registration} archived. It leaves the lists and the live views; its flights stay readable. Restore it at any time below.`) }}>Archive</Button>
+      </Actions>
+    ) },
   ]
-
   const memberColumns = [
-    { key: 'name', label: 'NAME',
-      render: m => <span style={{ fontWeight: 600 }}>{m.displayName || m.email}</span> },
-    { key: 'email', label: 'EMAIL', mono: true, render: m => <span style={{ color: T.graphite }}>{m.email}</span> },
-    { key: 'role', label: 'ROLE', width: 170,
-      render: m => m.role === 'super_admin' ? (
-        // super_admin : lecture seule — un select le rétrograderait.
-        <span title="Platform role — not editable from club administration"><Chip strong>SUPER ADMIN</Chip></span>
-      ) : (
-        <select value={m.role || 'user'} onChange={e => changeMemberRole(m, e.target.value)} className="ak-focus"
-          aria-label={`Role for ${m.email}`}
-          style={{ ...fieldBase, height: 28, fontFamily: T.sans, cursor: 'pointer' }}>
-          <option value="user">Pilot</option>
-          <option value="instructor">Instructor</option>
-          <option value="admin">Admin</option>
-        </select>
-      ) },
-    { key: 'actions', label: '', align: 'right',
-      render: m => (
-        <Actions>
-          <Button size="sm" variant="danger" confirm="Confirm revoke"
-            title={`Revoke access for ${m.email}. They lose access at next sign-in.`}
-            onClick={() => revokeMember(m)}>Revoke</Button>
-        </Actions>
-      ) },
+    { key: 'name', label: 'MEMBER', render: m => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{m.displayName || m.email}</span>
+        <span style={{ fontSize: 11, color: T.graphite }}>{m.email}</span>
+      </div>
+    ) },
+    { key: 'role', label: 'ROLE', width: 260, render: m => m.role === 'super_admin' ? (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Chip strong>SUPER ADMIN</Chip><span style={lab}>READ ONLY</span></span>
+    ) : (
+      <Select value={m.role || 'user'} aria-label={`Role for ${m.email}`} onChange={v => { changeMemberRole(m, v); setNotice('ok', `${m.displayName || m.email} is now ${roleLabel(v)}. The new role applies at their next page load.`) }}
+        options={[{ value: 'user', label: 'Pilot · own flights' }, { value: 'instructor', label: 'Instructor · club logbook' }, { value: 'admin', label: 'Admin · full club' }]} />
+    ) },
+    { key: 'status', label: 'STATUS', render: () => <StatusDot tone="ok" text="SIGNED IN" /> },
+    { key: 'actions', label: '', align: 'right', render: m => (m.role === 'super_admin' ? <span style={lab}>CANNOT BE REMOVED</span> : (
+      <Actions>
+        <Button size="sm" variant="danger" confirm="Remove access?" title={`Withdraw the dashboard sign-in of ${m.email}`}
+          onClick={() => { revokeMember(m); setNotice('info', `Access removed for ${m.displayName || m.email}. The pilot record and the flights are untouched; only the dashboard sign-in is withdrawn.`) }}>Remove access</Button>
+      </Actions>
+    )) },
   ]
-
   const inviteColumns = [
-    { key: 'email', label: 'EMAIL', mono: true },
-    { key: 'role', label: 'INVITED AS', render: i => <span style={{ color: T.graphite }}>{roleLabel(i.role || 'user')}</span> },
+    { key: 'email', label: 'E-MAIL', render: i => <span style={{ fontSize: 13 }}>{i.email}</span> },
+    { key: 'role', label: 'INVITED AS', render: i => <span style={{ fontSize: 13 }}>{roleLabel(i.role || 'user')}</span> },
     { key: 'status', label: 'STATUS', render: () => <StatusDot tone="caution" text="WAITING FOR FIRST SIGN-IN" /> },
-    { key: 'actions', label: '', align: 'right',
-      render: inv => (
-        <Actions>
-          <Button size="sm" variant="danger" confirm="Confirm revoke"
-            title={`Revoke invitation for ${inv.email}`} onClick={() => revokeInvite(inv)}>Revoke</Button>
-        </Actions>
-      ) },
+    { key: 'actions', label: '', align: 'right', render: inv => (
+      <Actions><Button size="sm" variant="ghost" confirm="Cancel it?" onClick={() => { revokeInvite(inv); setNotice('info', `Invitation cancelled: ${inv.email} can no longer join with it.`) }}>Cancel</Button></Actions>
+    ) },
   ]
 
   const pilotIsEdit = !!editId && !!pilotForm
   const pilotConflict = trigramConflictOf(pilotForm, allTrigrams, pilotIsEdit)
+  const metrics = (cards) => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+      {cards.map(c => <MetricCard key={c.label} label={c.label} value={loading ? null : String(c.value)} status={loading ? undefined : c.status} />)}
+    </div>
+  )
+  const toolbar = (q, setQ, placeholder, shown, total, right) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ flex: '1 1 320px', maxWidth: 420 }}><SearchBox value={q} onChange={setQ} placeholder={placeholder} count={shown} total={total} /></div>
+      <span style={lab}>{shown} OF {total}</span>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>{right}</div>
+    </div>
+  )
+  const archivedBlock = (kind, list) => list.length > 0 && (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingBottom: 8, borderBottom: T.border }}>
+        <h2 style={{ ...headingStyle(15), margin: 0 }}>Archived {kind === 'pilot' ? 'pilots' : 'aircraft'}</h2>
+        <span style={lab}>{list.length} ARCHIVED · {list.filter(r => !(kind === 'pilot' ? pRefs(r) : aRefs(r))).length} CAN BE PURGED</span>
+      </div>
+      <Banner tone="info" title="Archive keeps the logbook intact">
+        An archived {kind === 'pilot' ? 'pilot' : 'aircraft'} leaves the lists and the totals; every flight already flown stays readable. Purge deletes the record for good and is refused while a flight still refers to it.
+      </Banner>
+      <DataTable columns={archivedCols(kind)} rows={list} />
+    </div>
+  )
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{
-      width: '100%', height: '100%', background: T.paper,
-      display: 'flex', flexDirection: 'column',
-      fontFamily: T.sans, color: T.ink, overflow: 'hidden',
-    }}>
+    <div style={{ width: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
+      <main style={{ padding: '28px 32px 48px', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1320 }}>
+        <header style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={lab}>{[club?.name, club?.icao].filter(Boolean).join(' · ').toUpperCase() || 'CLUB RECORDS'}</span>
+          <h1 style={{ ...headingStyle(28), margin: 0 }}>Admin</h1>
+        </header>
+        <Tabs ariaLabel="Admin sections" value={tab} onChange={switchTab} tabs={[
+          { key: 'PILOTS', label: 'Pilots', count: activePilots.length },
+          { key: 'AIRCRAFT', label: 'Aircraft', count: activeAc.length },
+          { key: 'ACCESS', label: 'Access', count: members.length },
+        ]} />
 
-      {/* Top bar */}
-      <div style={{
-        padding: '16px 24px', flexShrink: 0, borderBottom: T.border,
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        {/* (22/09) titre de page comme In flight / Logbook / Fleet (heading 28) */}
-        <h1 style={{ ...headingStyle(28), margin: '0 12px 0 0' }}>Admin</h1>
-        <Tabs
-          ariaLabel="Admin sections"
-          value={tab}
-          onChange={switchTab}
-          tabs={[
-            { key: 'PILOTS',   label: 'Pilots',   count: pilots.filter(p => !p.archived).length },
-            { key: 'AIRCRAFT', label: 'Aircraft', count: aircraft.filter(a => !a.archived).length },
-            { key: 'ACCESS',   label: 'Access',   count: members.length + invites.length },
-          ]}
-        />
+        {purgeMsg && (
+          <Banner tone={purgeMsg.tone} action={<Button size="sm" variant="ghost" icon="close" onClick={() => setPurgeMsg(null)}>Dismiss</Button>}>{purgeMsg.text}</Banner>
+        )}
+        {error && !pilotForm && !aircraftForm && (
+          <Banner tone="caution" action={<Button size="sm" variant="ghost" onClick={() => setError('')}>Dismiss</Button>}>{error}</Banner>
+        )}
 
-        <div style={{ flex: 1 }} />
-
-        {tab === 'PILOTS' && pilots.some(p => p.archived) && (
-          <Button variant="danger" confirm="Delete all archived?" disabled={saving}
-            onClick={() => runPurge(pilots.filter(p => p.archived), purgePilotDoc, setPilots, 'pilot')}>
-            Purge archived ({pilots.filter(p => p.archived).length})
-          </Button>
-        )}
-        {tab === 'AIRCRAFT' && aircraft.some(a => a.archived) && (
-          <Button variant="danger" confirm="Delete all archived?" disabled={saving}
-            onClick={() => runPurge(aircraft.filter(a => a.archived), purgeAircraftDoc, setAircraft, 'aircraft')}>
-            Purge archived ({aircraft.filter(a => a.archived).length})
-          </Button>
-        )}
-        {tab === 'PILOTS' && (
-          <Button variant="primary" onClick={openNewPilot}>New pilot</Button>
-        )}
-        {tab === 'AIRCRAFT' && (
-          <Button variant="primary" onClick={openNewAircraft}>New aircraft</Button>
-        )}
-        {tab === 'ACCESS' && !inviteForm && (
-          <Button variant="primary" onClick={() => { setInviteForm({ email: '', role: 'user' }); setError('') }}>Invite person</Button>
-        )}
-      </div>
-
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 32px' }}>
-        <div style={{ maxWidth: 1120, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {purgeMsg && (tab === 'PILOTS' || tab === 'AIRCRAFT') && (
-            <Banner tone={purgeMsg.tone} action={<Button size="sm" variant="ghost" onClick={() => setPurgeMsg(null)}>Dismiss</Button>}>{purgeMsg.text}</Banner>
-          )}
-
-          {tab === 'PILOTS' && (<>
-            <SearchBox value={qPilots} onChange={setQPilots} placeholder="Search pilots — name, trigram, e-mail, licence" count={pilotsShown.length} total={pilots.length} />
-            <DataTable
-              columns={pilotColumns} rows={pilotsShown} loading={loading}
-              empty={qPilots.trim()
-                ? <EmptyState text={`No pilot matches “${qPilots.trim()}”.`} actionLabel="Clear search" onAction={() => setQPilots('')} />
-                : <EmptyState text="No pilots yet." actionLabel="New pilot" onAction={openNewPilot} />}
-            />
+        {tab === 'PILOTS' && (<>
+          {metrics([
+            { label: 'PILOTS ON FILE', value: activePilots.length, status: { tone: 'off', text: `${fiCount} instructor${fiCount === 1 ? '' : 's'} · ${activePilots.length - fiCount} pilots` } },
+            { label: 'ACCOUNT NOT LINKED', value: unlinked, status: unlinked ? { tone: 'caution', text: 'Send an invitation code' } : { tone: 'ok', text: 'Every pilot linked' } },
+            { label: 'DUPLICATE PIN', value: dupPins, status: dupPins ? { tone: 'caution', text: 'Change one so the AKview tells them apart' } : { tone: 'ok', text: 'All PINs unique' } },
+          ])}
+          {toolbar(qPilots, setQPilots, 'Name, trigram, e-mail or licence · Esc clears', pilotsList.length, activePilots.length, <>
+            {archPilots.length > 0 && (
+              <Button size="sm" variant="ghost" icon="archive" confirm="Purge all archived?" disabled={saving}
+                onClick={() => runPurge(archPilots, purgePilotDoc, setPilots, 'pilot')}>Purge archived ({archPilots.length})</Button>
+            )}
+            <Button size="sm" variant="primary" icon="user" onClick={openNewPilot}>New pilot</Button>
           </>)}
+          <DataTable columns={pilotColumns} rows={pilotsList} loading={loading}
+            empty={qPilots.trim()
+              ? <EmptyState text={`No pilot matches “${qPilots.trim()}”.`} actionLabel="Clear the search" onAction={() => setQPilots('')} />
+              : <EmptyState text="No pilots yet." actionLabel="New pilot" onAction={openNewPilot} />} />
+          {archivedBlock('pilot', archPilots.filter(p => pilotsShown.includes(p)))}
+        </>)}
 
-          {tab === 'AIRCRAFT' && (<>
-            <SearchBox value={qAircraft} onChange={setQAircraft} placeholder="Search aircraft — registration, type, hex, base, owner" count={aircraftShown.length} total={aircraft.length} />
-            <DataTable
-              columns={aircraftColumns} loading={loading}
-              rows={aircraftShown}
-              empty={qAircraft.trim()
-                ? <EmptyState text={`No aircraft matches “${qAircraft.trim()}”.`} actionLabel="Clear search" onAction={() => setQAircraft('')} />
-                : <EmptyState text="No aircraft yet." actionLabel="New aircraft" onAction={openNewAircraft} />}
-            />
+        {tab === 'AIRCRAFT' && (<>
+          {metrics([
+            { label: 'AIRCRAFT ON FILE', value: activeAc.length, status: { tone: 'off', text: `${activeAc.filter(a => a.ownership !== 'owner').length} club · ${activeAc.filter(a => a.ownership === 'owner').length} owners` } },
+            { label: 'NO HEX (MODE S)', value: noHex, status: noHex ? { tone: 'caution', text: 'Not identified on the live map' } : { tone: 'ok', text: 'Every aircraft identified' } },
+            { label: 'NO PHOTO', value: noPhoto, status: noPhoto ? { tone: 'caution', text: 'Harder to recognise' } : { tone: 'ok', text: 'All photos in place' } },
+          ])}
+          {toolbar(qAircraft, setQAircraft, 'Registration, type, hex, base or owner · Esc clears', acList.length, activeAc.length, <>
+            {archAc.length > 0 && (
+              <Button size="sm" variant="ghost" icon="archive" confirm="Purge all archived?" disabled={saving}
+                onClick={() => runPurge(archAc, purgeAircraftDoc, setAircraft, 'aircraft')}>Purge archived ({archAc.length})</Button>
+            )}
+            <Button size="sm" variant="primary" icon="plane" onClick={openNewAircraft}>New aircraft</Button>
           </>)}
+          <DataTable columns={aircraftColumns} rows={acList} loading={loading}
+            empty={qAircraft.trim()
+              ? <EmptyState text={`No aircraft matches “${qAircraft.trim()}”.`} actionLabel="Clear the search" onAction={() => setQAircraft('')} />
+              : <EmptyState text="No aircraft yet." actionLabel="New aircraft" onAction={openNewAircraft} />} />
+          {archivedBlock('aircraft', archAc.filter(a => aircraftShown.includes(a)))}
+        </>)}
 
-          {tab === 'ACCESS' && (
-            <>
-              <SearchBox value={qAccess} onChange={setQAccess} placeholder="Search access — e-mail, name, role" count={membersShown.length + invitesShown.length} total={members.length + pendingInvites.length} />
-              {error && !inviteForm && (
-                <Banner tone="caution" action={<Button size="sm" variant="ghost" onClick={() => setError('')}>Dismiss</Button>}>
-                  {error}
-                </Banner>
-              )}
-
-              {/* Invite form */}
-              {inviteForm && (
-                <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 16 }}>
-                  <div style={{ ...headingStyle(15), marginBottom: 12 }}>Invite a person</div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                    <label style={{ flex: 2, minWidth: 220, display: 'flex', flexDirection: 'column' }}>
-                      <Label>EMAIL · GOOGLE ACCOUNT</Label>
-                      <input type="email" value={inviteForm.email} autoFocus className="ak-focus"
-                        onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
-                        placeholder="person@gmail.com"
-                        style={{ ...fieldBase, fontFamily: T.mono }} />
-                    </label>
-                    <label style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column' }}>
-                      <Label>ROLE</Label>
-                      <select value={inviteForm.role} className="ak-focus"
-                        onChange={e => setInviteForm(f => ({ ...f, role: e.target.value }))}
-                        style={{ ...fieldBase, fontFamily: T.sans, cursor: 'pointer' }}>
-                        <option value="user">Pilot — own flights</option>
-                        <option value="instructor">Instructor — logbook</option>
-                        <option value="admin">Admin — full club</option>
-                      </select>
-                    </label>
-                    <Button variant="primary" onClick={sendInvite} disabled={saving}>
-                      {saving ? 'Sending…' : 'Send invite'}
-                    </Button>
-                    <Button onClick={() => { setInviteForm(null); setError('') }}>Cancel</Button>
-                  </div>
-                  {error && <Banner tone="caution" style={{ marginTop: 12 }}>{error}</Banner>}
-                  <div style={{ fontSize: 13, color: T.graphite, marginTop: 12, lineHeight: 1.5 }}>
-                    The person signs in with this Google account and gets access to <strong style={{ color: T.ink }}>{club?.name || 'this club'}</strong> automatically.
-                    Until then, they see an “Access pending” screen.
-                  </div>
-                </div>
-              )}
-
-              {/* Members (people with access now) */}
-              <div>
-                {sectionTitle('Members', membersShown.length)}
-                <DataTable
-                  columns={memberColumns} rows={membersShown} loading={loading}
-                  empty={<EmptyState text={qAccess.trim() ? `No member matches “${qAccess.trim()}”.` : 'No one has access to this club yet.'} />}
-                />
+        {tab === 'ACCESS' && (<>
+          {metrics([
+            { label: 'DASHBOARD MEMBERS', value: members.length, status: { tone: 'off', text: `${members.filter(m => m.role === 'admin' || m.role === 'super_admin').length} admin · ${members.filter(m => m.role === 'instructor').length} instructor` } },
+            { label: 'PENDING INVITATIONS', value: pendingInvites.length, status: pendingInvites.length ? { tone: 'caution', text: 'Waiting for first sign-in' } : { tone: 'ok', text: 'Nothing waiting' } },
+            { label: 'PILOTS WITHOUT ACCESS', value: noAccess, status: { tone: 'off', text: 'They fly, they do not sign in' } },
+          ])}
+          {toolbar(qAccess, setQAccess, 'Name, e-mail or role · Esc clears', membersShown.length, members.length,
+            <Button size="sm" variant="primary" icon="user" onClick={() => { setInviteForm(f => f || { email: '', role: 'user' }); setTimeout(() => document.getElementById('invite-email')?.focus(), 0) }}>New invitation</Button>)}
+          <DataTable columns={memberColumns} rows={membersShown} loading={loading}
+            empty={<EmptyState text={qAccess.trim() ? `No member matches “${qAccess.trim()}”.` : 'No one has access to this club yet.'} />} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingBottom: 8, borderBottom: T.border }}>
+                <h2 style={{ ...headingStyle(15), margin: 0 }}>Pending invitations</h2>
+                <span style={lab}>{invitesShown.length} WAITING</span>
               </div>
-
-              {/* Pending invites */}
-              {!loading && invitesShown.length > 0 && (
-                <div>
-                  {sectionTitle('Pending invites', invitesShown.length)}
-                  <DataTable columns={inviteColumns} rows={invitesShown} />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+              <DataTable columns={inviteColumns} rows={invitesShown} empty={<EmptyState text="No invitation waiting." />} />
+              <span style={lab}>AN INVITATION BY E-MAIL NEEDS A GOOGLE ACCOUNT · AN INVITATION CODE WORKS WITH ANY SIGN-IN</span>
+            </div>
+            <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <h2 style={{ ...headingStyle(15), margin: 0 }}>Invite someone</h2>
+                <span style={{ fontSize: 12, color: T.graphite }}>They sign in with this Google account and get access to {club?.name || 'this club'} automatically.</span>
+              </div>
+              <Field label="E-MAIL (GOOGLE ACCOUNT)" hint="A pilot without a Google account links with an invitation code instead (Pilots tab).">
+                <Input id="invite-email" type="email" value={inviteForm?.email || ''} placeholder="name@example.com"
+                  onChange={v => setInviteForm(f => ({ role: 'user', ...(f || {}), email: v }))} />
+              </Field>
+              <Field label="INVITED AS">
+                <Select value={inviteForm?.role || 'user'} onChange={v => setInviteForm(f => ({ email: '', ...(f || {}), role: v }))}
+                  options={[{ value: 'user', label: 'Pilot · own flights' }, { value: 'instructor', label: 'Instructor · club logbook' }, { value: 'admin', label: 'Admin · full club' }]} />
+              </Field>
+              <div><Button size="sm" variant="primary" icon="check" disabled={saving || !(inviteForm?.email || '').trim()} onClick={sendInvite}>{saving ? 'Sending…' : 'Send invitation'}</Button></div>
+            </div>
+          </div>
+        </>)}
+      </main>
 
       {/* Pilot drawer */}
-      <Drawer closeOnOverlay={false}
-        open={!!pilotForm}
-        onClose={closePilotForm}
-        title={editId ? 'Edit pilot' : 'New pilot'}
-        subtitle={pilotForm ? [pilotForm.trigram, club?.code].filter(Boolean).join(' · ') || undefined : undefined}
-        footer={<>
-          <Button onClick={closePilotForm}>Cancel</Button>
-          <Button variant="primary" onClick={savePilot} disabled={saving || pilotConflict}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </>}
-      >
+      <Drawer closeOnOverlay={false} open={!!pilotForm} onClose={closePilotForm}
+        title={pilotForm ? (editId ? (pName(pilotForm) || 'Edit pilot') : 'New pilot') : ''}
+        subtitle={pilotForm ? [pilotForm.trigram, pilotForm.licence === 'student' ? 'STUDENT' : 'LICENSED', editId ? `${pRefs({ id: editId })} flights on file` : club?.code].filter(Boolean).join(' · ') : undefined}
+        footer={
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            {editId ? (
+              <Button size="sm" variant="danger" icon="archive" confirm="Archive?" title="Reversible: the flights stay"
+                onClick={() => { const p = pilots.find(x => x.id === editId); if (p) { deletePilot(p); setNotice('info', `${pName(p)} archived. Every flight already flown stays readable; restore it at any time.`) } closePilotForm() }}>Archive pilot</Button>
+            ) : <span />}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" onClick={closePilotForm}>Cancel</Button>
+              <Button size="sm" variant="primary" icon="check" onClick={savePilot} disabled={saving || pilotConflict}>{saving ? 'Saving…' : 'Save'}</Button>
+            </div>
+          </div>
+        }>
         {pilotForm && (
-          <PilotForm
-            form={pilotForm}
-            setForm={setPilotForm}
-            allTrigrams={allTrigrams}
-            currentClub={club}
-            error={error}
-            isEdit={!!editId}
-          />
+          <PilotForm form={pilotForm} setForm={setPilotForm} allTrigrams={allTrigrams} currentClub={club} error={error}
+            isEdit={!!editId} pilot={editId ? pilots.find(x => x.id === editId) : null} />
         )}
       </Drawer>
 
       {/* Aircraft drawer */}
-      <Drawer closeOnOverlay={false}
-        open={!!aircraftForm}
-        onClose={closeAircraftForm}
-        title={editId ? 'Edit aircraft' : 'New aircraft'}
-        subtitle={aircraftForm ? [aircraftForm.callSign, aircraftForm.typeDesig].filter(Boolean).join(' · ') || undefined : undefined}
-        footer={<>
-          <Button onClick={closeAircraftForm}>Cancel</Button>
-          <Button variant="primary" onClick={saveAircraft} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </>}
-      >
+      <Drawer closeOnOverlay={false} open={!!aircraftForm} onClose={closeAircraftForm}
+        title={aircraftForm ? (aircraftForm.callSign || (editId ? 'Edit aircraft' : 'New aircraft')) : ''}
+        subtitle={aircraftForm ? [aircraftForm.typeDesig, aircraftForm.homeBase, aircraftForm.ownership === 'owner' ? 'private owner' : 'club aircraft'].filter(Boolean).join(' · ') : undefined}
+        footer={
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            {editId ? (
+              <Button size="sm" variant="danger" icon="archive" confirm="Archive?" title="Reversible: the flights stay"
+                onClick={() => { const a = aircraft.find(x => x.id === editId); if (a) { deleteAircraft(a); setNotice('info', `${a.callSign || a.registration} archived. Its flights stay readable; restore it at any time.`) } closeAircraftForm() }}>Archive aircraft</Button>
+            ) : <span />}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" onClick={closeAircraftForm}>Cancel</Button>
+              <Button size="sm" variant="primary" icon="check" onClick={saveAircraft} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+            </div>
+          </div>
+        }>
         {aircraftForm && (
-          <AircraftForm
-            form={aircraftForm}
-            setForm={setAircraftForm}
-            pilots={pilots}
-            error={error}
-          />
+          <AircraftForm form={aircraftForm} setForm={setAircraftForm} pilots={pilots} error={error} typePicks={typePicks} />
         )}
       </Drawer>
     </div>
