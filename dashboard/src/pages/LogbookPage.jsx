@@ -105,11 +105,11 @@ const presenceText = f => (f.instructorOnboard ? 'On board' : 'On ground')
 // Boutons de ligne : Open Loop, Assign (vol en attente) / Edit (vol validé), Delete (admin, 2 temps).
 function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
   return (
-    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end' }}>
+    <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
+      {/* (22/09) vol à attribuer : « Assign » EN PREMIER (il était poussé hors écran à droite) */}
+      {onAssign && f._pending && <Button size="sm" variant="primary" icon="edit" onClick={() => onAssign(f)}>Assign</Button>}
       <Button size="sm" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button>
-      {onAssign && (!f._pending
-        ? <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment">Edit</Button>
-        : <Button size="sm" variant="primary" icon="edit" onClick={() => onAssign(f)}>Assign</Button>)}
+      {onAssign && !f._pending && <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment">Edit</Button>}
       {canDelete && (
         <Button size="sm" variant="danger" confirm="Confirm?" onClick={() => onDelete(f.id)} title="Remove this flight from the logbook">
           Delete
@@ -123,7 +123,7 @@ function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
 const COL_DATE     = { key: 'date', label: 'DATE', mono: true, render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDateTime(f.startTs)}</span> }
 const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', render: f => formatDuration(f.duration) }
 const COL_TYPE     = { key: 'type', label: 'TYPE', render: f => <TypeBadge type={f.flightType} /> }
-const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
+const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
 const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax g={f.maxG} /> }
 const colAircraft  = acLabel => ({
   key: 'aircraft', label: 'AIRCRAFT', mono: true,
@@ -429,14 +429,19 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     // Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
     // moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol.
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
-    { key: 'role', label: 'ROLE', render: f => (
-      f.pilotRole === 'student' ? <Chip>STUDENT</Chip>
-        : f.pilotRole === 'pilot' ? <Chip>PILOT</Chip>
-        : DASH
+    // (22/09) ROLE fusionné dans PILOT, PRESENCE sous INSTRUCTOR : 13 → 11 colonnes, plus de défilement horizontal.
+    { key: 'pilot', label: 'PILOT', render: f => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+        {getPilotName(pilots, f.pilotId)}
+        {f.pilotRole === 'student' ? <Chip>STUDENT</Chip> : f.pilotRole === 'pilot' ? <Chip>PILOT</Chip> : null}
+      </span>
     ) },
-    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span> : DASH) },
-    { key: 'presence', label: 'PRESENCE', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{presenceText(f)}</span> : DASH) },
+    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? (
+      <span style={{ display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap' }}>
+        <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span>
+        <span style={{ ...monoStyle(10, T.etch), letterSpacing: '0.08em' }}>{presenceText(f).toUpperCase()}</span>
+      </span>
+    ) : DASH) },
     { ...COL_DURATION, label: sortLabel('DURATION', 'duration') },
     COL_TYPE,
     COL_ALT,
