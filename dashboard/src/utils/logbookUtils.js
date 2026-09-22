@@ -187,9 +187,18 @@ export function flightTypeBadge(type) {
   return { label: ft.short, color: ft.color }
 }
 
-// Total seconds from a list of flight objects
+// (22/09, Christophe) Durée INVRAISEMBLABLE (> 12 h pour un ULM, ou négative) : horodatages aberrants d'anciens
+// enregistrements (ex. ATC19019.csv « 719 h » sur OOI43). Exclue de TOUS les totaux, signalée à l'affichage.
+export const MAX_PLAUSIBLE_SEC = 12 * 3600
+export function isDurationSuspect(f) {
+  const d = Number(f?.duration) || 0
+  return d > MAX_PLAUSIBLE_SEC || d < 0
+}
+export const countSuspect = (flights) => flights.filter(isDurationSuspect).length
+
+// Total seconds from a list of flight objects — durées invraisemblables exclues.
 export function sumDuration(flights) {
-  return flights.reduce((s, f) => s + (f.duration || 0), 0)
+  return flights.reduce((s, f) => s + (isDurationSuspect(f) ? 0 : (Number(f.duration) || 0)), 0)
 }
 
 /**

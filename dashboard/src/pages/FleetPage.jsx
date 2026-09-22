@@ -3,6 +3,7 @@ import { collection, getDocs, query, where, doc, getDoc, setDoc, serverTimestamp
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { httpsCallable } from 'firebase/functions'
 import { db, storage, auth, functions } from '../firebase/config'
+import { isDurationSuspect } from '../utils/logbookUtils'
 import { useClub } from '../contexts/ClubContext'
 import {
   T, labelStyle, headingStyle, monoStyle,
@@ -157,7 +158,7 @@ export default function FleetPage() {
         const h = {}
         snap.forEach(d => {
           const f = d.data()
-          if (!f.boxId || !f.duration) return
+          if (!f.boxId || !f.duration || isDurationSuspect(f)) return   // (22/09) durée invraisemblable exclue
           h[f.boxId] = (h[f.boxId] || 0) + Number(f.duration) / 3600
         })
         setHoursByBox(h)

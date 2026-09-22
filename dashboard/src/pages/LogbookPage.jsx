@@ -32,7 +32,7 @@ import {
 import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import {
   formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
-  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment, findMyPilot,
+  FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment, findMyPilot, isDurationSuspect, countSuspect,
 } from '../utils/logbookUtils'
 
 // Rôles autorisés à importer un CSV depuis le Logbook.
@@ -125,7 +125,85 @@ function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
 
 // Colonnes communes des tables de vols.
 const COL_DATE     = { key: 'date', label: 'DATE', mono: true, render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDateTime(f.startTs)}</span> }
-const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', render: f => formatDuration(f.duration) }
+// (22/09) Durée invraisemblable (> 12 h) : point ambre + valeur grisée, infobulle « exclue des totaux ».
+function DurationCell({ f }) {
+  if (!isDurationSuspect(f)) return formatDuration(f.duration)
+  return (
+    <span title={`Implausible duration (${formatDuration(f.duration)}): excluded from every total. Check the recording.`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: T.etch, whiteSpace: 'nowrap' }}>
+      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: T.amber }} />
+      {formatDuration(f.duration)}
+    </span>
+  )
+}
+const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', render: f => <DurationCell f={f} /> }
+const suspectDot = (n) => (n > 0 ? <StatusDot tone="caution" text={`${n} DURATION${n === 1 ? '' : 'S'} TO CHECK`} /> : null)
+
+// ─── (22/09, Christophe) Vols d'une carte rangés par ANNÉE → MOIS → JOUR ────────────────────────────────────
+// Lignes année / mois dépliables avec leurs totaux (durées invraisemblables exclues et comptées à part) ; l'année
+// et le mois les plus récents s'ouvrent seuls ; dans un mois, un tableau par jour.
+const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+const ymd = f => { const t = tsMillis(f.startTs); return t ? new Date(t).toISOString().slice(0, 10) : '0000-00-00' }
+function periodMeta(list) {
+  const bad = countSuspect(list)
+  return `${list.length} FLIGHT${list.length === 1 ? '' : 'S'} · ${formatDuration(sumDuration(list))}${bad ? ` · ${bad} TO CHECK` : ''}`
+}
+function PeriodRow({ level, open, onToggle, title, meta }) {
+  return (
+    <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus" onClick={onToggle}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: level === 0 ? '10px 16px' : '8px 16px 8px 36px', borderTop: T.border,
+               background: level === 0 ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
+      <Icon name="chevron-right" size={14} color={T.graphite} style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
+      <span style={{ ...labelStyle(T.ink), fontSize: level === 0 ? 12 : 11 }}>{title}</span>
+      <span style={labelStyle(T.etch)}>{meta}</span>
+    </div>
+  )
+}
+function FlightsByPeriod({ flights, columns }) {
+  const tree = useMemo(() => {
+    const years = []
+    flights.forEach(f => {
+      const d = ymd(f), y = d.slice(0, 4), m = d.slice(0, 7)
+      let Y = years.find(x => x.key === y); if (!Y) { Y = { key: y, flights: [], months: [] }; years.push(Y) }
+      Y.flights.push(f)
+      let M = Y.months.find(x => x.key === m); if (!M) { M = { key: m, flights: [], days: [] }; Y.months.push(M) }
+      M.flights.push(f)
+      let D = M.days.find(x => x.key === d); if (!D) { D = { key: d, flights: [] }; M.days.push(D) }
+      D.flights.push(f)
+    })
+    const desc = (a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0)
+    years.sort(desc); years.forEach(Y => { Y.months.sort(desc); Y.months.forEach(M => M.days.sort(desc)) })
+    return years
+  }, [flights])
+  const [openY, setOpenY] = useState(() => new Set(tree[0] ? [tree[0].key] : []))
+  const [openM, setOpenM] = useState(() => new Set(tree[0]?.months[0] ? [tree[0].months[0].key] : []))
+  const flip = (setter, k) => setter(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n })
+  return (
+    <div>
+      {tree.map(Y => (
+        <div key={Y.key}>
+          <PeriodRow level={0} open={openY.has(Y.key)} onToggle={() => flip(setOpenY, Y.key)} title={Y.key === '0000' ? 'NO DATE' : Y.key} meta={periodMeta(Y.flights)} />
+          {openY.has(Y.key) && Y.months.map(M => (
+            <div key={M.key}>
+              <PeriodRow level={1} open={openM.has(M.key)} onToggle={() => flip(setOpenM, M.key)}
+                title={M.key.startsWith('0000') ? 'NO DATE' : `${MONTH_NAMES[Number(M.key.slice(5, 7)) - 1]} ${M.key.slice(0, 4)}`} meta={periodMeta(M.flights)} />
+              {openM.has(M.key) && M.days.map(D => (
+                <div key={D.key} style={{ borderTop: T.border }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px 6px 56px' }}>
+                    <span style={{ ...labelStyle(T.graphite) }}>{D.key.startsWith('0000') ? 'NO DATE' : `${Number(D.key.slice(8, 10))} ${MONTH_NAMES[Number(D.key.slice(5, 7)) - 1]}`}</span>
+                    <span style={labelStyle(T.etch)}>{periodMeta(D.flights)}</span>
+                  </div>
+                  <DataTable columns={columns} rows={D.flights} style={NESTED_TABLE} />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 const COL_TYPE     = { key: 'type', label: 'TYPE', render: f => <TypeBadge type={f.flightType} /> }
 const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
 const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax g={f.maxG} /> }
@@ -197,7 +275,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
     if (mode !== 'pilot') return {}
     return myFlights.reduce((acc, f) => {
       const t = f.flightType || 'solo'
-      acc[t] = (acc[t] || 0) + (f.duration || 0)
+      acc[t] = (acc[t] || 0) + (isDurationSuspect(f) ? 0 : (f.duration || 0))
       return acc
     }, {})
   }, [myFlights, mode])
@@ -234,6 +312,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={headingStyle(15)}>{pilot.firstName} {pilot.lastName}</span>
             {unvalidated > 0 && <StatusDot tone="caution" text={`${unvalidated} TO ASSIGN`} />}
+            {suspectDot(countSuspect(myFlights))}
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
             {(pilot.licences || []).map(lic => <Chip key={lic}>{lic}</Chip>)}
@@ -278,7 +357,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
         </div>
       )}
 
-      {open && myFlights.length > 0 && <DataTable columns={columns} rows={myFlights} style={NESTED_TABLE} />}
+      {open && myFlights.length > 0 && <FlightsByPeriod flights={myFlights} columns={columns} />}
 
       {open && myFlights.length === 0 && (
         <div style={{ borderTop: T.border }}><EmptyState text="No flights recorded." /></div>
@@ -328,6 +407,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ ...monoStyle(16, T.ink), fontWeight: 600 }}>{ac.callSign || ac.registration}</span>
             <OwnershipBadge ac={ac} />
+            {suspectDot(countSuspect(acFlights))}
           </div>
           <div style={{ color: T.graphite, fontSize: 12, marginTop: 4 }}>
             {[ac.ownership === 'owner' ? `Owner: ${getPilotName(pilots, ac.ownerPilotId)}` : null, ac.typeDesig || ac.type].filter(Boolean).join(' · ')}
@@ -356,7 +436,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
         </div>
       </CardHeader>
 
-      {open && acFlights.length > 0 && <DataTable columns={columns} rows={acFlights} style={NESTED_TABLE} />}
+      {open && acFlights.length > 0 && <FlightsByPeriod flights={acFlights} columns={columns} />}
       {open && acFlights.length === 0 && (
         <div style={{ borderTop: T.border }}><EmptyState text="No flights for this aircraft." /></div>
       )}
@@ -1010,7 +1090,7 @@ export default function LogbookPage({ role }) {
     const withStats = regularPilots.map(p => {
       const pFlights = flights.filter(f => f.pilotId === p.id)
       const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
-      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
+      return { ...p, _totalSecs: sumDuration(pFlights), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortPilots === 'alpha')      return [...withStats].sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
     if (sortPilots === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
@@ -1022,7 +1102,7 @@ export default function LogbookPage({ role }) {
     const withStats = instructors.map(p => {
       const pFlights = flights.filter(f => f.instructorId === p.id)
       const last = pFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
-      return { ...p, _totalSecs: pFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
+      return { ...p, _totalSecs: sumDuration(pFlights), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortInstructors === 'alpha')      return [...withStats].sort((a, b) => (a.lastName || '').localeCompare(b.lastName || ''))
     if (sortInstructors === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
@@ -1035,7 +1115,7 @@ export default function LogbookPage({ role }) {
       const ids = [ac.callSign, ac.registration].filter(Boolean)   // callSign canonique + registration legacy
       const acFlights = flights.filter(f => ids.includes(f.aircraftIdent))
       const last = acFlights.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))[0]
-      return { ...ac, _totalSecs: acFlights.reduce((s, f) => s + (f.duration || 0), 0), _lastTs: last ? tsMillis(last.startTs) : null }
+      return { ...ac, _totalSecs: sumDuration(acFlights), _lastTs: last ? tsMillis(last.startTs) : null }
     })
     if (sortAircraft === 'alpha')      return [...withStats].sort((a, b) => (a.callSign || a.registration || '').localeCompare(b.callSign || b.registration || ''))
     if (sortAircraft === 'lastFlight') return [...withStats].sort((a, b) => (b._lastTs || 0) - (a._lastTs || 0))
