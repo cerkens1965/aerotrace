@@ -26,11 +26,12 @@
 //   uploadedAt
 // ──────────────────────────────────────────────────────────────────────────
 
+// (22/09, Claude Design Logbook) durées en HH:MM partout (avant « 0h 34m ») ; les heures peuvent dépasser 99.
 export function formatDuration(seconds) {
-  if (!seconds || seconds <= 0) return '0h 00m'
+  if (!seconds || seconds <= 0) return '00:00'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
-  return `${h}h ${String(m).padStart(2, '0')}m`
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 // ── Pays d'un aérodrome, déduit de son préfixe OACI ──────────────────────────

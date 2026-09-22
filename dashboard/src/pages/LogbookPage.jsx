@@ -25,8 +25,9 @@ import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import RedeemInvite from '../components/auth/RedeemInvite'
 import {
   T, labelStyle, valueStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Icon, Chip,
+  Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Chip, Field, Select, Toggle, Icon,
 } from '../components/ui'
+import AircraftPhoto from '../components/aircraft/AircraftPhoto'
 import {
   formatDate, formatDateTime, formatDuration, sortByDateDesc, tsMillis, icaoFlag, icaoCountry,
   FLIGHT_TYPES, getPilotName, sumDuration, flightTypeBadge, needsAssignment, findMyPilot,
@@ -363,23 +364,149 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
 // ─── FlightMatrix ─────────────────────────────────────────────────────────────
 
-const SELECT_STYLE = {
-  background: T.card, border: T.border, color: T.ink, fontFamily: T.sans, fontSize: 13,
-  height: 34, padding: '0 10px', borderRadius: T.radius.sm, cursor: 'pointer',
+
+// ─── (22/09) All flights, d'après Claude Design Logbook (export AirKi Dashboard-3) ──────────────────────────
+// 1. FILE « to assign » : bandeau encre (TO ASSIGN · OLDEST IN QUEUE · HOURS UNCREDITED · ASSIGNED AUTOMATICALLY) +
+//    vols groupés par JOUR puis AVION, du plus ancien au plus récent, 20 à la fois. « Assign next flight » ouvre le
+//    plus ancien ; le tiroir enchaîne (« Save & next flight »). ≤ 3 vols en attente → simple bandeau « queue clear ».
+// 2. TABLEAU des vols (par défaut : validés), filtres en Field/Select, GROUP BY jour / avion / pilote / à plat,
+//    SORT date / avion / pilote / durée. Colonnes empilées (date+heure, immat+type, pilote+rôle, type+instructeur)
+//    pour tenir sans défilement horizontal.
+// L'attribution GROUPÉE (« Assign these 5 ») et l'export CSV proposés par la maquette ne sont PAS construits (nouveaux,
+// en attente d'accord de Christophe).
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+const utcDay  = ts => { const t = tsMillis(ts); return t ? new Date(t).toISOString().slice(0, 10) : '' }
+const dayCaps = ts => { const t = tsMillis(ts); if (!t) return '−−−'; const d = new Date(t); return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}` }
+const utcTime = ts => { const t = tsMillis(ts); if (!t) return '−−−'; const d = new Date(t); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC` }
+const QUEUE_PAGE = 20
+const nFlights = n => `${n} FLIGHT${n === 1 ? '' : 'S'}`
+
+function Stack({ top, bottom, mono = false, strong = false }) {
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+      <span style={{ ...(mono ? monoStyle(12, T.ink) : { fontFamily: T.sans, fontSize: 13, color: T.ink }), fontWeight: strong ? 600 : undefined, whiteSpace: 'nowrap' }}>{top}</span>
+      {bottom && <span style={{ ...labelStyle(T.etch), whiteSpace: 'nowrap' }}>{bottom}</span>}
+    </span>
+  )
 }
 
-function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, canDelete, onDelete }) {
-  // Suppression en 2 temps (1er clic arme, 2e archive, désarmement 5 s) : portée par
-  // <Button variant="danger" confirm="Confirm?">.
+function QueueStat({ label, value, big }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={labelStyle(T.mutedDark)}>{label}</span>
+      <span style={{ ...monoStyle(big ? 30 : 15, T.white), lineHeight: 1 }}>{value}</span>
+    </div>
+  )
+}
+
+const iconBtn = { width: 32, padding: 0, justifyContent: 'center' }
+
+function QueueRow({ f, onAssign, onReplay }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(120px, 170px) minmax(0, 1fr) 60px 80px auto', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #EDE9E2' }}>
+      <span style={monoStyle(12, T.ink)}>{utcTime(f.startTs)}</span>
+      <span style={monoStyle(12, T.ink)}><Route f={f} /></span>
+      <StatusDot tone="caution" text="TO ASSIGN" />
+      <span style={{ ...monoStyle(12, T.ink), textAlign: 'right' }}>{formatDuration(f.duration)}</span>
+      <span style={{ ...labelStyle(T.etch), textAlign: 'right' }}>{f.maxAlt ? `${Math.round(f.maxAlt)} FT` : '−−−'}</span>
+      <span style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <Button size="sm" variant="primary" onClick={() => onAssign(f)}>Assign</Button>
+        <Button size="sm" variant="ghost" icon="play" onClick={() => onReplay(f.id)} title="Open Loop" aria-label="Open Loop" style={iconBtn} />
+      </span>
+    </div>
+  )
+}
+
+function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onReview }) {
+  const [shown, setShown] = useState(QUEUE_PAGE)
+  const hours = sumDuration(queue)
+  if (queue.length <= 3) {
+    return (
+      <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flexWrap: 'wrap' }}>
+          <StatusDot tone={queue.length ? 'caution' : 'ok'} text={queue.length ? `${queue.length} TO ASSIGN` : 'QUEUE CLEAR'} />
+          <span style={{ fontFamily: T.sans, fontSize: 13, color: T.graphite }}>
+            {queue.length ? `${queue.length === 1 ? 'One flight needs' : `${queue.length} flights need`} a pilot by hand.` : 'Every flight has a pilot. Nothing waiting.'}
+          </span>
+        </span>
+        {queue.length > 0 && <Button size="sm" variant="primary" icon="check" onClick={() => onAssign(queue[0])}>{queue.length === 1 ? 'Assign the last one' : 'Assign next flight'}</Button>}
+      </div>
+    )
+  }
+  // Groupes jour → avion (plus ancien d'abord), sur les `shown` premiers vols de la file.
+  const days = []
+  queue.slice(0, shown).forEach(f => {
+    const dk = utcDay(f.startTs)
+    let d = days.find(x => x.key === dk)
+    if (!d) { d = { key: dk, ts: f.startTs, flights: [], groups: [] }; days.push(d) }
+    d.flights.push(f)
+    const ak = acOf(f).ident
+    let g = d.groups.find(x => x.key === ak)
+    if (!g) { g = { key: ak, ac: acOf(f), flights: [] }; d.groups.push(g) }
+    g.flights.push(f)
+  })
+  return (
+    <section aria-label="Flights to assign" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: T.ink, borderRadius: T.radius.md, padding: '18px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
+          <QueueStat label="TO ASSIGN" value={queue.length} big />
+          <span aria-hidden="true" style={{ width: 1, height: 42, background: T.ruleDark }} />
+          <QueueStat label="OLDEST IN QUEUE" value={dayCaps(queue[0].startTs)} />
+          <QueueStat label="HOURS UNCREDITED" value={formatDuration(hours)} />
+          <QueueStat label="ASSIGNED AUTOMATICALLY" value={`${autoCount} OF ${total}`} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button variant="primary" onInk icon="check" onClick={() => onAssign(queue[0])}>Assign next flight</Button>
+          <Button onInk icon="list" onClick={onReview}>Review queue</Button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingBottom: 8, borderBottom: T.border, flexWrap: 'wrap' }}>
+        <h2 style={{ ...headingStyle(15), margin: 0 }}>Queue, by day and aircraft</h2>
+        <span style={labelStyle(T.etch)}>GROUPED · OLDEST FIRST</span>
+      </div>
+      {days.map(d => (
+        <div key={d.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ ...labelStyle(T.ink), fontSize: 11 }}>{dayCaps(d.ts)}</span>
+            <span style={labelStyle(T.etch)}>{nFlights(d.flights.length)} · {formatDuration(sumDuration(d.flights))}</span>
+            <span aria-hidden="true" style={{ flex: 1, height: 1, background: '#EDE9E2' }} />
+          </div>
+          {d.groups.map(g => (
+            <div key={g.key} style={{ background: T.card, border: T.border, borderRadius: T.radius.md, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#FBFAF7', flexWrap: 'wrap' }}>
+                {g.ac.rec ? <AircraftPhoto ac={g.ac.rec} width={40} height={30} /> : null}
+                <span style={{ ...monoStyle(13, T.ink), fontWeight: 500, letterSpacing: '0.04em' }}>{g.ac.label}</span>
+                {g.ac.rec && <Chip muted>{g.ac.rec.ownership === 'owner' ? 'OWNER' : 'CLUB'}</Chip>}
+                <span style={labelStyle(T.etch)}>{nFlights(g.flights.length)} · {formatDuration(sumDuration(g.flights))}</span>
+              </div>
+              {g.flights.map(f => <QueueRow key={f.id} f={f} onAssign={onAssign} onReplay={onReplay} />)}
+            </div>
+          ))}
+        </div>
+      ))}
+      {queue.length > shown && (
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <Button size="sm" onClick={() => setShown(n => n + QUEUE_PAGE)}>Show the next {Math.min(QUEUE_PAGE, queue.length - shown)} in queue</Button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAssign, canDelete, onDelete, autoCount }) {
   const [filterPilot,    setFilterPilot]    = useState('')
   const [filterInstr,    setFilterInstr]    = useState('')
   const [filterAircraft, setFilterAircraft] = useState('')
   const [filterType,     setFilterType]     = useState('')
-  const [filterStatus,   setFilterStatus]   = useState('')
+  const pendingAll = flights.filter(f => f._pending).length
+  const [filterStatus,   setFilterStatus]   = useState(pendingAll > 3 ? 'validated' : '')   // la file montre déjà les vols à attribuer
+  const [groupBy,        setGroupBy]        = useState('day')    // 'day' | 'aircraft' | 'pilot' | 'none'
   const [sortKey,        setSortKey]        = useState('date')
   const [sortDir,        setSortDir]        = useState('desc')
+  const tableRef = useRef(null)
 
   const instructors = useMemo(() => pilots.filter(p => p.isInstructor === true), [pilots])
+  const queue = useMemo(() => flights.filter(f => f._pending).sort((a, b) => tsMillis(a.startTs) - tsMillis(b.startTs)), [flights])
 
   const filtered = useMemo(() => {
     let list = [...flights]
@@ -389,136 +516,144 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, onReplay, onAssign, 
     if (filterType)     list = list.filter(f => f.flightType === filterType)
     if (filterStatus === 'validated') list = list.filter(f => !f._pending)
     if (filterStatus === 'pending')   list = list.filter(f =>  f._pending)
-    list.sort((a, b) => {
-      let va, vb
-      if (sortKey === 'date')     { va = tsMillis(a.startTs); vb = tsMillis(b.startTs) }
-      if (sortKey === 'duration') { va = a.duration || 0; vb = b.duration || 0 }
-      if (sortKey === 'aircraft') { va = a.aircraftIdent || ''; vb = b.aircraftIdent || '' }
-      if (va < vb) return sortDir === 'asc' ? -1 : 1
-      if (va > vb) return sortDir === 'asc' ?  1 : -1
-      return 0
-    })
+    const key = f => sortKey === 'duration' ? (f.duration || 0)
+      : sortKey === 'aircraft' ? acLabel(f.aircraftIdent)
+      : sortKey === 'pilot' ? getPilotName(pilots, f.pilotId)
+      : tsMillis(f.startTs)
+    list.sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? (sortDir === 'asc' ? -1 : 1) : va > vb ? (sortDir === 'asc' ? 1 : -1) : 0 })
     return list
-  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, sortKey, sortDir, acLabel])
+  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, sortKey, sortDir, acLabel, pilots])
 
-  const toggleSort = key => {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortKey(key); setSortDir('desc') }
-  }
+  const groups = useMemo(() => {
+    if (groupBy === 'none') return [{ key: 'all', title: null, rows: filtered }]
+    const label = f => groupBy === 'aircraft' ? acLabel(f.aircraftIdent) : groupBy === 'pilot' ? getPilotName(pilots, f.pilotId) : dayCaps(f.startTs)
+    const out = []
+    filtered.forEach(f => { const k = label(f); let g = out.find(x => x.key === k); if (!g) { g = { key: k, title: k, rows: [] }; out.push(g) } g.rows.push(f) })
+    return out
+  }, [filtered, groupBy, acLabel, pilots])
 
-  // En-tête triable : bouton dans le <th> de DataTable.
-  const sortLabel = (text, skey) => (
-    <button
-      type="button"
-      className="ak-focus"
-      onClick={() => toggleSort(skey)}
-      aria-label={`Sort by ${text.toLowerCase()}`}
-      style={{
-        ...labelStyle(sortKey === skey ? T.ink : T.etch),
-        background: 'none', border: 'none', padding: 0, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-      }}
-    >
-      {text}{sortKey === skey ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
-    </button>
-  )
-
-  const pendingCount = flights.filter(f => f._pending).length
+  const setSort = k => { if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir(k === 'date' || k === 'duration' ? 'desc' : 'asc') } }
+  const review = () => { setFilterStatus('pending'); setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0) }
 
   const columns = [
-    { ...COL_DATE, label: sortLabel('DATE', 'date') },
-    { ...colAircraft(acLabel), label: sortLabel('AIRCRAFT', 'aircraft') },
-    // Terrains déduits du GPS (normalizeFlight). '—' = aucun terrain connu à
-    // moins de 5 km : soit hors base AIP, soit le log ne démarre pas au sol.
+    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} /> },
+    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} /> },
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    // (22/09) ROLE fusionné dans PILOT, PRESENCE sous INSTRUCTOR : 13 → 11 colonnes, plus de défilement horizontal.
-    { key: 'pilot', label: 'PILOT', render: f => (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
-        {getPilotName(pilots, f.pilotId)}
-        {f.pilotRole === 'student' ? <Chip>STUDENT</Chip> : f.pilotRole === 'pilot' ? <Chip>PILOT</Chip> : null}
+    { key: 'pilot', label: 'PILOT', render: f => <Stack top={f.pilotId ? getPilotName(pilots, f.pilotId) : '—'} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} /> },
+    { key: 'kind', label: 'TYPE · INSTRUCTOR', render: f => (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <TypeBadge type={f.flightType} />
+        <span style={{ ...labelStyle(T.etch), whiteSpace: 'nowrap' }}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
       </span>
     ) },
-    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? (
-      <span style={{ display: 'flex', flexDirection: 'column', whiteSpace: 'nowrap' }}>
-        <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span>
-        <span style={{ ...monoStyle(10, T.etch), letterSpacing: '0.08em' }}>{presenceText(f).toUpperCase()}</span>
-      </span>
-    ) : DASH) },
-    { ...COL_DURATION, label: sortLabel('DURATION', 'duration') },
-    COL_TYPE,
-    COL_ALT,
+    COL_DURATION,
     { key: 'status', label: 'STATUS', render: f => <ValidBadge validated={!f._pending} /> },
     { key: 'actions', label: '', align: 'right', render: f => (
       <RowActions f={f} onReplay={onReplay} onAssign={onAssign} canDelete={canDelete} onDelete={onDelete} />
     ) },
   ]
 
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, alignItems: 'center' }}>
-        <Icon name="filter" size={16} color={T.graphite} />
-        <select aria-label="Filter by pilot" className="ak-focus" value={filterPilot} onChange={e => setFilterPilot(e.target.value)} style={SELECT_STYLE}>
-          <option value="">All pilots</option>
-          {pilots.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-        </select>
-        <select aria-label="Filter by instructor" className="ak-focus" value={filterInstr} onChange={e => setFilterInstr(e.target.value)} style={SELECT_STYLE}>
-          <option value="">All instructors</option>
-          {instructors.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-        </select>
-        <select aria-label="Filter by aircraft" className="ak-focus" value={filterAircraft} onChange={e => setFilterAircraft(e.target.value)} style={SELECT_STYLE}>
-          <option value="">All aircraft</option>
-          {aircraft.map(a => { const cs = a.callSign || a.registration; return <option key={a.id} value={cs}>{cs} — {a.typeDesig || a.type}</option> })}
-        </select>
-        <select aria-label="Filter by flight type" className="ak-focus" value={filterType} onChange={e => setFilterType(e.target.value)} style={SELECT_STYLE}>
-          <option value="">All types</option>
-          {Object.entries(FLIGHT_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        <select aria-label="Filter by status" className="ak-focus" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={SELECT_STYLE}>
-          <option value="">All statuses</option>
-          <option value="validated">Validated</option>
-          <option value="pending">To assign ({pendingCount})</option>
-        </select>
-        <span style={{ ...monoStyle(12, T.graphite), marginLeft: 'auto' }}>
-          {filtered.length} flight{filtered.length !== 1 ? 's' : ''}
-        </span>
-      </div>
+  const toggle = (active, onClick, label) => <Toggle mono active={active} onClick={onClick}>{label}</Toggle>
+  const selectOpts = {
+    pilots: pilots.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() })),
+    instr: instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() })),
+    ac: aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } }),
+    types: Object.entries(FLIGHT_TYPES).map(([k, v]) => ({ value: k, label: v.label })),
+    status: [{ value: '', label: 'Any status' }, { value: 'validated', label: 'Validated' }, { value: 'pending', label: `To assign (${pendingAll})` }],
+  }
 
-      <DataTable columns={columns} rows={filtered} empty={<EmptyState text="No matching flights." />} />
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <AssignQueue queue={queue} total={flights.length} autoCount={autoCount} acOf={acOf} onAssign={onAssign} onReplay={onReplay} onReview={review} />
+
+      <section ref={tableRef} aria-label="Flights" style={{ display: 'flex', flexDirection: 'column', gap: 12, scrollMarginTop: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: T.border, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <h2 style={{ ...headingStyle(15), margin: 0 }}>{filterStatus === 'pending' ? 'Flights to assign' : 'Flights'}</h2>
+            <span style={labelStyle(T.etch)}>{nFlights(flights.length)} · {pendingAll ? `${pendingAll} TO ASSIGN` : 'ALL ASSIGNED'} · {formatDuration(sumDuration(flights))} TOTAL</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div role="group" aria-label="Group by" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={labelStyle(T.etch)}>GROUP BY</span>
+              {toggle(groupBy === 'day', () => setGroupBy('day'), 'DAY')}
+              {toggle(groupBy === 'aircraft', () => setGroupBy('aircraft'), 'AIRCRAFT')}
+              {toggle(groupBy === 'pilot', () => setGroupBy('pilot'), 'PILOT')}
+              {toggle(groupBy === 'none', () => setGroupBy('none'), 'FLAT')}
+            </div>
+            <div role="group" aria-label="Sort by" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={labelStyle(T.etch)}>SORT</span>
+              {toggle(sortKey === 'date', () => setSort('date'), 'DATE')}
+              {toggle(sortKey === 'aircraft', () => setSort('aircraft'), 'AIRCRAFT')}
+              {toggle(sortKey === 'pilot', () => setSort('pilot'), 'PILOT')}
+              {toggle(sortKey === 'duration', () => setSort('duration'), 'DURATION')}
+              <Toggle mono onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))} title="Reverse the order">{sortDir === 'asc' ? '↑' : '↓'}</Toggle>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+          <Field label="PILOT"><Select value={filterPilot} onChange={setFilterPilot} options={[{ value: '', label: 'All pilots' }, ...selectOpts.pilots]} /></Field>
+          <Field label="INSTRUCTOR"><Select value={filterInstr} onChange={setFilterInstr} options={[{ value: '', label: 'All instructors' }, ...selectOpts.instr]} /></Field>
+          <Field label="AIRCRAFT"><Select mono value={filterAircraft} onChange={setFilterAircraft} options={[{ value: '', label: 'All aircraft' }, ...selectOpts.ac]} /></Field>
+          <Field label="FLIGHT TYPE"><Select value={filterType} onChange={setFilterType} options={[{ value: '', label: 'All types' }, ...selectOpts.types]} /></Field>
+          <Field label="STATUS"><Select value={filterStatus} onChange={setFilterStatus} options={selectOpts.status} /></Field>
+        </div>
+
+        {groups.length === 0 && <DataTable columns={columns} rows={[]} empty={<EmptyState text="No flights match these filters." />} />}
+        {groups.map(g => (
+          <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {g.title && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ ...labelStyle(T.ink), fontSize: 11 }}>{g.title}</span>
+                <span style={labelStyle(T.etch)}>{nFlights(g.rows.length)} · {formatDuration(sumDuration(g.rows))}{g.rows.some(f => f._pending) ? ` · ${g.rows.filter(f => f._pending).length} TO ASSIGN` : ''}</span>
+                <span aria-hidden="true" style={{ flex: 1, height: 1, background: '#EDE9E2' }} />
+              </div>
+            )}
+            <DataTable columns={columns} rows={g.rows} />
+          </div>
+        ))}
+        <div style={labelStyle(T.etch)}>SHOWING {filtered.length} OF {flights.length}</div>
+      </section>
     </div>
   )
 }
 
 // ─── MyFlights ────────────────────────────────────────────────────────────────
-// Vols du compte connecté (fiche /pilots reliée par e-mail) : comme pilote (pilotId), et
-// comme instructeur (instructorId) si la fiche est instructeur. Lecture seule : aucune
-// action d'attribution/suppression ici, seulement « Open Loop ».
-function MyFlights({ me, flights, pilots, acLabel, onReplay }) {
+// Vols du compte connecté (fiche /pilots reliée) : comme pilote (pilotId), et comme instructeur (instructorId) si
+// la fiche est instructeur. Lecture seule : « Open Loop » seulement. Métriques avec statut (maquette Claude Design).
+function MyFlights({ me, flights, pilots, acLabel, acOf, onReplay }) {
   const total = sumDuration(flights)
   const last  = flights[0]
+  const first = flights[flights.length - 1]
+  const pending = flights.filter(f => f._pending).length
   const columns = [
-    COL_DATE,
-    colAircraft(acLabel),
+    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} /> },
+    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} /> },
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    { key: 'pilot', label: 'PILOT', render: f => <span style={{ fontWeight: f.pilotId === me.id ? 600 : 400 }}>{getPilotName(pilots, f.pilotId)}</span> },
-    { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId
-      ? <span style={{ color: f.instructorId === me.id ? T.ink : T.graphite, fontWeight: f.instructorId === me.id ? 600 : 400 }}>
-          {getPilotName(pilots, f.instructorId)} · {presenceText(f).toLowerCase()}
-        </span>
-      : DASH) },
+    ...(me.isInstructor ? [{ key: 'pilot', label: 'PILOT', render: f => <Stack strong={f.pilotId === me.id} top={getPilotName(pilots, f.pilotId)} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} /> }] : []),
+    { key: 'kind', label: 'TYPE · INSTRUCTOR', render: f => (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <TypeBadge type={f.flightType} />
+        <span style={{ ...labelStyle(T.etch), whiteSpace: 'nowrap' }}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
+      </span>
+    ) },
     COL_DURATION,
-    COL_TYPE,
-    COL_ALT,
-    COL_G,
-    { key: 'actions', label: '', align: 'right', render: f => <RowActions f={f} onReplay={onReplay} /> },
+    { key: 'alt', label: 'MAX ALT FT', mono: true, align: 'right', render: f => (f.maxAlt ? Math.round(f.maxAlt) : DASH) },
+    { key: 'actions', label: '', align: 'right', render: f => <Button size="sm" variant="ghost" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button> },
   ]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
-        <MetricCard label="FLIGHTS"     value={flights.length} />
-        <MetricCard label="HOURS"       value={formatDuration(total)} />
-        <MetricCard label="LAST FLIGHT" value={last ? formatDate(last.startTs) : null} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        <MetricCard label="FLIGHTS" value={String(flights.length)} status={flights.length ? (pending ? { tone: 'caution', text: `${pending} to assign` } : { tone: 'ok', text: 'All validated' }) : undefined} />
+        <MetricCard label="HOURS" value={formatDuration(total)} status={first ? { tone: 'off', text: `Since ${formatDate(first.startTs)}` } : undefined} />
+        <MetricCard label="LAST FLIGHT" value={last ? formatDate(last.startTs) : null} status={last ? { tone: 'off', text: `${acLabel(last.aircraftIdent)} · ${formatDuration(last.duration)}` } : undefined} />
       </div>
-
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingBottom: 8, borderBottom: T.border }}>
+        <h2 style={{ ...headingStyle(15), margin: 0 }}>My flights</h2>
+        <span style={labelStyle(T.etch)}>{nFlights(flights.length)} · {formatDuration(total)} TOTAL</span>
+      </div>
       <DataTable columns={columns} rows={flights} empty={<EmptyState text="No flights recorded yet." />} />
+      <div style={labelStyle(T.etch)}>RECORDED BY AKcore · READ ONLY</div>
     </div>
   )
 }
@@ -596,37 +731,29 @@ function CsvImportCard({ clubId }) {
     }
   }
 
+  // (22/09) « Add a flight by hand » (maquette Claude Design) : toute la carte accepte le glisser-déposer.
   return (
-    <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: '14px 16px', marginBottom: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <div style={labelStyle(T.etch)}>IMPORT CSV</div>
-        <div
-          onClick={() => !uploading && inputRef.current?.click()}
-          onDragOver={e => { e.preventDefault(); setDragging(true) }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]) }}
-          style={{
-            flex: 1, minWidth: 220,
-            border: `1px dashed ${dragging ? T.ink : T.rule}`,
-            background: dragging ? T.paper : 'transparent',
-            borderRadius: T.radius.sm, padding: '10px 14px', textAlign: 'center',
-            color: T.graphite, fontFamily: T.sans, fontSize: 13,
-            cursor: uploading ? 'wait' : 'pointer',
-          }}
-        >
-          {uploading
-            ? <>Uploading… <span style={monoStyle(13, T.ink)}>{progress}%</span></>
-            : 'Drop a Garmin G3X CSV here'}
+    <section id="logbook-import" aria-label="Add a flight by hand"
+      onDragOver={e => { e.preventDefault(); setDragging(true) }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]) }}
+      style={{ background: dragging ? T.paper : T.card, border: `1px ${dragging ? 'dashed' : 'solid'} ${dragging ? T.ink : T.rule}`, borderRadius: T.radius.md, padding: '18px 20px', scrollMarginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+          <h2 style={{ ...headingStyle(15), margin: 0 }}>Add a flight by hand</h2>
+          <p style={{ margin: 0, fontFamily: T.sans, fontSize: 13, lineHeight: 1.5, color: T.graphite }}>
+            Drop a G3X CSV recorded by the AKcore box. The flight lands in the queue above, ready to assign.
+          </p>
         </div>
-        <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }}
-          onChange={e => processFile(e.target.files[0])} />
-        <Button icon="upload" disabled={uploading} onClick={() => inputRef.current?.click()}>
-          Choose file
-        </Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {uploading ? <span style={labelStyle(T.etch)}>UPLOADING · {progress}%</span> : <span style={labelStyle(T.etch)}>G3X CSV · 4 HZ</span>}
+          <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={e => processFile(e.target.files[0])} />
+          <Button size="sm" icon="upload" disabled={uploading} onClick={() => inputRef.current?.click()}>Choose a file</Button>
+        </div>
       </div>
       {error && <Banner tone="caution" style={{ marginTop: 12 }}>{error}</Banner>}
       {info  && <Banner tone="ok" style={{ marginTop: 12 }}>{info}</Banner>}
-    </div>
+    </section>
   )
 }
 
@@ -697,6 +824,12 @@ export default function LogbookPage({ role }) {
       if (a.callSign)     byIdent.set(a.callSign, cs)
     })
     return ident => (ident ? (byIdent.get(ident) || ident) : '—')
+  }, [aircraft])
+  // Fiche avion d'un vol (photo, type, CLUB/OWNER) : { ident, label, rec }.
+  const acOf = useMemo(() => {
+    const byIdent = new Map()
+    aircraft.forEach(a => { if (a.registration) byIdent.set(a.registration, a); if (a.callSign) byIdent.set(a.callSign, a) })
+    return f => { const rec = byIdent.get(f.aircraftIdent) || null; return { ident: rec ? (rec.callSign || rec.registration) : (f.aircraftIdent || '—'), label: rec ? (rec.callSign || rec.registration) : (f.aircraftIdent || 'Unknown aircraft'), rec } }
   }, [aircraft])
 
   // Pilots/aircraft : lecture one-shot scopée club, archivés exclus.
@@ -780,8 +913,12 @@ export default function LogbookPage({ role }) {
   const [sortInstructors, setSortInstructors] = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
   const [sortAircraft,    setSortAircraft]    = useState('alpha')   // 'alpha' | 'lastFlight' | 'hours'
 
-  // La modale a déjà écrit en base ; onSnapshot rafraîchit la liste. Rien à faire ici.
-  const handleAssigned = useCallback(() => {}, [])
+  // La fiche a déjà écrit en base ; onSnapshot rafraîchit la liste. On retient la dernière attribution de la
+  // session pour SUGGÉRER le même pilote au vol suivant du même avion le même jour (maquette Claude Design).
+  const [suggest, setSuggest] = useState(null)
+  const handleAssigned = useCallback((id, u, ctx) => {
+    setSuggest({ aircraftIdent: ctx?.aircraftIdent, day: ctx?.day, pilotId: u.pilotId, instructorId: u.instructorId, instructorOnboard: u.instructorOnboard })
+  }, [])
 
   // Loop = lecteur d'un vol. On mémorise l'onglet pour que « Back to logbook » le rouvre.
   const handleReplay = useCallback(
@@ -827,8 +964,9 @@ export default function LogbookPage({ role }) {
     }
   }, [])
 
-  const totalSeconds  = useMemo(() => flights.reduce((s, f) => s + (f.duration || 0), 0), [flights])
   const pendingCount  = useMemo(() => flights.filter(f => f._pending).length, [flights])
+  const autoCount     = useMemo(() => flights.filter(f => f.autoAssigned).length, [flights])
+  const assignQueue   = useMemo(() => flights.filter(f => f._pending).sort((a, b) => tsMillis(a.startTs) - tsMillis(b.startTs)), [flights])
   const instructors   = useMemo(() => pilots.filter(p => p.isInstructor === true), [pilots])
   const regularPilots = useMemo(() => pilots, [pilots])
 
@@ -887,10 +1025,15 @@ export default function LogbookPage({ role }) {
     <div style={{ height: '100%', overflowY: 'auto', background: T.paper, fontFamily: T.sans, color: T.ink }}>
       <div style={{ padding: '28px 32px 48px', maxWidth: 1280, margin: '0 auto' }}>
 
-        <div style={{ marginBottom: 24 }}>
-          {clubLine && <div style={{ ...labelStyle(T.etch), marginBottom: 8 }}>{clubLine}</div>}
-          <h1 style={{ ...headingStyle(28), margin: 0 }}>Logbook</h1>
-        </div>
+        <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {clubLine && <div style={labelStyle(T.etch)}>{clubLine}</div>}
+            <h1 style={{ ...headingStyle(28), margin: 0 }}>Logbook</h1>
+          </div>
+          {canImport && (
+            <Button size="sm" icon="upload" onClick={() => document.getElementById('logbook-import')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>Import G3X CSV</Button>
+          )}
+        </header>
 
         {loadError && (
           <Banner tone="caution" title="Could not load the logbook" style={{ marginBottom: 20 }}>
@@ -899,30 +1042,34 @@ export default function LogbookPage({ role }) {
         )}
 
         {!isPilot && !loading && !loadError && pilots.length === 0 && flights.length === 0 && (
-          <Banner tone="info" style={{ marginBottom: 20 }}>No data for this club yet.</Banner>
+          <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 8, marginBottom: 20 }}>
+            <EmptyState text="No flights yet. Flights arrive on their own once an AKcore box has flown; you can also add one from a G3X CSV." />
+          </div>
         )}
 
         {!isPilot && !loading && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 24 }}>
-            <MetricCard label="PILOTS"        value={regularPilots.length} />
-            <MetricCard label="INSTRUCTORS"   value={instructors.length} />
-            <MetricCard label="AIRCRAFT"      value={aircraft.length} />
-            <MetricCard label="TOTAL FLIGHTS" value={flights.length} />
-            <MetricCard label="TOTAL HOURS"   value={formatDuration(totalSeconds)} />
+            <MetricCard label="PILOTS" value={String(regularPilots.length)}
+              status={{ tone: 'off', text: `${regularPilots.filter(p => p.licence === 'student').length} students` }} />
+            <MetricCard label="INSTRUCTORS" value={String(instructors.length)}
+              status={{ tone: 'off', text: instructors.length === 1 ? `${instructors[0].firstName || ''} ${instructors[0].lastName || ''}`.trim() : (instructors.length ? 'Flight instructors' : 'None flagged') }} />
+            <MetricCard label="AIRCRAFT" value={String(aircraft.length)}
+              status={{ tone: 'off', text: `${aircraft.filter(a => a.ownership !== 'owner').length} club · ${aircraft.filter(a => a.ownership === 'owner').length} owner` }} />
+            <MetricCard label="TOTAL FLIGHTS" value={String(flights.length)}
+              status={flights.length ? (pendingCount ? { tone: 'caution', text: `${pendingCount} to assign` } : { tone: 'ok', text: 'All assigned' }) : { tone: 'off', text: 'Nothing recorded' }} />
           </div>
         )}
 
-        {canImport && <CsvImportCard clubId={clubId} />}
-
         {isPilot && !loading && !loadError && !me && (
-          <Banner
-            tone="info"
-            title="Your account is not linked to a pilot profile yet."
-            style={{ marginBottom: 20 }}
-          >
-            <div style={{ marginBottom: 12 }}>Ask your club admin for an invitation code, then enter it here.</div>
+          <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 20, maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <h2 style={{ ...headingStyle(15), margin: 0 }}>Link your account to your pilot record</h2>
+              <p style={{ margin: 0, fontFamily: T.sans, fontSize: 13, lineHeight: 1.5, color: T.graphite }}>
+                Your flights are already recorded by the AKcore box. Enter the 8-character code your instructor gave you to see them here.
+              </p>
+            </div>
             <RedeemInvite onDone={() => window.location.reload()} />
-          </Banner>
+          </div>
         )}
 
         {!(isPilot && !loading && !me) && (
@@ -934,7 +1081,7 @@ export default function LogbookPage({ role }) {
         ) : (
           <>
             {activeTab === 'mine' && me && (
-              <MyFlights me={me} flights={myFlights} pilots={pilots} acLabel={acLabel} onReplay={handleReplay} />
+              <MyFlights me={me} flights={myFlights} pilots={pilots} acLabel={acLabel} acOf={acOf} onReplay={handleReplay} />
             )}
             {!isPilot && activeTab === 'pilots' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -964,7 +1111,7 @@ export default function LogbookPage({ role }) {
               </div>
             )}
             {!isPilot && activeTab === 'matrix' && (
-              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
+              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} acOf={acOf} autoCount={autoCount} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} />
             )}
             {canDelete && activeTab === 'archived' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1015,15 +1162,22 @@ export default function LogbookPage({ role }) {
             )}
           </>
         )}
+
+        {canImport && !loading && activeTab !== 'archived' && <div style={{ marginTop: 24 }}><CsvImportCard clubId={clubId} /></div>}
       </div>
 
       {assignFlight && (
         <FlightAssignModal
+          key={assignFlight.id}            // (22/09) « Save & next flight » : état ré-initialisé à chaque vol
           flight={assignFlight}
           pilots={pilots}
           aircraft={aircraft}
           onSave={handleAssigned}
           onClose={() => setAssignFlight(null)}
+          queue={assignFlight._pending ? assignQueue : []}
+          onNext={f => setAssignFlight(f)}
+          onOpenLoop={handleReplay}
+          suggest={suggest}
         />
       )}
     </div>
