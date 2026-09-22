@@ -7,7 +7,7 @@ import { isDurationSuspect } from '../utils/logbookUtils'
 import { useClub } from '../contexts/ClubContext'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, MetricCard, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Chip, Field, fieldStyle,
+  Button, MetricCard, StatusDot, DataTable, Drawer, EmptyState, Banner, Chip, Field, Input, Toggle, Skeleton,
 } from '../components/ui'
 
 // ─── FleetPage — état firmware de la flotte de boîtiers (ATC) + écrans (ATV) ────
@@ -98,40 +98,6 @@ function unitInfo(dev, published) {
   return { atcLatest, atcUpToDate, ota, atvLatest, atvVerStr, upToDate: atcUpToDate && atvUpToDate }
 }
 
-// Badge version : point vert si à jour, puce « → vN » (point ambre) si en retard,
-// version seule si la version publiée est inconnue.
-function VerBadge({ cur, curStr, latest, fleetMax }) {
-  if (cur == null) return <span style={monoStyle(12, T.etch)}>—</span>
-  const known = typeof latest === 'number'
-  const upToDate = known && cur >= latest
-  // (2026-08-03) « périmé vs PARC » : à jour sur son tag OTA mais un build PLUS RÉCENT roule déjà
-  // sur un autre appareil (flash USB dev, pas encore béni/publié) → puce grise discrète.
-  const behindFleet = typeof fleetMax === 'number' && fleetMax > cur && (!known || cur >= latest)
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <span style={{ ...monoStyle(12), fontWeight: 500 }}>{curStr || `v${cur}`}</span>
-      {known && (upToDate
-        ? <span title={`Up to date (v${latest} published)`}><StatusDot tone="ok" /></span>
-        : <Chip tone="caution" title={`Update available: v${latest}`}>→ v{latest}</Chip>)}
-      {behindFleet && (
-        <Chip muted title={`A newer build is running in the fleet: v${fleetMax} (dev, not published on the OTA tag)`}>← v{fleetMax} dev</Chip>
-      )}
-    </span>
-  )
-}
-
-// Section du tiroir : titre Semibold 13 + filet haut.
-function Section({ title, first, children }) {
-  return (
-    <section style={{ paddingTop: first ? 0 : 16, marginTop: first ? 0 : 16, borderTop: first ? 'none' : T.border, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h3 style={{ ...headingStyle(14), margin: 0 }}>{title}</h3>
-      {children}
-    </section>
-  )
-}
-
-const inputStyle = fieldStyle({ mono: true })   // (22/09) style commun de la bibliothèque
-
 export default function FleetPage() {
   const { clubId } = useClub()
   const [devices, setDevices] = useState([])
@@ -145,6 +111,10 @@ export default function FleetPage() {
   const [emnifyError, setEmnifyError] = useState(null)
   const [hoursByBox, setHoursByBox] = useState({})  // (2026-08-26) heures de vol du mois par boxId (docs /flights uploadés)
   const [refreshing, setRefreshing] = useState(false)
+  const [showOnly, setShowOnly] = useState(false)   // (22/09) tableau : « Needs attention » seulement
+  const [showPw, setShowPw] = useState(false)       // (22/09) tiroir : afficher le mot de passe WiFi
+  const [now, setNow] = useState(() => Date.now())  // horloge de page (30 s) : âges « n MIN AGO », boîtiers muets
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t) }, [])
 
   // Heures de vol du MOIS COURANT par boîtier — pour la colonne MB/h (conso ÷ heures).
   // Requête single-field (endTs epoch ms ≥ début de mois) → pas d'index composite ; somme
@@ -165,9 +135,6 @@ export default function FleetPage() {
       })
       .catch(err => console.warn('[Fleet] flight hours:', err.message))
   }, [])
-  // (2026-08-03) version max VUE dans le parc (FW_VERSION/VIEW_VERSION monotones toutes cartes)
-  const fleetMaxFw  = devices.reduce((m, d) => Math.max(m, d.fwVersion  || 0), 0)
-  const fleetMaxAtv = devices.reduce((m, d) => Math.max(m, d.atvVersion || 0), 0)
 
   useEffect(() => {
     if (!clubId) { setLoading(false); return }
@@ -266,7 +233,7 @@ export default function FleetPage() {
     const reg = (cfgEdit.reg || '').trim().toUpperCase()
     const wifiSsid = (cfgEdit.wifiSsid || '').trim()
     const forget = (cfgEdit.forget || []).filter(Boolean)
-    if (!reg && !wifiSsid && !forget.length) return
+    if (!reg && !wifiSsid && !forget.length && !cfgEdit.otaTag) return   // (22/09) un simple changement de canal suffit
     const type = (cfgEdit.type || '').trim().toUpperCase()
     const hex  = (cfgEdit.hex  || '').trim().toUpperCase()
     setCfgSaving(true)
@@ -323,347 +290,351 @@ export default function FleetPage() {
   const [monthVal, monthUnit] = mbParts(monthMB)
   const syncText = emnify ? `${emnify.matchedCount ?? 0} SIM · synced ${fmtSeen(emnify.updatedAt)}` : 'never synced'
 
-  const latestAtcPub = Math.max(...ATC_TAGS.map(t => published[t] ?? 0))
-  const latestAtvPub = published['atv_ws241'] ?? 0
 
-  // ─── Colonnes du tableau ───
-  const sub = { ...monoStyle(11, T.graphite), marginTop: 2 }
+  // ─── (22/09) Fleet d'après Claude Design « Fleet health dashboard » (export AirKi Dashboard-2) ─────────────────
+  // Priorité VISIBILITÉ : gros chiffres mono, un statut par boîtier, panneau encre « NEEDS ATTENTION » en tête.
+  const MISSING = '−−−'
+  const MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+  const pad2 = (n) => String(n).padStart(2, '0')
+  const utc = (ms) => { const d = new Date(ms); return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC` }
+  const dayUtc = (ms) => { const d = new Date(ms); return `${pad2(d.getUTCDate())} ${MON[d.getUTCMonth()]}` }
+  const seenText = (ms) => { if (!ms) return MISSING; return (now - ms < DAY_MS && new Date(ms).getUTCDate() === new Date().getUTCDate()) ? utc(ms) : `${dayUtc(ms)} · ${utc(ms)}` }
+  const agoText = (ms) => { if (!ms) return 'NEVER SEEN'; const m = Math.floor((now - ms) / 60000); const h = Math.floor(m / 60), d = Math.floor(h / 24)
+    return d > 0 ? `NOT SEEN ${d} D` : h > 0 ? `${h} H AGO` : m > 0 ? `${m} MIN AGO` : 'JUST NOW' }
+  const channelOf = (dev) => (dev.board === 's3dev' ? 'DEV' : 'FLEET')
+  const regOf = (dev) => { const r = dev.desiredCallSign || callSignOf(dev); return (!r || r === '—' || /^TBD/i.test(r)) ? null : r }
+  const acRecOf = (reg) => aircraft.find(a => (a.callSign || a.registration || '').toUpperCase() === (reg || '').toUpperCase()) || null
+  const mbhOf = (dev) => { const h = hoursByBox[dev.id] || 0; return (h >= 0.5 && dev.dataUsageMB != null) ? dev.dataUsageMB / h : null }
+  const mbhs = devices.map(mbhOf).filter(v => v != null).sort((a, b) => a - b)
+  const medianMbh = mbhs.length ? mbhs[Math.floor(mbhs.length / 2)] : null
+  const STALE_DAYS = 3
+
+  // Diagnostic par boîtier : un statut principal + les raisons « à traiter ».
+  const diag = (dev) => {
+    const info = dev._info, seen = tsMillis(dev.lastSeen || dev.updatedAt)
+    const days = seen ? (now - seen) / DAY_MS : Infinity
+    const reg = regOf(dev), issues = []
+    if (days >= STALE_DAYS) issues.push({ text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN', detail: seen ? `Last report ${dayUtc(seen)} · ${utc(seen)}${dev.wifiSsid ? `, on ${dev.wifiSsid}` : ''}.${dev.board === 'wrover' ? ' WROVER board, due to be retired.' : ''}` : 'No report received from this box yet.' })
+    if ((dev.otaState || '') === 'failed') issues.push({ text: 'UPDATE FAILED', detail: `AKcore ${dev.fwVersion ?? MISSING} did not move to ${info.atcLatest ?? MISSING}. It will retry at the next WiFi.` })
+    else if (!info.upToDate) {
+      const parts = []
+      if (!info.atcUpToDate) parts.push(`AKcore ${dev.fwVersion ?? MISSING} → ${info.atcLatest}`)
+      if (dev.atvVersion != null && typeof info.atvLatest === 'number' && dev.atvVersion < info.atvLatest) parts.push(`AKview ${dev.atvVersion} → ${info.atvLatest}`)
+      issues.push({ text: 'UPDATE AVAILABLE', detail: `${parts.join(' and ') || 'Behind its channel'}. Applies at the next WiFi.` })
+    }
+    if (!reg) issues.push({ text: 'NO AIRCRAFT LINKED', detail: 'Reporting, but its flights cannot be credited to an aircraft.', action: 'Link' })
+    const mbh = mbhOf(dev)
+    if (mbh != null && medianMbh && mbhs.length >= 3 && mbh > 2 * medianMbh) issues.push({ text: 'HIGH DATA USE', detail: `${mbh.toFixed(1)} MB per flight hour, more than twice the fleet figure (${medianMbh.toFixed(1)}).` })
+    const st = days >= STALE_DAYS ? { tone: 'caution', text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN' }
+      : (dev.otaState === 'failed') ? { tone: 'caution', text: 'UPDATE FAILED' }
+      : dev.otaState === 'downloading' ? { tone: 'info', text: 'UPDATING…' }
+      : !info.upToDate ? { tone: 'caution', text: 'UPDATE AVAILABLE' }
+      : { tone: 'ok', text: 'UP TO DATE' }
+    return { issues, st, reg, seen }
+  }
+  const diagRows = rows.map(d => ({ ...d, _d: diag(d) }))
+  const attention = diagRows.filter(d => d._d.issues.length)
+  const [onlyAttention, setOnlyAttention] = [showOnly, setShowOnly]
+  const shownRows = onlyAttention ? attention : diagRows
+  const linkedCount = diagRows.filter(d => d._d.reg).length
+  const totalHours = Object.values(hoursByBox).reduce((a, b) => a + b, 0)
+
+  const lab = labelStyle(T.etch)
+  const col = (gap = 5, align) => ({ display: 'flex', flexDirection: 'column', gap, minWidth: 0, alignItems: align })
+  const big = (size, color = T.ink) => ({ ...monoStyle(size, color), fontWeight: 500, letterSpacing: '0.04em', whiteSpace: 'nowrap' })
+  const verLine = (tag, cur, latest, none) => {
+    const behind = cur != null && typeof latest === 'number' && cur < latest
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={lab}>{tag}</span>
+        <span style={big(17, cur != null ? T.ink : T.etch)}>{cur ?? MISSING}</span>
+        {behind && <Chip tone="caution" title={`Latest published on its channel: ${latest}`}>→ {latest}</Chip>}
+        {cur == null && none && <span style={lab}>{none}</span>}
+      </div>
+    )
+  }
   const columns = [
-    {
-      key: 'unit', label: 'UNIT', mono: true,
-      render: (dev) => <span style={{ fontWeight: 500 }}>{dev.boxId || dev.id}</span>,
-    },
-    {
-      key: 'aircraft', label: 'AIRCRAFT', mono: true,
-      render: (dev) => {
-        const reported = callSignOf(dev)
-        const pending = dev.desiredCallSign && dev.desiredCallSign !== reported
-        return (
-          <div title={pending ? `Pushed: ${dev.desiredCallSign} (the unit applies it at its next WiFi session)` : 'Open unit configuration'}>
-            <div style={{ fontWeight: 500 }}>{pending ? dev.desiredCallSign : reported}</div>
-            {pending && <StatusDot tone="caution" text={`pending · was ${reported}`} style={{ marginTop: 4 }} />}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'core', label: 'CORE FW',
-      render: (dev) => (
-        <VerBadge cur={dev.fwVersion} curStr={dev.fwVersionStr} latest={dev._info.atcLatest} fleetMax={fleetMaxFw} />
-      ),
-    },
-    {
-      key: 'view', label: 'VIEW FW',
-      render: (dev) => (
-        <VerBadge cur={dev.atvVersion} curStr={dev._info.atvVerStr} latest={dev._info.atvLatest} fleetMax={fleetMaxAtv} />
-      ),
-    },
-    {
-      key: 'channel', label: 'CHANNEL',
-      render: (dev) => (
-        <div>
-          <div style={monoStyle(12)}>{dev.board || '?'}</div>
-          <StatusDot tone={dev._info.ota.tone} text={dev._info.ota.t} style={{ marginTop: 4 }} />
+    { key: 'unit', label: 'UNIT', render: (dev) => (
+      <div style={col()}>
+        <span style={big(19)}>{dev.boxId || dev.id}</span>
+        <span style={lab}>{dev.board === 'wrover' ? 'WROVER · RETIRING' : 'S3'}</span>
+      </div>
+    ) },
+    { key: 'state', label: 'STATE', render: (dev) => (
+      <div style={col(6)}>
+        <StatusDot tone={dev._d.st.tone} text={dev._d.st.text} size={10} />
+        {!dev._d.reg && <span style={lab}>NO AIRCRAFT LINKED</span>}
+      </div>
+    ) },
+    { key: 'aircraft', label: 'AIRCRAFT', render: (dev) => {
+      const rec = acRecOf(dev._d.reg)
+      const pending = dev.desiredCallSign && dev.desiredCallSign !== callSignOf(dev)
+      return (
+        <div style={col()} title={pending ? `Pushed: ${dev.desiredCallSign} (applied at the next WiFi)` : undefined}>
+          <span style={big(17, dev._d.reg ? T.ink : T.etch)}>{dev._d.reg || MISSING}</span>
+          <span style={lab}>{pending ? 'PENDING' : (rec?.typeDesig || rec?.type || (dev._d.reg ? MISSING : 'NONE'))}</span>
         </div>
-      ),
-    },
-    {
-      key: 'wifi', label: 'WIFI / KNOWN NETWORKS',
-      render: (dev) => (
-        <div style={{ minWidth: 120 }}>
-          <div style={monoStyle(12, dev.wifiSsid ? T.ink : T.etch)}>{dev.wifiSsid || '—'}</div>
-          {/* (2026-09-21) réseaux WiFi connus du boîtier (ATC ≥213) : « ssid* » = saisi par le pilote (protégé), sans étoile = poussé par le dashboard */}
-          {dev.wifiKnown && (
-            <div style={sub} title="WiFi networks known to the unit — * = entered by the pilot (protected)">
-              {dev.wifiKnown}
-            </div>
-          )}
+      )
+    } },
+    { key: 'fw', label: 'FIRMWARE', render: (dev) => (
+      <div style={col(6)}>
+        {verLine('AKC', dev.fwVersion, dev._info.atcLatest)}
+        {verLine('AKV', dev.atvVersion, dev._info.atvLatest, 'NO AKview')}
+      </div>
+    ) },
+    { key: 'channel', label: 'CHANNEL', render: (dev) => (channelOf(dev) === 'DEV' ? <Chip tone="info">DEV</Chip> : <Chip muted>FLEET</Chip>) },
+    { key: 'wifi', label: 'WIFI / KNOWN NETWORKS', render: (dev) => {
+      const n = dev.wifiKnown ? dev.wifiKnown.split(',').filter(x => x.trim()).length : 0
+      return (
+        <div style={col()} title={dev.wifiKnown ? `Known networks: ${dev.wifiKnown}` : undefined}>
+          <span style={{ ...monoStyle(14, dev.wifiSsid ? T.ink : T.etch), overflowWrap: 'anywhere' }}>{dev.wifiSsid || MISSING}</span>
+          <span style={lab}>{n ? `${n} KNOWN NETWORK${n === 1 ? '' : 'S'}` : 'NO LIST REPORTED'}</span>
         </div>
-      ),
-    },
-    {
-      key: 'data', label: 'DATA/MONTH', align: 'right', mono: true,
-      render: (dev) => (
-        <div title={[
-          dev.iccid ? `ICCID ${dev.iccid}` : (dev.emnifyName ? `EMnify: ${dev.emnifyName}` : 'not linked to a SIM'),
-          dev.simStatus ? `SIM ${dev.simStatus}` : '',
-          dev.yearMB != null ? `Year: ${fmtMB(dev.yearMB)}` : '',
-          dev.overallMB != null ? `Overall: ${fmtMB(dev.overallMB)}` : '',
-          dev.lastDayMB != null ? `Last day (${dev.lastDayDate || '?'}): ${fmtMB(dev.lastDayMB)}` : '',
-        ].filter(Boolean).join('\n')}>
-          <div style={{ color: dev.dataUsageMB != null ? T.ink : T.etch }}>
-            {dev.dataUsageMB != null ? fmtMB(dev.dataUsageMB) : (dev.iccid || dev.emnifyName ? '—' : '·')}
-          </div>
-          {dev.overallMB != null && <div style={sub}>Σ {fmtMB(dev.overallMB)}</div>}
-        </div>
-      ),
-    },
-    {
-      key: 'cost', label: 'COST', align: 'right', mono: true,
-      render: (dev) => (
-        <span style={{ color: dev.dataCost ? T.ink : T.etch, whiteSpace: 'nowrap' }}>
-          {dev.dataCost != null ? `${dev.dataCost.toFixed(2)} ${dev.dataCostCur || 'EUR'}` : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'mbh', label: 'MB/H', align: 'right', mono: true,
-      render: (dev) => {   // (2026-08-26) MB/h = conso mois ÷ heures de vol uploadées du mois
-        const h = hoursByBox[dev.id] || 0
-        const ok = h >= 0.5 && dev.dataUsageMB != null   // <30 min de vol = ratio non significatif
-        return (
-          <span title={h > 0 ? `${h.toFixed(1)} h of flight uploaded this month` : 'no flight uploaded this month (cloud off?)'}
-                style={{ color: ok ? T.ink : T.etch }}>
-            {ok ? `${(dev.dataUsageMB / h).toFixed(1)}` : '—'}
+      )
+    } },
+    { key: 'data', label: `DATA · ${(monthLabel(emnify?.monthKey).split(' ')[0] || 'MONTH').slice(0, 3).toUpperCase()}`, align: 'right', render: (dev) => {
+      const mbh = mbhOf(dev)
+      return (
+        <div style={col(5, 'flex-end')} title={[dev.iccid ? `ICCID ${dev.iccid}` : 'not linked to a SIM', dev.yearMB != null ? `Year: ${fmtMB(dev.yearMB)}` : '', dev.overallMB != null ? `Overall: ${fmtMB(dev.overallMB)}` : ''].filter(Boolean).join('\n')}>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+            <span style={big(19, dev.dataUsageMB != null ? T.ink : T.etch)}>{dev.dataUsageMB != null ? Math.round(dev.dataUsageMB) : MISSING}</span>
+            <span style={lab}>MB</span>
           </span>
-        )
-      },
-    },
-    {
-      key: 'seen', label: 'LAST SEEN', align: 'right', mono: true,
-      render: (dev) => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{fmtSeen(dev.lastSeen || dev.updatedAt)}</span>,
-    },
+          <span style={lab}>{dev.dataCost != null ? `€ ${dev.dataCost.toFixed(2)}` : '€ −−−'} · {mbh != null ? `${mbh.toFixed(1)} MB/H` : '−−− MB/H'}</span>
+        </div>
+      )
+    } },
+    { key: 'seen', label: 'LAST SEEN', align: 'right', render: (dev) => (
+      <div style={col(5, 'flex-end')}>
+        <span style={{ ...monoStyle(14, dev._d.seen && now - dev._d.seen < STALE_DAYS * DAY_MS ? T.ink : T.etch), whiteSpace: 'nowrap' }}>{seenText(dev._d.seen)}</span>
+        <span style={lab}>{agoText(dev._d.seen)}</span>
+      </div>
+    ) },
   ]
 
   const knownNetworks = cfgEdit?.reported.wifiKnown
     ? cfgEdit.reported.wifiKnown.split(',').map(x => x.trim()).filter(Boolean)
     : []
-  const canPush = !!cfgEdit && !cfgSaving && !!(cfgEdit.reg.trim() || cfgEdit.wifiSsid.trim() || (cfgEdit.forget || []).length)
+  const canPush = !!cfgEdit && !cfgSaving && !!(cfgEdit.reg.trim() || cfgEdit.wifiSsid.trim() || (cfgEdit.forget || []).length || cfgEdit.otaTag)
+  const editDev = cfgEdit ? diagRows.find(d => (d.boxId || d.id) === cfgEdit.boxId) : null
+  const fact = (label, value, wide) => (
+    <div style={{ ...col(4), gridColumn: wide ? '1 / -1' : undefined }}>
+      <span style={lab}>{label}</span>
+      <span style={wide ? big(22) : monoStyle(14)}>{value || MISSING}</span>
+    </div>
+  )
+  const syncLine = emnify?.updatedAt ? `SIM DATA SYNCED ${dayUtc(tsMillis(emnify.updatedAt))} · ${utc(tsMillis(emnify.updatedAt))}` : 'SIM DATA NEVER SYNCED'
+  const pubLine = `PUBLISHED NOW · FLEET CHANNEL AKC ${published.s3 ?? MISSING} / AKV ${published.atv_ws241 ?? MISSING} · DEV CHANNEL AKC ${published.s3dev ?? MISSING} / AKV ${published.atv_ws241dev ?? MISSING}`
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: T.paper, color: T.ink, fontFamily: T.sans }}>
-      <div style={{ maxWidth: 1240, margin: '0 auto', padding: '24px 24px 40px' }}>
-        {/* En-tête */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ ...headingStyle(28), margin: 0 }}>Fleet</h1>
-          <span style={labelStyle(T.etch)}>FIRMWARE · ADMIN</span>
-        </div>
-        <p style={{ fontSize: 14, lineHeight: 1.5, color: T.graphite, margin: '6px 0 0', maxWidth: 720 }}>
-          Firmware status of each AKcore unit and its AKview display. Updated whenever
-          the unit reaches WiFi (post-flight upload or end of an update).
-        </p>
-
-        {/* Métriques clés */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginTop: 18 }}>
-          <MetricCard
-            label="UP TO DATE"
-            value={loading || !clubId ? null : `${upToDateCount}/${devices.length}`}
-            status={devices.length ? (upToDateCount === devices.length
-              ? { tone: 'ok', text: 'all units current' }
-              : { tone: 'caution', text: `${devices.length - upToDateCount} behind` }) : undefined}
-          />
-          <MetricCard
-            label="UNITS SEEN"
-            value={loading || !clubId ? null : devices.length}
-            status={devices.length ? { tone: seen24h ? 'ok' : 'off', text: `${seen24h} in last 24 h` } : undefined}
-          />
-          <MetricCard
-            label={`DATA · ${monthLabel(emnify?.monthKey).toUpperCase()}`}
-            value={monthVal}
-            unit={monthUnit}
-            status={pct != null
-              ? { tone: pct >= 70 ? 'caution' : 'ok', text: `${pct}% of ${fmtMB(pool)} pool` }
-              : { tone: 'off', text: syncText }}
-          />
-          <MetricCard
-            label="COST · MONTH"
-            value={emnify?.totalCost != null ? emnify.totalCost.toFixed(2) : null}
-            unit={currency}
-            status={{ tone: emnify ? 'ok' : 'off', text: syncText }}
-          />
-        </div>
-
-        {/* Conso EMnify — lue en direct depuis EMnify (rien cumulé chez nous) */}
-        <div style={{ marginTop: 12, padding: '10px 14px', background: T.card, border: T.border, borderRadius: T.radius.md, display: 'flex', alignItems: 'center', gap: 18, rowGap: 8, flexWrap: 'wrap' }}>
-          <span style={labelStyle(T.etch)}>DATA · EMNIFY</span>
-          {[['OVERALL', emnify?.overallMB, 'since activation'],
-            [String(emnify?.year || '2026'), emnify?.yearMB, 'current year'],
-            ['LAST DAY', emnify?.lastDayMB, emnify?.lastDayDate || '']].map(([l, mb, t]) => (
-            <span key={l} title={t} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={labelStyle(T.etch)}>{l}</span>
-              <span style={{ ...monoStyle(13), fontWeight: 500 }}>{fmtMB(mb)}</span>
-            </span>
-          ))}
-          <Button size="sm" icon="refresh" onClick={refreshEmnify} disabled={refreshing} style={{ marginLeft: 'auto' }}>
-            {refreshing ? 'Syncing…' : 'Refresh data usage'}
-          </Button>
-        </div>
-        {emnifyError && (
-          <Banner tone="caution" title="Data usage refresh failed" style={{ marginTop: 12 }} onRetry={refreshEmnify}>
-            {emnifyError}
-          </Banner>
-        )}
-
-        {/* (2026-08-31, demande Christophe, v2) La DERNIÈRE version (build le plus récent VU dans le parc,
-            banc compris) s'affiche EN PREMIER — c'est elle qu'on cherche. La version PUBLIÉE par tag OTA
-            (celle que la flotte télécharge) vient ensuite. Si dernière > publiée → puce « unpublished ». */}
-        <div style={{ marginTop: 12, padding: '10px 14px', background: T.card, border: T.border, borderRadius: T.radius.md, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 18, rowGap: 10 }}>
-          <span style={labelStyle(T.etch)}>VERSIONS</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ ...labelStyle(T.graphite), marginRight: 2 }}>LATEST IN FLEET</span>
-            {[['Core', fleetMaxFw, latestAtcPub], ['View', fleetMaxAtv, latestAtvPub]].map(([fam, last, pub]) => (
-              <span key={fam} style={{ display: 'inline-flex', gap: 6 }}>
-                <Chip title="Most recent build seen in the fleet (bench included)">{fam} v{last || '?'}</Chip>
-                {last > pub && (
-                  <Chip tone="caution" title="Not yet published on the OTA tags — the fleet does not download it (bench/dev build)">unpublished</Chip>
-                )}
-              </span>
-            ))}
+      <main style={{ maxWidth: 1400, padding: '28px 32px 48px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
+          <div style={col(6)}>
+            <span style={lab}>FIRMWARE · SIM DATA · WIFI</span>
+            <h1 style={{ ...headingStyle(28), margin: 0 }}>Fleet</h1>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span title="version.txt of the OTA tags on Firebase Storage — this is what units and displays download"
-                  style={{ ...labelStyle(T.graphite), marginRight: 2 }}>PUBLISHED · OTA</span>
-            {ATC_TAGS.map(t => <Chip key={t}>{t} v{published[t] ?? '?'}</Chip>)}
-            <Chip>ws241 v{published['atv_ws241'] ?? '?'}</Chip>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={lab}>{syncLine}</span>
+            <Button size="sm" variant="ghost" icon="refresh" onClick={refreshEmnify} disabled={refreshing}>{refreshing ? 'Syncing…' : 'Refresh'}</Button>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <StatusDot tone="ok" text="up to date" />
-            <StatusDot tone="caution" text="→ vN update available" />
-            <StatusDot tone="off" text="← vN dev: newer bench build" />
-          </div>
-        </div>
+        </header>
 
-        {/* Tableau des boîtiers */}
-        <div style={{ marginTop: 16 }}>
-          {!loading && !clubId ? (
-            <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md }}>
-              <EmptyState text="Select a club first." />
-            </div>
-          ) : (
-            <DataTable
-              columns={columns}
-              rows={rows}
-              rowKey="id"
-              loading={loading}
-              onRowClick={openConfig}
-              empty={<EmptyState text="No unit has reported its status yet. A unit appears here after its first WiFi session (post-flight upload or update)." />}
-            />
-          )}
-        </div>
-      </div>
+        {emnifyError && <Banner tone="caution" title="Data usage refresh failed" onRetry={refreshEmnify}>{emnifyError}</Banner>}
 
-      {/* (P1) Configuration du boîtier — écrit /deviceConfig/{boxId}, le boîtier le tire par WiFi */}
-      <Drawer closeOnOverlay={false}
-        open={!!cfgEdit}
-        onClose={closeConfig}
-        title={cfgEdit ? `Unit ${cfgEdit.boxId}` : ''}
-        subtitle="Pushed over WiFi (config-pull) · applied at the next WiFi session"
-        footer={cfgEdit && (
+        {!loading && !clubId ? (
+          <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md }}><EmptyState text="Select a club first." /></div>
+        ) : loading ? (
           <>
-            <Button variant="secondary" onClick={closeConfig} disabled={cfgSaving}>Cancel</Button>
-            <Button variant="primary" onClick={saveConfig} disabled={!canPush}>
-              {cfgSaving ? 'Pushing…' : 'Push to unit'}
-            </Button>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+              {[0, 1, 2, 3].map(i => <Skeleton key={i} height={108} radius={6} />)}
+            </div>
+            <Skeleton height={76} radius={6} />
+            <DataTable columns={columns.map(c => ({ key: c.key, label: c.label, align: c.align }))} rows={[]} loading />
+            <span style={lab}>READING THE LAST REPORT OF EACH AKcore …</span>
           </>
-        )}
-      >
-        {cfgEdit && (
-          <div>
-            {cfgError && <Banner tone="caution" title="Not pushed" style={{ marginBottom: 16 }}>{cfgError}</Banner>}
+        ) : devices.length === 0 ? (
+          <>
+            <Banner tone="info" title="Nothing to show until a box reports">An AKcore reports as soon as it powers up and reaches a known WiFi network.</Banner>
+            <div style={{ background: T.card, border: T.border, borderRadius: T.radius.md, padding: 8 }}>
+              <EmptyState text="No box has reported yet. The fleet board fills itself as each AKcore comes online." />
+            </div>
+          </>
+        ) : (<>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+            <MetricCard label="UP TO DATE" value={String(upToDateCount)} unit={`OF ${devices.length}`}
+              status={upToDateCount === devices.length ? { tone: 'ok', text: 'All units current' } : { tone: 'caution', text: `${devices.length - upToDateCount} unit${devices.length - upToDateCount === 1 ? '' : 's'} behind their channel` }} />
+            <MetricCard label="UNITS SEEN" value={String(seen24h)} unit={`OF ${devices.length}`}
+              status={seen24h === devices.length ? { tone: 'ok', text: 'All seen in the last 24 h' } : { tone: 'caution', text: `${devices.length - seen24h} silent for more than 24 h` }} />
+            <MetricCard label={`DATA · ${monthLabel(emnify?.monthKey).toUpperCase()}`} value={monthVal} unit={monthUnit}
+              status={pct != null ? { tone: pct >= 70 ? 'caution' : 'ok', text: `${pct} % of ${fmtMB(pool)} pool` } : { tone: 'off', text: syncText }} />
+            <MetricCard label="COST · MONTH" value={emnify?.totalCost != null ? emnify.totalCost.toFixed(2) : null} unit={currency}
+              status={emnify?.totalCost != null && totalHours >= 1 ? { tone: 'off', text: `${(emnify.totalCost / totalHours).toFixed(2)} ${currency} per flight hour` } : { tone: emnify ? 'ok' : 'off', text: syncText }} />
+          </div>
 
-            <Section title="Identity" first>
-              {cfgEdit.fromSheet ? (
-                /* Fiche aéronef trouvée → UNE SEULE source : identité en lecture seule ici. */
-                <div style={{ padding: '10px 12px', borderRadius: T.radius.sm, background: T.paper, border: T.border }}>
-                  <div style={{ ...monoStyle(14), fontWeight: 500 }}>
-                    {cfgEdit.reg}
-                    <span style={{ color: T.graphite }}> · {cfgEdit.type || 'type ?'} · {cfgEdit.hex || 'no hex'}</span>
-                  </div>
-                  <div style={{ fontSize: 12, lineHeight: 1.4, color: T.graphite, marginTop: 6 }}>
-                    Managed by the aircraft record (Admin → Aircraft) and synced to the unit automatically.
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <Field label="REGISTRATION / CALLSIGN *" hint="No aircraft record — direct entry.">
-                    <input className="ak-focus" value={cfgEdit.reg} onChange={e => setCfgEdit(c => ({ ...c, reg: e.target.value }))}
-                      placeholder="OOI43" style={inputStyle} />
-                  </Field>
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <Field label="ICAO TYPE" style={{ flex: '1 1 140px' }}>
-                      <input className="ak-focus" value={cfgEdit.type} onChange={e => setCfgEdit(c => ({ ...c, type: e.target.value }))}
-                        placeholder="FK9 / VL3…" style={inputStyle} />
-                    </Field>
-                    <Field label="HEX (IF TRANSPONDER)" style={{ flex: '1 1 140px' }}>
-                      <input className="ak-focus" value={cfgEdit.hex} onChange={e => setCfgEdit(c => ({ ...c, hex: e.target.value }))}
-                        placeholder="empty if no ADS-B" style={inputStyle} />
-                    </Field>
-                  </div>
-                </>
+          <section aria-label="Needs attention" style={{ background: T.ink, borderRadius: T.radius.md, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                <span style={labelStyle(T.mutedDark)}>NEEDS ATTENTION</span>
+                <span style={{ ...monoStyle(26, T.white), lineHeight: 1 }}>{attention.length}</span>
+                <span style={labelStyle(T.mutedDark)}>OF {devices.length} UNITS</span>
+              </div>
+              {attention.length > 0 && (
+                <Button size="sm" onInk icon="filter" onClick={() => setOnlyAttention(v => !v)}>
+                  {onlyAttention ? `Show all ${devices.length} units` : `Show only these ${attention.length}`}
+                </Button>
               )}
-              <div style={{ fontSize: 12, lineHeight: 1.5, color: T.graphite }}>
-                Currently on the unit: <span style={monoStyle(12)}>{cfgEdit.reported.reg || '—'}{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}{cfgEdit.reported.wifiSsid ? ` · WiFi ${cfgEdit.reported.wifiSsid}` : ''}</span>
-              </div>
-              {cfgEdit.hasConfig && <StatusDot tone="caution" text="A configuration is already pending" />}
-            </Section>
-
-            {/* (2026-09-20) Canal OTA du boîtier (ATC ≥210) : flotte (s3) ou dev (s3dev) ; son écran suit (ws241 / ws241dev). */}
-            <Section title="Update channel">
-              <Tabs
-                ariaLabel="Update channel"
-                tabs={[{ key: '', label: 'Unchanged' }, { key: 's3', label: 'Fleet' }, { key: 's3dev', label: 'Dev' }]}
-                value={cfgEdit.otaTag}
-                onChange={(k) => setCfgEdit(c => ({ ...c, otaTag: k }))}
-              />
-              <div style={{ fontSize: 12, lineHeight: 1.4, color: T.graphite }}>
-                Fleet = <span style={monoStyle(12)}>s3</span>, Dev = <span style={monoStyle(12)}>s3dev</span>; the display follows.
-                {cfgEdit.reported.board ? <> Currently <span style={monoStyle(12)}>{cfgEdit.reported.board}</span>.</> : null}
-              </div>
-            </Section>
-
-            {/* (P2) WiFi club poussé au boîtier */}
-            <Section title="Club WiFi">
-              <div style={{ fontSize: 12, lineHeight: 1.4, color: T.graphite, marginTop: -6 }}>
-                Optional. Becomes the unit's primary network.
-              </div>
-              <Field label="SSID">
-                <input className="ak-focus" value={cfgEdit.wifiSsid} onChange={e => setCfgEdit(c => ({ ...c, wifiSsid: e.target.value }))}
-                  placeholder="EBBY" style={inputStyle} />
-              </Field>
-              <Field label="PASSWORD" hint="The password is visible to designated dashboard members.">
-                <input className="ak-focus" type="password" value={cfgEdit.wifiPass} autoComplete="new-password"
-                  onChange={e => setCfgEdit(c => ({ ...c, wifiPass: e.target.value }))}
-                  placeholder={cfgEdit.wifiSsid ? '••••••••' : ''} style={inputStyle} />
-              </Field>
-            </Section>
-
-            {/* (2026-09-21) Réseaux WiFi connus du boîtier (rapport ATC ≥213, noms seuls) : une ligne par réseau, origine + réseau actif */}
-            {knownNetworks.length > 0 && (
-              <Section title="Known WiFi networks">
-                <ol style={{ listStyle: 'none', margin: 0, padding: 0, border: T.border, borderRadius: T.radius.sm }}>
-                  {knownNetworks.map((x, i) => {
-                    const pilot = x.endsWith('*'); const name = pilot ? x.slice(0, -1) : x
-                    const active = name.toLowerCase() === (cfgEdit.reported.wifiSsid || '').toLowerCase()
-                    const marked = (cfgEdit.forget || []).includes(name)
-                    return (
-                      <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderTop: i ? T.border : 'none', flexWrap: 'wrap' }}>
-                        <span style={{ ...monoStyle(12, T.etch), width: 18 }}>{i + 1}.</span>
-                        <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-                          <div style={{ ...monoStyle(13, marked ? T.etch : T.ink), fontWeight: 500, textDecoration: marked ? 'line-through' : 'none', overflowWrap: 'anywhere' }}>{name}</div>
-                          <div style={{ display: 'flex', gap: 10, marginTop: 3, flexWrap: 'wrap' }}>
-                            <span style={monoStyle(11, T.graphite)}>{pilot ? 'pilot · protected' : 'dashboard'}</span>
-                            {active && <StatusDot tone="ok" text="connected" />}
-                            {marked && <StatusDot tone="caution" text="removal pending" />}
-                          </div>
+            </div>
+            {attention.length === 0 ? (
+              <StatusDot tone="ok" onInk text="EVERY UNIT IS SEEN, CURRENT AND LINKED" />
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 10 }}>
+                {attention.map(dev => (
+                  <div key={dev.id} style={{ border: `1px solid ${T.ruleDark}`, borderRadius: T.radius.md, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={col(6)}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={big(17, T.white)}>{dev.boxId || dev.id}</span>
+                        <span style={monoStyle(11, T.mutedDark)}>{dev._d.reg || MISSING}</span>
+                      </div>
+                      {dev._d.issues.map((it, k) => (
+                        <div key={k} style={col(3)}>
+                          <StatusDot tone="caution" onInk text={it.text} />
+                          <span style={{ fontSize: 13, lineHeight: 1.45, color: T.white }}>{it.detail}</span>
                         </div>
-                        {/* Edit = pré-remplit le WiFi club ci-dessus (nouveau mot de passe) ; Remove = marque pour suppression, envoyée au Push */}
-                        <Button size="sm" variant="secondary" title="Change this network's password"
-                          onClick={() => setCfgEdit(c => ({ ...c, wifiSsid: name, wifiPass: '' }))}>Edit</Button>
-                        <Button size="sm" variant={marked ? 'secondary' : 'danger'}
-                          title={marked ? 'Cancel the removal' : 'Remove this network from the unit at its next WiFi session'}
-                          onClick={() => setCfgEdit(c => ({ ...c, forget: marked ? c.forget.filter(y => y !== name) : [...(c.forget || []), name] }))}>
-                          {marked ? 'Keep' : 'Remove'}
-                        </Button>
-                      </li>
-                    )
-                  })}
-                </ol>
-                <div style={{ fontSize: 12, lineHeight: 1.4, color: T.graphite }}>
-                  Order = the unit's priority. A dashboard network is dropped before a pilot network when the list (6) overflows.
-                  Removals are sent on Push and applied at the unit's next WiFi session (Core ≥ 214).
-                </div>
-              </Section>
+                      ))}
+                    </div>
+                    <Button size="sm" onInk onClick={() => openConfig(dev)}>{dev._d.issues.some(x => x.action === 'Link') && dev._d.issues.length === 1 ? 'Link' : 'Open'}</Button>
+                  </div>
+                ))}
+              </div>
             )}
+          </section>
+
+          <section aria-label="Club fleet" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: T.border, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <h2 style={{ ...headingStyle(15), margin: 0 }}>Club fleet · AKcore</h2>
+                <span style={lab}>{onlyAttention ? `${attention.length} OF ${devices.length} UNITS · NEEDS ATTENTION` : `${devices.length} UNITS · ${linkedCount} AIRCRAFT LINKED · ${devices.length - linkedCount} UNASSIGNED`}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={lab}>SHOW</span>
+                <Toggle mono active={!onlyAttention} onClick={() => setOnlyAttention(false)}>ALL {devices.length}</Toggle>
+                <Toggle mono active={onlyAttention} onClick={() => setOnlyAttention(true)}>NEEDS ATTENTION</Toggle>
+              </div>
+            </div>
+            <DataTable columns={columns} rows={shownRows} rowKey="id" onRowClick={openConfig}
+              empty={<EmptyState text="No unit matches this filter." />} />
+            <span style={lab}>{pubLine}</span>
+          </section>
+        </>)}
+      </main>
+
+      {/* Tiroir boîtier — écrit /deviceConfig(+Public)/{boxId}, le boîtier le tire à sa prochaine session WiFi */}
+      <Drawer closeOnOverlay={false} open={!!cfgEdit} onClose={closeConfig}
+        title={cfgEdit ? `Unit ${cfgEdit.boxId}` : ''}
+        subtitle={editDev ? [editDev._d.reg || 'No aircraft', `AKC ${editDev.fwVersion ?? MISSING} / AKV ${editDev.atvVersion ?? MISSING}`, `${channelOf(editDev)} channel`, agoText(editDev._d.seen).toLowerCase()].join(' · ') : ''}
+        footer={cfgEdit && (
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+            <span style={lab}>APPLIED AT THE NEXT WIFI</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" variant="ghost" onClick={closeConfig} disabled={cfgSaving}>Cancel</Button>
+              <Button size="sm" variant="primary" icon="check" onClick={saveConfig} disabled={!canPush}>{cfgSaving ? 'Pushing…' : 'Save & push to box'}</Button>
+            </div>
+          </div>
+        )}>
+        {cfgEdit && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {cfgError && <Banner tone="caution" title="Not pushed">{cfgError}</Banner>}
+
+            {cfgEdit.fromSheet ? (
+              <div style={{ border: T.border, borderRadius: T.radius.md, background: '#FBFAF7', padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ ...col(4), gridColumn: '1 / -1' }}>
+                  <span style={lab}>IDENTITY · FROM THE AIRCRAFT RECORD</span>
+                  <span style={big(22)}>{cfgEdit.reg}</span>
+                </div>
+                {fact('ICAO TYPE', cfgEdit.type)}
+                {fact('ICAO HEX', cfgEdit.hex)}
+                {fact('BOARD', (cfgEdit.reported.board || '').toUpperCase())}
+                {fact('AKview PAIRED', editDev?.atvVersion != null ? `AKV ${editDev.atvVersion}` : 'NONE')}
+                <span style={{ gridColumn: '1 / -1', fontSize: 12, lineHeight: 1.4, color: T.graphite }}>Edit the identity in Admin → Aircraft; it is synced to the box automatically.</span>
+              </div>
+            ) : (
+              <div style={col(12)}>
+                <span style={{ ...lab, color: T.ink }}>IDENTITY</span>
+                <Field label="REGISTRATION / CALLSIGN *" hint="No aircraft record: direct entry.">
+                  <Input mono value={cfgEdit.reg} placeholder="OOI43" onChange={v => setCfgEdit(c => ({ ...c, reg: v }))} />
+                </Field>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <Field label="ICAO TYPE" style={{ flex: '1 1 140px' }}><Input mono value={cfgEdit.type} placeholder="FK9 / VL3…" onChange={v => setCfgEdit(c => ({ ...c, type: v }))} /></Field>
+                  <Field label="HEX (IF TRANSPONDER)" style={{ flex: '1 1 140px' }}><Input mono value={cfgEdit.hex} placeholder="empty if no ADS-B" onChange={v => setCfgEdit(c => ({ ...c, hex: v }))} /></Field>
+                </div>
+                <span style={{ fontSize: 12, color: T.graphite }}>On the box now: <span style={monoStyle(12)}>{cfgEdit.reported.reg || MISSING}{cfgEdit.reported.hex ? ` / ${cfgEdit.reported.hex}` : ''}</span></span>
+              </div>
+            )}
+            {cfgEdit.hasConfig && <StatusDot tone="caution" text="A CONFIGURATION IS ALREADY PENDING" />}
+
+            <Field label="UPDATE CHANNEL" hint={`Dev boxes receive a new version before the rest of the fleet; the AKview follows.${cfgEdit.reported.board ? ` Currently ${channelOf({ board: cfgEdit.reported.board }).toLowerCase()}.` : ''}`}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Toggle active={!cfgEdit.otaTag} onClick={() => setCfgEdit(c => ({ ...c, otaTag: '' }))}>Unchanged</Toggle>
+                <Toggle active={cfgEdit.otaTag === 's3'} onClick={() => setCfgEdit(c => ({ ...c, otaTag: 's3' }))}>Fleet</Toggle>
+                <Toggle active={cfgEdit.otaTag === 's3dev'} onClick={() => setCfgEdit(c => ({ ...c, otaTag: 's3dev' }))}>Dev</Toggle>
+              </div>
+            </Field>
+
+            <div id="fleet-club-wifi" style={{ borderTop: '1px solid #EDE9E2', paddingTop: 16, ...col(12) }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ ...lab, color: T.ink }}>CLUB WIFI</span>
+                {cfgEdit.reported.wifiSsid && <Chip tone="ok">CONNECTED · {cfgEdit.reported.wifiSsid}</Chip>}
+              </div>
+              <Field label="SSID" hint="Optional. Becomes the box's first network.">
+                <Input mono id="fleet-ssid" value={cfgEdit.wifiSsid} placeholder="EBBY" onChange={v => setCfgEdit(c => ({ ...c, wifiSsid: v }))} />
+              </Field>
+              <Field label="PASSWORD" hint="Visible to designated dashboard members only.">
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Input mono type={showPw ? 'text' : 'password'} autoComplete="new-password" value={cfgEdit.wifiPass}
+                      placeholder={cfgEdit.wifiSsid ? '••••••••' : ''} onChange={v => setCfgEdit(c => ({ ...c, wifiPass: v }))} />
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => setShowPw(v => !v)}>{showPw ? 'Hide' : 'Show'}</Button>
+                </div>
+              </Field>
+            </div>
+
+            <div style={{ borderTop: '1px solid #EDE9E2', paddingTop: 16, ...col(10) }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <span style={{ ...lab, color: T.ink }}>KNOWN WIFI NETWORKS</span>
+                <span style={lab}>{knownNetworks.length} OF 6</span>
+              </div>
+              {knownNetworks.length === 0 && <span style={{ fontSize: 13, color: T.graphite }}>The box has not reported its list yet (AKcore 213 or later).</span>}
+              {knownNetworks.map((x, i) => {
+                const onBox = x.endsWith('*'); const name = onBox ? x.slice(0, -1) : x
+                const active = name.toLowerCase() === (cfgEdit.reported.wifiSsid || '').toLowerCase()
+                const marked = (cfgEdit.forget || []).includes(name)
+                return (
+                  <div key={i} style={{ border: T.border, borderRadius: T.radius.md, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, opacity: marked ? 0.6 : 1 }}>
+                    <div style={col(4)}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={lab}>{i + 1}</span>
+                        <span style={{ ...monoStyle(14), overflowWrap: 'anywhere' }}>{name}</span>
+                      </div>
+                      <span style={lab}>{[active ? 'CONNECTED' : null, onBox ? 'ADDED ON THE BOX · PROTECTED' : 'ADDED FROM THE DASHBOARD', marked ? 'REMOVAL PENDING' : null].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Button size="sm" variant="ghost" icon="edit" title="Change this network's password" aria-label="Edit network"
+                        onClick={() => { setCfgEdit(c => ({ ...c, wifiSsid: name, wifiPass: '' })); document.getElementById('fleet-ssid')?.focus() }} style={{ width: 32, padding: 0, justifyContent: 'center' }} />
+                      <Button size="sm" variant={marked ? 'secondary' : 'ghost'}
+                        onClick={() => setCfgEdit(c => ({ ...c, forget: marked ? c.forget.filter(y => y !== name) : [...(c.forget || []), name] }))}>
+                        {marked ? 'Keep' : 'Forget'}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+              <Button size="sm" icon="wifi" onClick={() => { setCfgEdit(c => ({ ...c, wifiSsid: '', wifiPass: '' })); document.getElementById('fleet-ssid')?.focus() }}>Add a network</Button>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: T.graphite }}>
+                Order is the box's priority. Changes are applied the next time the box reaches WiFi (forget needs AKcore 214 or later). A network added on the box appears here after its next report.
+              </p>
+            </div>
           </div>
         )}
       </Drawer>
