@@ -142,25 +142,43 @@ const suspectDot = (n) => (n > 0 ? <StatusDot tone="caution" text={`${n} DURATIO
 // ─── (22/09, Christophe) Vols d'une carte rangés par ANNÉE → MOIS → JOUR ────────────────────────────────────
 // Lignes année / mois dépliables avec leurs totaux (durées invraisemblables exclues et comptées à part) ; l'année
 // et le mois les plus récents s'ouvrent seuls ; dans un mois, un tableau par jour.
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 const ymd = f => { const t = tsMillis(f.startTs); return t ? new Date(t).toISOString().slice(0, 10) : '0000-00-00' }
-function periodMeta(list) {
+// (22/09, retour Christophe « la lisibilité laisse à désirer ») : totaux en COLONNES à droite (vols · heures ·
+// à vérifier), titres hiérarchisés (année 15 · mois 13 · jour 12), vols dans un ENCART blanc bordé sur fond papier.
+function PeriodStats({ list, strong }) {
   const bad = countSuspect(list)
-  return `${list.length} FLIGHT${list.length === 1 ? '' : 'S'} · ${formatDuration(sumDuration(list))}${bad ? ` · ${bad} TO CHECK` : ''}`
+  return (
+    <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 18 }}>
+      {bad > 0 && <StatusDot tone="caution" text={`${bad} TO CHECK`} />}
+      <span style={{ ...monoStyle(12, T.graphite), minWidth: 84, textAlign: 'right' }}>{list.length} FLIGHT{list.length === 1 ? '' : 'S'}</span>
+      <span style={{ ...monoStyle(strong ? 16 : 14, T.ink), fontWeight: 500, minWidth: 64, textAlign: 'right' }}>{formatDuration(sumDuration(list))}</span>
+    </span>
+  )
 }
-function PeriodRow({ level, open, onToggle, title, meta }) {
+const LEVEL = [
+  { pad: '12px 20px 12px 16px', bg: '#FBFAF7', title: { fontFamily: T.sans, fontSize: 15, fontWeight: 600, color: T.ink } },
+  { pad: '10px 20px 10px 40px', bg: T.card,    title: { fontFamily: T.sans, fontSize: 13, fontWeight: 600, color: T.ink } },
+  { pad: '8px 20px 8px 64px',   bg: T.card,    title: { ...monoStyle(12, T.graphite), letterSpacing: '0.04em' } },
+]
+function PeriodRow({ level, open, onToggle, title, list }) {
+  const L = LEVEL[level]
   return (
     <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus" onClick={onToggle}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
-      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: level === 0 ? '10px 16px' : level === 1 ? '8px 16px 8px 36px' : '7px 16px 7px 56px', borderTop: T.border,
-               background: level === 0 ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: L.pad, borderTop: T.border, background: L.bg, cursor: 'pointer' }}>
       <Icon name="chevron-right" size={14} color={T.graphite} style={{ transform: open ? 'rotate(90deg)' : 'none' }} />
-      <span style={{ ...labelStyle(level === 2 ? T.graphite : T.ink), fontSize: level === 0 ? 12 : level === 1 ? 11 : 10 }}>{title}</span>
-      <span style={labelStyle(T.etch)}>{meta}</span>
+      <span style={L.title}>{title}</span>
+      <PeriodStats list={list} strong={level === 0} />
     </div>
   )
 }
-function FlightsByPeriod({ flights, columns }) {
+function FlightsByPeriod({ flights, columns: baseColumns }) {
+  // Dans un jour, la date est déjà sur la ligne du jour : la colonne DATE ne garde que l'heure UTC.
+  const columns = baseColumns.map(c => (c.key === 'date'
+    ? { ...c, label: 'TIME', render: f => { const t = tsMillis(f.startTs); return t ? `${new Date(t).toISOString().slice(11, 16)} UTC` : '−−−' } }
+    : c))
   const tree = useMemo(() => {
     const years = []
     flights.forEach(f => {
@@ -184,16 +202,20 @@ function FlightsByPeriod({ flights, columns }) {
     <div>
       {tree.map(Y => (
         <div key={Y.key}>
-          <PeriodRow level={0} open={openY.has(Y.key)} onToggle={() => flip(setOpenY, Y.key)} title={Y.key === '0000' ? 'NO DATE' : Y.key} meta={periodMeta(Y.flights)} />
+          <PeriodRow level={0} open={openY.has(Y.key)} onToggle={() => flip(setOpenY, Y.key)} title={Y.key === '0000' ? 'No date' : Y.key} list={Y.flights} />
           {openY.has(Y.key) && Y.months.map(M => (
             <div key={M.key}>
               <PeriodRow level={1} open={openM.has(M.key)} onToggle={() => flip(setOpenM, M.key)}
-                title={M.key.startsWith('0000') ? 'NO DATE' : `${MONTH_NAMES[Number(M.key.slice(5, 7)) - 1]} ${M.key.slice(0, 4)}`} meta={periodMeta(M.flights)} />
+                title={M.key.startsWith('0000') ? 'No date' : `${MONTH_FULL[Number(M.key.slice(5, 7)) - 1]} ${M.key.slice(0, 4)}`} list={M.flights} />
               {openM.has(M.key) && M.days.map(D => (
                 <div key={D.key}>
                   <PeriodRow level={2} open={openD.has(D.key)} onToggle={() => flip(setOpenD, D.key)}
-                    title={D.key.startsWith('0000') ? 'NO DATE' : `${Number(D.key.slice(8, 10))} ${MONTH_NAMES[Number(D.key.slice(5, 7)) - 1]} ${D.key.slice(0, 4)}`} meta={periodMeta(D.flights)} />
-                  {openD.has(D.key) && <DataTable columns={columns} rows={D.flights} style={NESTED_TABLE} />}
+                    title={D.key.startsWith('0000') ? 'NO DATE' : `${String(Number(D.key.slice(8, 10))).padStart(2, '0')} ${MONTH_NAMES[Number(D.key.slice(5, 7)) - 1]} ${D.key.slice(0, 4)}`} list={D.flights} />
+                  {openD.has(D.key) && (
+                    <div style={{ background: T.paper, borderTop: T.border, padding: '10px 20px 14px 64px' }}>
+                      <DataTable columns={columns} rows={D.flights} />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -211,8 +233,6 @@ const colAircraft  = acLabel => ({
   render: f => <span title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</span>,
 })
 
-// Table dépliée dans une carte : sans cadre propre, séparée par un filet.
-const NESTED_TABLE = { border: 'none', borderTop: T.border, borderRadius: 0 }
 
 // Bloc chiffré aligné à droite dans l'en-tête des cartes.
 function CardStat({ label, value, sub, minWidth }) {
