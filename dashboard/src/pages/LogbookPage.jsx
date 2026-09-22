@@ -604,7 +604,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
               {toggle(groupBy === 'day', () => setGroupBy('day'), 'DAY')}
               {toggle(groupBy === 'aircraft', () => setGroupBy('aircraft'), 'AIRCRAFT')}
               {toggle(groupBy === 'pilot', () => setGroupBy('pilot'), 'PILOT')}
-              {toggle(groupBy === 'none', () => setGroupBy('none'), 'FLAT')}
+              {toggle(groupBy === 'none', () => setGroupBy('none'), 'NONE')}
             </div>
             <div role="group" aria-label="Sort by" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={labelStyle(T.etch)}>SORT</span>
