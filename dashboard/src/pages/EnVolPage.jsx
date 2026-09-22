@@ -58,6 +58,28 @@ function useLastFlights(clubId) {
   return last
 }
 
+// Dernier signal de chaque boîtier AirKi Core (/devices : callSign + lastSeen, écrit par reportDevice).
+function useBoxSeen(clubId) {
+  const [seen, setSeen] = useState({})
+  useEffect(() => {
+    if (!clubId) return
+    let on = true
+    getDocs(query(collection(db, 'devices'), where('clubId', '==', clubId)))
+      .then(snap => {
+        const m = {}
+        snap.docs.forEach(d => {
+          const v = d.data(); const k = String(v.callSign || '').toUpperCase()
+          const t = tsMillis(v.lastSeen || v.updatedAt)
+          if (k && (!m[k] || t > m[k])) m[k] = t
+        })
+        if (on) setSeen(m)
+      })
+      .catch(err => console.warn('[InFlight] devices:', err?.message || err))
+    return () => { on = false }
+  }, [clubId])
+  return seen
+}
+
 // Horloge de la page (5 s) : durées, âges, péremption — sans Date.now() pendant le rendu.
 function useNow(periodMs = 5000) {
   const [now, setNow] = useState(() => Date.now())
@@ -85,9 +107,9 @@ function SectionHead({ title, meta }) {
 
 function OwnerTag({ ac, owner, muted }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' }}>
       <Chip muted={muted}>{ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}</Chip>
-      {owner && <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{owner}</span>}
+      {owner && <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite, overflowWrap: 'anywhere' }}>{owner}</span>}
     </span>
   )
 }
@@ -149,18 +171,23 @@ function AirborneCard({ ac, owner, now, onLocate }) {
   )
 }
 
+// (22/09, retour Christophe « risques de superposition ») : plus de note à droite qui écrasait le nom du
+// propriétaire — tout est empilé : immat · étiquette + nom (retour à la ligne permis) · statut · note.
 function CompactCard({ ac, owner, tone, text, note }) {
   return (
-    <div style={{ ...cardBox, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-      <AircraftPhoto ac={ac} width={40} height={30} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
-          <span style={{ ...monoStyle(13, T.ink), fontWeight: 500, letterSpacing: '0.04em' }}>{ident(ac)}</span>
-          <OwnerTag ac={ac} owner={owner} muted />
+    <div style={{ ...cardBox, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
+      <AircraftPhoto ac={ac} width={56} height={42} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
+        <span style={{ ...monoStyle(14, T.ink), fontWeight: 500, letterSpacing: '0.04em' }}>{ident(ac)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+          <Chip muted>{ac.ownership === 'owner' ? 'OWNER' : 'CLUB'}</Chip>
+          {owner && <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite, overflowWrap: 'anywhere' }}>{owner}</span>}
         </div>
-        <StatusDot tone={tone} text={text} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', paddingTop: 6, borderTop: innerRule }}>
+          <StatusDot tone={tone} text={text} />
+          {note && <span style={labelStyle(T.etch)}>{note}</span>}
+        </div>
       </div>
-      {note && <span style={{ ...labelStyle(T.etch), textAlign: 'right', maxWidth: 130 }}>{note}</span>}
     </div>
   )
 }
@@ -183,6 +210,7 @@ export default function EnVolPage() {
   const { fleet, loading, error, updatedAt, refresh } = useFleet(clubId)
   const owners = useOwnerNames(clubId)
   const lastFlights = useLastFlights(clubId)
+  const boxSeen = useBoxSeen(clubId)
   const now = useNow()
   const navigate = useNavigate()
   const locate = (p) => navigate('/live', { state: { flyTo: { ...p, zoom: 13 } } })
@@ -203,9 +231,12 @@ export default function EnVolPage() {
     const lf = lastFlights[String(ac.callSign || '').toUpperCase()] || lastFlights[String(ac.registration || '').toUpperCase()]
     return lf ? `LAST FLIGHT ${dayLabel(lf.t, now)} · ${hhmm(lf.dur * 1000)}` : 'NO FLIGHT LOGGED'
   }
-  const silentNote = (ac) => (ac.fdrData?.lastSeen
-    ? `NO DATA SINCE ${dayLabel(ac.fdrData.lastSeen, now)} · ${utcHM(ac.fdrData.lastSeen)}`
-    : 'NO DATA RECEIVED')
+  const silentNote = (ac) => {
+    const keys = [ac.callSign, ac.registration].map(k => String(k || '').toUpperCase()).filter(Boolean)
+    const t = Math.max(ac.fdrData?.lastSeen || 0, ...keys.map(k => boxSeen[k] || 0))
+    if (t) return `LAST SIGNAL ${dayLabel(t, now)} · ${utcHM(t)} UTC`
+    return keys.some(k => k in boxSeen) ? 'NO SIGNAL RECEIVED' : 'NO AIRKI CORE LINKED'
+  }
 
   const refreshing = { tone: 'off', text: 'Refreshing' }
   const grid = (min) => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`, gap: 12 })
