@@ -26,6 +26,7 @@ export default function useFleet(clubId) {
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
   const [updatedAt, setUpdatedAt] = useState(null)   // (22/09) dernier poll réussi (Live : « UPDATED … UTC »)
+  const [nonce,     setNonce]     = useState(0)      // (22/09) refresh() : relance immédiate des polls (bouton Refresh / Retry)
   const timerRef = useRef(null)
 
   // ── 1. Flotte Firestore ────────────────────────────────────────────────────
@@ -77,7 +78,7 @@ export default function useFleet(clubId) {
     fetchSafeSky()
     timerRef.current = setInterval(fetchSafeSky, POLL_INTERVAL_MS)
     return () => clearInterval(timerRef.current)
-  }, [fetchSafeSky])
+  }, [fetchSafeSky, nonce])
 
   // ── 3bis. Balises FlyADSL par callsign (réseau : app SafeSky, ADS-L AeroTrace…) ──
   // Le flux uav-api ci-dessus = sources RADIO uniquement. Ici on interroge FlyADSL
@@ -100,7 +101,7 @@ export default function useFleet(clubId) {
                                         // le gain est nul (latence pipeline SafeSky 2-5 s) et le fan-out
                                         // par callsign ferait ~500k appels FlyADSL/jour par client à 1 Hz
     return () => { stop = true; clearInterval(t) }
-  }, [aircraft])
+  }, [aircraft, nonce])
 
   // ── 4. Fusion statut ──────────────────────────────────────────────────────
   const fleet = aircraft.map(ac => {
@@ -120,6 +121,7 @@ export default function useFleet(clubId) {
       course: bcnRaw.ground_track,
       status: bcnRaw.flight_state,           // AIRBORNE | GROUNDED
       source: 'network',
+      fixTs: (bcnRaw.timestamp ?? 0) * 1000,  // (22/09) heure réelle du fix (âge de la position sur In flight)
     } : null
     const sky = bcn ?? safesky.find(t =>
       t.id?.toUpperCase() === ac.icao24?.toUpperCase() ||
@@ -162,6 +164,7 @@ export default function useFleet(clubId) {
         lon:        sky.longitude,
         beaconType: sky.beacon_type,
         lastSeen:   now,
+        fixTs:      sky.fixTs ?? (sky.last_update > 1e12 ? sky.last_update : sky.last_update > 1e9 ? sky.last_update * 1000 : null),
       } : null,
       fdrData: fdr ? {
         mode:     fdr.mode,
@@ -187,5 +190,6 @@ export default function useFleet(clubId) {
     loading,
     error,
     updatedAt,
+    refresh: () => setNonce(n => n + 1),
   }
 }
