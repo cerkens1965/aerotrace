@@ -314,6 +314,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
   const columns = [
     COL_DATE,
     colAircraft(acLabel),
+    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
     ...(mode === 'instructor' ? [{ key: 'student', label: 'STUDENT', render: f => getPilotName(pilots, f.pilotId) }] : []),
     ...(mode === 'pilot' ? [{ key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span> : DASH) }] : []),
     COL_DURATION,
@@ -402,6 +403,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
   const columns = [
     COL_DATE,
+    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
     { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
     { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId
       ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)} · {presenceText(f).toLowerCase()}</span>
