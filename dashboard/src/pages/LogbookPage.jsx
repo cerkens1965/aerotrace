@@ -108,8 +108,9 @@ function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
     <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
       {/* (22/09) vol à attribuer : « Assign » EN PREMIER (il était poussé hors écran à droite) */}
       {onAssign && f._pending && <Button size="sm" variant="primary" icon="edit" onClick={() => onAssign(f)}>Assign</Button>}
-      <Button size="sm" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button>
-      {onAssign && !f._pending && <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment">Edit</Button>}
+      {/* (22/09) Open Loop et Edit en boutons carrés à icône (nom en infobulle + aria-label) : la ligne tient à l'écran */}
+      <Button size="sm" icon="play" onClick={() => onReplay(f.id)} title="Open Loop" aria-label="Open Loop" style={{ width: 32, padding: 0, justifyContent: 'center' }} />
+      {onAssign && !f._pending && <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment" aria-label="Edit assignment" style={{ width: 32, padding: 0, justifyContent: 'center' }} />}
       {canDelete && (
         <Button size="sm" variant="danger" confirm="Confirm?" onClick={() => onDelete(f.id)} title="Remove this flight from the logbook">
           Delete
