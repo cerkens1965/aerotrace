@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { getDoc, doc } from 'firebase/firestore'
 import { ref, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../firebase/config'
-import { parseG3XCSV, subsampleFrames, getFrameAtTime } from '../utils/csvParser'
+import { parseG3XCSV, getFrameAtTime } from '../utils/csvParser'   // (23/09) subsampleFrames n'est plus utilisé ici : la barre de progression (et ses barres de phase) a été supprimée
 import SixPack from '../components/ui/SixPack'
 import ReplayMap from '../components/map/ReplayMap'
 import FlightCharts from '../components/replay/FlightCharts'
@@ -38,132 +38,96 @@ function fmtUTC(ts) {
   return `${hh}:${mm}:${ss}Z`
 }
 
-// ─── Timeline scrubber ────────────────────────────────────────────────────────
-function Timeline({ frames, currentTs, onSeek, playing, onPlayPause, speed, onSpeedChange }) {
-  const isDragging = useRef(false)
-
+// ─── Barre de lecture ─────────────────────────────────────────────────────────
+// (23/09, Christophe) La BARRE DE PROGRESSION a été SUPPRIMÉE : elle faisait double emploi
+// avec les courbes juste au-dessus, qui portent déjà la position de lecture (curseur ambre,
+// tracé joué en plein / à venir en fantôme) et se laissent déjà gratter à la souris.
+// Reste ici ce que les courbes ne disent pas : lecture/pause, temps écoulé, heure UTC, vitesse.
+function Timeline({ frames, currentTs, playing, onPlayPause, speed, onSpeedChange }) {
   if (!frames || frames.length === 0) return null
   const startTs = frames[0].ts
-  const endTs   = frames[frames.length-1].ts
-  const total   = endTs - startTs
-  const progress = ((currentTs - startTs) / total) * 100
-  const seek = (e, currentTarget) => {
-    const rect = (currentTarget || e.currentTarget).getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    onSeek(startTs + ratio * total)
-  }
-  const handleMouseDown = (e) => { isDragging.current = true; seek(e) }
-  const handleMouseMove = (e) => { if (isDragging.current) seek(e) }
-  const handleMouseUp   = ()  => { isDragging.current = false }
+  const total   = frames[frames.length - 1].ts - startTs
 
   return (
-    <div style={{ padding: '12px 16px', background: T.card, borderTop: T.border }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-        {/* Play/Pause */}
-        <Button variant="primary" size="sm" onClick={onPlayPause} aria-label={playing ? 'Pause' : 'Play'}
-          style={{ width: 32, height: 32, padding: 0 }}>
-          {playing
-            ? <svg viewBox="0 0 24 24" width={16} height={16} aria-hidden="true" style={{ display: 'block' }}>
-                <rect x={6} y={4} width={4} height={16} fill="currentColor" /><rect x={14} y={4} width={4} height={16} fill="currentColor" />
-              </svg>
-            : <Icon name="play" size={16} />}
-        </Button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+      padding: '10px 16px', background: T.card, borderTop: T.border }}>
 
-        {/* Time */}
-        <span style={{ ...monoStyle(12, T.ink), fontWeight: 500, minWidth: 50 }}>
-          {fmtTime(currentTs - startTs)}
-        </span>
-        <span style={{ ...monoStyle(11, T.graphite), minWidth: 70 }}>
-          {fmtUTC(currentTs)}
-        </span>
+      <Button variant="primary" size="sm" onClick={onPlayPause} aria-label={playing ? 'Pause' : 'Play'}
+        style={{ width: 34, height: 34, padding: 0, flexShrink: 0 }}>
+        {playing
+          ? <svg viewBox="0 0 24 24" width={15} height={15} aria-hidden="true" style={{ display: 'block' }}>
+              <rect x={6} y={4} width={4} height={16} fill="currentColor" /><rect x={14} y={4} width={4} height={16} fill="currentColor" />
+            </svg>
+          : <Icon name="play" size={15} />}
+      </Button>
 
-        {/* Speed selector */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {[1, 2, 5, 10, 30].map(s => (
-            <button key={s} onClick={() => onSpeedChange(s)} className="ak-focus" aria-pressed={speed === s} style={{
-              padding: '2px 7px', borderRadius: T.radius.sm,
-              background: speed === s ? T.ink : T.card,
-              border: `1px solid ${speed === s ? T.ink : T.rule}`,
-              color: speed === s ? T.white : T.graphite,
-              fontFamily: T.mono, fontSize: 11, fontVariantNumeric: 'tabular-nums', cursor: 'pointer',
-            }}>
-              {s}x
-            </button>
-          ))}
-        </div>
-
-        <div style={{ flex: 1 }} />
-        <span style={{ ...monoStyle(11, T.graphite), minWidth: 70, textAlign: 'right' }}>
-          {fmtUTC(startTs + total)}
-        </span>
-        <span style={{ ...monoStyle(11, T.etch) }}>
-          {fmtTime(total)}
-        </span>
+      {/* Temps écoulé (gros) puis l'heure UTC correspondante (discrète) */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <span style={{ ...monoStyle(18, T.ink), fontWeight: 500, minWidth: 66 }}>{fmtTime(currentTs - startTs)}</span>
+        <span style={{ ...monoStyle(11, T.graphite) }}>{fmtUTC(currentTs)}</span>
       </div>
 
-      {/* Progress bar */}
-      <div onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ height: 6, background: T.rule, borderRadius: 3, cursor: 'ew-resize', position: 'relative', userSelect: 'none' }}>
-        <div style={{
-          height: '100%', width: `${progress}%`, background: T.amber,
-          borderRadius: 3, transition: playing ? 'none' : 'width 0.05s', position: 'relative',
-        }}>
-          <div style={{ position: 'absolute', right: -8, top: -5,
-            width: 16, height: 16, borderRadius: '50%',
-            background: T.amber, border: `2px solid ${T.white}`,
-            boxShadow: 'none',
-            pointerEvents: 'none',
-          }} />
+      {/* Vitesse de lecture — mêmes pastilles que les séries des courbes */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={labelStyle(T.etch)}>SPEED</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[1, 2, 5, 10, 30].map(sp => (
+            <button key={sp} onClick={() => onSpeedChange(sp)} className="ak-focus" aria-pressed={speed === sp} style={{
+              padding: '4px 9px', borderRadius: T.radius.sm, cursor: 'pointer',
+              background: speed === sp ? T.ink : T.card,
+              border: `1px solid ${speed === sp ? T.ink : T.rule}`,
+              color: speed === sp ? T.white : T.graphite,
+              fontFamily: T.mono, fontSize: 11, fontWeight: 500, fontVariantNumeric: 'tabular-nums',
+            }}>{sp}x</button>
+          ))}
         </div>
-        {/* Phase coloring - mini bars */}
-        <div style={{
-          position: 'absolute', top: 10, left: 0, right: 0, height: 3,
-          display: 'flex',
-        }}>
-          {subsampleFrames(frames, 500).map((f, i) => {
-            const x = ((f.ts - startTs) / total) * 100
-            return <div key={i} style={{
-              position: 'absolute', left: `${x}%`, width: '0.25%', height: '100%',
-              background: PHASE_COLORS[f.phase] ?? T.ok,
-            }} />
-          })}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 8 }} />
+
+      {/* Durée totale, et l'heure de fin dessous — l'échelle des courbes, en clair */}
+      <div style={{ textAlign: 'right' }}>
+        <div style={labelStyle(T.etch)}>TOTAL</div>
+        <div style={{ ...monoStyle(13, T.ink), fontWeight: 500, marginTop: 2 }}>
+          {fmtTime(total)}<span style={{ color: T.graphite, marginLeft: 8 }}>{fmtUTC(startTs + total)}</span>
         </div>
       </div>
     </div>
   )
 }
 
-// ─── Data strip ───────────────────────────────────────────────────────────────
+// ─── Bandeau d'instruments ────────────────────────────────────────────────────
+// (23/09) Redessiné : libellé + UNITÉ en capitales 10 px etch, valeur Geist Mono 20 px encre
+// tabulaire (les chiffres ne dansent plus quand la lecture défile), colonnes de largeur fixe
+// séparées par un filet 1 px. La couleur reste portée par une pastille, jamais par le texte.
 function DataStrip({ frame }) {
   if (!frame) return null
-  // (22/09) unités dans les libellés (convention Live / In flight), valeurs seules en mono ; vitesse en kt.
   const n = (v, f = (x) => String(Math.round(x))) => (v == null || Number.isNaN(v) ? '−−−' : f(v))
   const items = [
-    { l: 'GS KT',   v: n(frame.spd) },
-    { l: 'ALT FT',  v: n(frame.alt) },
-    { l: 'AGL FT',  v: n(frame.agl) },
-    { l: 'VSI FPM', v: n(frame.vspd, x => `${x > 0 ? '+' : ''}${Math.round(x)}`) },
-    { l: 'HDG',     v: n(frame.hdg, x => String(Math.round(x) % 360).padStart(3, '0')) },
-    { l: 'G',       v: n(frame.normAc, x => x.toFixed(2)), alert: Math.abs(frame.normAc) > 2 },
-    { l: 'RPM',     v: n(frame.rpm) },
-    { l: 'OAT °C',  v: n(frame.oat) },
-    { l: 'PHASE',   v: frame.phase, color: PHASE_COLORS[frame.phase] },
+    { l: 'GS',    u: 'KT',  v: n(frame.spd),  w: 62 },
+    { l: 'ALT',   u: 'FT',  v: n(frame.alt),  w: 78 },
+    { l: 'AGL',   u: 'FT',  v: n(frame.agl),  w: 78 },
+    { l: 'VSI',   u: 'FPM', v: n(frame.vspd, x => `${x > 0 ? '+' : ''}${Math.round(x)}`), w: 86 },
+    { l: 'HDG',   u: '',    v: n(frame.hdg, x => String(Math.round(x) % 360).padStart(3, '0')), w: 62 },
+    { l: 'G',     u: '',    v: n(frame.normAc, x => x.toFixed(2)), w: 62, dot: Math.abs(frame.normAc) > 2 ? T.amber : null },
+    { l: 'RPM',   u: '',    v: n(frame.rpm),  w: 70 },
+    { l: 'OAT',   u: '°C',  v: n(frame.oat),  w: 62 },
+    { l: 'PHASE', u: '',    v: frame.phase,   w: 120, dot: PHASE_COLORS[frame.phase], text: true },
   ]
-  // Couleur (alerte G, phase) portée par un point 6 px, le texte reste encre.
   return (
-    <div style={{ display: 'flex', background: T.card,
-      borderTop: T.border, padding: '8px 16px', flexWrap: 'wrap', gap: 20 }}>
-      {items.map(item => {
-        const dot = item.alert ? T.amber : item.color
-        return (
-          <div key={item.l}>
-            <div style={labelStyle(T.etch)}>{item.l}</div>
-            <div style={{ ...monoStyle(12, T.ink), fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
-              {dot && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: T.radius.pill, background: dot, flexShrink: 0 }} />}
-              {item.v}
-            </div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch',
+      background: T.card, borderTop: T.border }}>
+      {items.map((item, i) => (
+        <div key={item.l} style={{ minWidth: item.w, padding: '8px 16px',
+          borderLeft: i === 0 ? 'none' : T.border }}>
+          <div style={labelStyle(T.etch)}>{item.u ? `${item.l} ${item.u}` : item.l}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 3 }}>
+            {item.dot && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill,
+              background: item.dot, flexShrink: 0 }} />}
+            <span style={{ ...monoStyle(item.text ? 13 : 20, T.ink), fontWeight: 500, lineHeight: 1 }}>{item.v}</span>
           </div>
-        )
-      })}
+        </div>
+      ))}
     </div>
   )
 }
@@ -393,7 +357,6 @@ export default function ReplayPage() {
           <Timeline
             frames={view?.frames}
             currentTs={currentTs}
-            onSeek={handleSeek}
             playing={playing}
             onPlayPause={handlePlayPause}
             speed={speed}

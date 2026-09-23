@@ -88,16 +88,20 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       }
     })
 
-    // Cursor line
+    // Curseur de lecture — (23/09) SEULE marque de position depuis la suppression de la barre
+    // de progression : trait PLEIN (avant : pointillé pâle) + poignée au pied, pour qu'on voie
+    // tout de suite où on en est et que la zone se devine « grattable ».
     const cx = px(currentTs)
-    ctx.strokeStyle = 'rgba(245,166,35,0.7)'
-    ctx.lineWidth = 1
-    ctx.setLineDash([3, 3])
+    ctx.strokeStyle = T.amber
+    ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(cx, 0)
     ctx.lineTo(cx, H)
     ctx.stroke()
-    ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.moveTo(cx - 5, H); ctx.lineTo(cx + 5, H); ctx.lineTo(cx, H - 7); ctx.closePath()
+    ctx.fillStyle = T.amber
+    ctx.fill()
 
   }, [data, currentTs, activeParams])
 
@@ -124,12 +128,6 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
     document.addEventListener('mouseup', onUp)
   }
 
-  // Current values
-  const curFrame = useMemo(() => {
-    if (!data || !data.length) return null
-    return data.find(f => f.ts >= currentTs) ?? data[data.length - 1]
-  }, [data, currentTs])
-
   const toggle = (key) => setActive(prev => ({ ...prev, [key]: !prev[key] }))
 
   if (!frames || frames.length === 0) return null
@@ -137,12 +135,13 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
   return (
     <div style={{ background: C.panel, borderTop: `1px solid ${C.border}`, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
 
-      {/* Toggle buttons */}
+      {/* Séries à tracer — (23/09) pastilles SANS valeur : le bandeau d'instruments juste
+          au-dessus affiche déjà les 9 mesures de l'instant, en plus gros. Ici on choisit
+          ce qu'on trace, rien d'autre. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, color: T.etch, letterSpacing: '0.08em', marginRight: 2 }}>PLOT</span>
         {PARAMS.map(p => {
           const on = active[p.key]
-          const val = curFrame && curFrame[p.key] != null ? curFrame[p.key] * (p.mul || 1) : null
-          const displayVal = val != null ? (Math.abs(val) < 10 ? val.toFixed(1) : Math.round(val)) : '—'
           return (
             <button key={p.key} type="button" className="ak-focus" aria-pressed={on} onClick={() => toggle(p.key)} style={{
               display: 'flex', alignItems: 'center', gap: 6,
@@ -150,12 +149,9 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
               border: `1px solid ${on ? T.ink : C.border}`, background: T.card,
             }}>
               <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: T.radius.pill, background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : T.etch}` }} />
-              <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, color: on ? T.ink : T.etch, letterSpacing: '0.08em' }}>{p.label}</span>
-              {on && curFrame && (
-                <span style={{ fontFamily: C.mono, fontSize: 11, fontVariantNumeric: 'tabular-nums', color: C.text }}>
-                  {displayVal}<span style={{ fontSize: 10, color: T.graphite, marginLeft: 2 }}>{p.unit}</span>
-                </span>
-              )}
+              <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, color: on ? T.ink : T.etch, letterSpacing: '0.08em' }}>
+                {p.label}{p.unit ? ` ${p.unit}` : ''}
+              </span>
             </button>
           )
         })}
