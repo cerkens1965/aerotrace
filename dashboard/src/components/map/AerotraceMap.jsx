@@ -646,14 +646,19 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
         const icon = isFleet ? 34 : 34
-        const box  = isFleet ? Math.round(icon * 1.3) : icon   // (23/09) le disque entoure l'avion sans l'étouffer
+        const box  = isFleet ? Math.round(icon * 1.24) : icon   // (23/09) le lavis entoure l'avion sans l'étouffer
         o.sym.style.width = o.sym.style.height = `${box}px`
-        // DISQUE AMBRE pour les avions du CLUB (pas les propriétaires privés, qui gardent la
-        // silhouette encre nue). Filet encre 1 px : il détache le disque d'un fond clair ou
-        // d'une zone déjà ambrée (espaces aériens).
+        // (23/09, 4e passe — Christophe : « cette grosse tache manque d'élégance, et l'ambre
+        // totalement opaque n'est pas une option ») LAVIS, PAS APLAT. La charte tranche déjà
+        // la question pour tout ce qui se pose SUR la carte : les espaces aériens y sont
+        // définis comme « un lavis, jamais un solide », 14 % de remplissage et 55 % pour le
+        // bord. Le marqueur de la flotte suit la même grammaire — remplissage ambre à 18 %,
+        // filet ambre franc à 1 px, avion en ENCRE par-dessus. On garde ce qui marchait (une
+        // SURFACE, pas un simple contour : c'est elle qui accroche l'œil) sans masquer le
+        // terrain sous l'avion, et sans le pâté que faisait l'aplat.
         o.ring.style.display = isFleet ? 'block' : 'none'
-        o.ring.style.background = ringOn ? T.amber : 'transparent'
-        o.ring.style.borderColor = ringOn ? T.ink : fg
+        o.ring.style.background = ringOn ? 'rgba(245,166,35,0.18)' : 'transparent'
+        o.ring.style.borderColor = ringOn ? T.amber : fg
         o.ring.style.opacity = '1'
         o.img.style.width = o.img.style.height = `${icon}px`
         o.img.style.webkitMaskImage = o.img.style.maskImage = `url(${iconSrc})`

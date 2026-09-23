@@ -1243,6 +1243,20 @@ export default function LogbookPage({ role }) {
   const shownInstructors = useMemo(() => sortedInstructors.filter(p => matches(qCards, p.firstName, p.lastName, p.trigram, p.email, p.licence, 'fi instructor', ...(p.licences || []))), [sortedInstructors, qCards])
   const shownAircraft = useMemo(() => sortedAircraft.filter(a => matches(qCards, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? 'owner' : 'club')), [sortedAircraft, qCards])
 
+  // (23/09) Vols effectués sur un avion DU CLUB. Le rattachement passe par l'immat (callSign
+  // canonique ou registration héritée), comme partout ailleurs dans le carnet.
+  const fleetIdents = useMemo(() => {
+    const ids = new Set()
+    aircraft.filter(a => a.ownership !== 'owner').forEach(a => {
+      if (a.callSign) ids.add(a.callSign)
+      if (a.registration) ids.add(a.registration)
+    })
+    return ids
+  }, [aircraft])
+  const fleetFlights = useMemo(
+    () => flights.filter(f => fleetIdents.has(f.aircraftIdent)),
+    [flights, fleetIdents])
+
   const TABS = isPilot ? [
     { key: 'mine',        label: 'My flights', count: myFlights.length },
   ] : [
@@ -1258,20 +1272,6 @@ export default function LogbookPage({ role }) {
     { key: 'fleet',       label: club?.icao ? `Fleet ${club.icao}` : 'Club fleet', count: fleetFlights.length },
     ...(canDelete ? [{ key: 'archived', label: 'Archived', count: archivedFlights.length || undefined }] : []),
   ]
-
-  // (23/09) Vols effectués sur un avion DU CLUB. Le rattachement passe par l'immat (callSign
-  // canonique ou registration héritée), comme partout ailleurs dans le carnet.
-  const fleetIdents = useMemo(() => {
-    const ids = new Set()
-    aircraft.filter(a => a.ownership !== 'owner').forEach(a => {
-      if (a.callSign) ids.add(a.callSign)
-      if (a.registration) ids.add(a.registration)
-    })
-    return ids
-  }, [aircraft])
-  const fleetFlights = useMemo(
-    () => flights.filter(f => fleetIdents.has(f.aircraftIdent)),
-    [flights, fleetIdents])
 
   const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
 
