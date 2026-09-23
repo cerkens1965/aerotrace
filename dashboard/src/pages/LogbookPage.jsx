@@ -1123,7 +1123,7 @@ export default function LogbookPage({ role }) {
   // Onglet effectivement affiché : le pilote est cantonné à « My flights » ; un onglet
   // « My flights » sans fiche reliée (ou une clé inconnue venue de l'historique) retombe
   // sur All flights une fois les données chargées.
-  const TAB_KEYS = ['mine', 'pilots', 'instructors', 'aircraft', 'matrix']
+  const TAB_KEYS = ['mine', 'pilots', 'instructors', 'aircraft', 'matrix', 'fleet']
   const activeTab = isPilot ? 'mine'
     : !TAB_KEYS.includes(tab) ? 'matrix'
     : (tab === 'mine' && !me && !refsLoading) ? 'matrix'
@@ -1251,8 +1251,27 @@ export default function LogbookPage({ role }) {
     { key: 'instructors', label: 'Instructors', count: instructors.length },
     { key: 'aircraft',    label: 'Aircraft',    count: aircraft.length },
     { key: 'matrix',      label: 'All flights', count: pendingCount > 0 ? `${pendingCount} to assign` : undefined },
+    // (23/09, demande Christophe) Les vols de la FLOTTE DU CLUB seule — les appareils privés
+    // (ownership « owner ») en sont exclus. « All flights » mélange les deux, or l'exploitation
+    // du club et les avions des propriétaires ne se lisent pas ensemble : heures machine,
+    // facturation, entretien ne concernent que la flotte.
+    { key: 'fleet',       label: club?.icao ? `Fleet ${club.icao}` : 'Club fleet', count: fleetFlights.length },
     ...(canDelete ? [{ key: 'archived', label: 'Archived', count: archivedFlights.length || undefined }] : []),
   ]
+
+  // (23/09) Vols effectués sur un avion DU CLUB. Le rattachement passe par l'immat (callSign
+  // canonique ou registration héritée), comme partout ailleurs dans le carnet.
+  const fleetIdents = useMemo(() => {
+    const ids = new Set()
+    aircraft.filter(a => a.ownership !== 'owner').forEach(a => {
+      if (a.callSign) ids.add(a.callSign)
+      if (a.registration) ids.add(a.registration)
+    })
+    return ids
+  }, [aircraft])
+  const fleetFlights = useMemo(
+    () => flights.filter(f => fleetIdents.has(f.aircraftIdent)),
+    [flights, fleetIdents])
 
   const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
 
@@ -1351,8 +1370,8 @@ export default function LogbookPage({ role }) {
                 </div>
               </div>
             )}
-            {!isPilot && activeTab === 'matrix' && (
-              <FlightMatrix flights={flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} acOf={acOf} autoCount={autoCount} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} sel={sel} />
+            {!isPilot && (activeTab === 'matrix' || activeTab === 'fleet') && (
+              <FlightMatrix flights={activeTab === 'fleet' ? fleetFlights : flights} pilots={pilots} aircraft={aircraft} acLabel={acLabel} acOf={acOf} autoCount={autoCount} onReplay={handleReplay} onAssign={handleAssign} canDelete={canDelete} onDelete={handleDelete} sel={sel} />
             )}
             {canDelete && activeTab === 'archived' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1407,7 +1426,7 @@ export default function LogbookPage({ role }) {
         {canImport && !loading && activeTab !== 'archived' && <div style={{ marginTop: 24 }}><CsvImportCard clubId={clubId} /></div>}
 
         {bulkMsg && <Banner tone="ok" style={{ marginTop: 16 }} action={<Button size="sm" variant="ghost" onClick={() => setBulkMsg('')}>Dismiss</Button>}>{bulkMsg}</Banner>}
-        {!isPilot && activeTab === 'matrix' && selectedFlights.length > 0 && (
+        {!isPilot && (activeTab === 'matrix' || activeTab === 'fleet') && selectedFlights.length > 0 && (   // (23/09) la barre de sélection vaut aussi pour l'onglet flotte
           <div role="region" aria-label="Selection" style={{ position: 'sticky', bottom: 16, marginTop: 16, zIndex: 5, background: T.ink, borderRadius: T.radius.md,
                         padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
