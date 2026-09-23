@@ -559,7 +559,7 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
       {/* (23/09, 2e passe — Christophe : « par immat ce serait pas malin ») LES LIMITES
           APPARTIENNENT AU TYPE, pas à l'immatriculation : un club avec trois VL3 ne saisit
           rien trois fois. Elles se lisent ici, se modifient dans l'onglet Types. */}
-      <Section title="STRUCTURAL LIMITS">
+      <Section title="G ALERT THRESHOLDS">
         <div style={full}>
           <TypeLimitsReadOut code={form.typeDesig} types={types} />
         </div>
@@ -581,14 +581,14 @@ function TypeLimitsReadOut({ code, types }) {
   if (!L) return (
     <div style={{ ...fieldBase, padding: 10, background: T.paper }}>
       <div style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{code}</div>
-      <Hint>No limits recorded for this type yet. Enter them once, in the Types tab — they then
-        apply to every {code} of the club.</Hint>
+      <Hint>Nothing recorded for this type yet. Set it once, in the Types tab — it then applies
+        to every {code} of the club.</Hint>
     </div>
   )
   return (
     <div style={{ ...fieldBase, padding: 10, background: T.paper }}>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-        {[['LOAD +', num(L.gPos), 'g'], ['LOAD −', num(L.gNeg), 'g'],
+        {[['G ALERT +', num(L.gPos), 'g'], ['G ALERT −', num(L.gNeg), 'g'],
           ['VNE', num(L.vne), 'kt'], ['VNO', num(L.vno), 'kt'], ['VA', num(L.va), 'kt']].map(([l, v, u]) => (
           <div key={l}>
             <div style={labelStyle(T.etch)}>{l} {u.toUpperCase()}</div>
@@ -599,8 +599,8 @@ function TypeLimitsReadOut({ code, types }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
         <StatusDot tone={L.confirmed ? 'ok' : 'caution'} />
         <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite }}>
-          {L.confirmed ? 'Confirmed — flights of this type are checked against the load factors.'
-                       : 'To confirm — nothing is checked until these limits are confirmed.'}
+          {L.confirmed ? 'Confirmed — flights of this type are checked against these thresholds.'
+                       : 'To confirm — nothing is checked until these thresholds are confirmed.'}
         </span>
       </div>
       {L.source && <Hint>{L.source}</Hint>}
@@ -703,15 +703,27 @@ export default function AdminPage() {
       setNotice('ok', `Limits saved for ${f.code} — they apply to every ${f.code} of the club.`)
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
-  const openTypeForm = (code) => {
+  // (23/09) Pré-remplissage NATUREL : choisir un désignateur remplit le modèle depuis la base
+  // OACI, et pose les seuils d'alerte par défaut à ± 2 g (demande Christophe : ce sont des
+  // seuils de SURVEILLANCE, pas les limites structurelles de la cellule).
+  const G_DEFAULT_POS = '2', G_DEFAULT_NEG = '-2'
+  const typeDefaults = (code) => {
     const L = types[code] || {}
     const meta = findAircraftType(code)
     const str = v => (v == null || v === '' ? '' : String(v))
-    setTypeForm({ code, manufacturer: L.manufacturer || '', model: L.model || meta?.name || '',
-      gPos: str(L.gPos), gNeg: str(L.gNeg), vne: str(L.vne), vno: str(L.vno), va: str(L.va),
-      source: L.source || '', confirmed: !!L.confirmed })
-    setError('')
+    const known = !!types[code]
+    return {
+      code,
+      manufacturer: L.manufacturer || '',
+      model:        L.model || meta?.name || '',
+      gPos: known ? str(L.gPos) : G_DEFAULT_POS,
+      gNeg: known ? str(L.gNeg) : G_DEFAULT_NEG,
+      vne: str(L.vne), vno: str(L.vno), va: str(L.va),
+      source: L.source || '', confirmed: !!L.confirmed,
+    }
   }
+  const openTypeForm = (code) => { setTypeForm({ ...typeDefaults(code), isNew: false }); setError('') }
+  const openNewType  = () => { setTypeForm({ ...typeDefaults(''), isNew: true }); setError('') }
 
   // ── Accès (invitations) ───────────────────────────────────────────────────────
   const sendInvite = async () => {
@@ -753,7 +765,11 @@ export default function AdminPage() {
   const allTrigrams = pilots.map(p => p.trigram).filter(Boolean)
   // Types RÉELLEMENT présents dans la flotte : la base OACI en compte 205, les afficher tous
   // serait du bruit. On saisit les limites des types qu'on exploite.
-  const fleetTypes = [...new Set(aircraft.filter(a => !a.archived).map(a => a.typeDesig).filter(Boolean))].sort(compareText)
+  // Types de la flotte + types déjà fichés (on peut ficher un type avant d'avoir l'avion).
+  const fleetTypes = [...new Set([
+    ...aircraft.filter(a => !a.archived).map(a => a.typeDesig).filter(Boolean),
+    ...Object.keys(types),
+  ])].sort(compareText)
   const typesConfirmed = fleetTypes.filter(t => types[t]?.confirmed).length
 
   // ── Pilot CRUD ──────────────────────────────────────────────────────────────
@@ -1137,14 +1153,17 @@ export default function AdminPage() {
         {tab === 'TYPES' && (<>
           {metrics([
             { label: 'TYPES IN THE FLEET', value: fleetTypes.length,
-              status: { tone: 'off', text: 'Limits are shared by every aircraft of a type' } },
-            { label: 'LIMITS CONFIRMED', value: typesConfirmed,
+              status: { tone: 'off', text: 'Thresholds are shared by every aircraft of a type' } },
+            { label: 'THRESHOLDS CONFIRMED', value: typesConfirmed,
               status: typesConfirmed === fleetTypes.length && fleetTypes.length
                 ? { tone: 'ok', text: 'Load factors checked on every flight' }
-                : { tone: 'caution', text: 'Unconfirmed limits raise no alert' } },
-            { label: 'NO LIMITS YET', value: fleetTypes.filter(t => !types[t]).length,
+                : { tone: 'caution', text: 'Unconfirmed thresholds raise no alert' } },
+            { label: 'NOT SET YET', value: fleetTypes.filter(t => !types[t]).length,
               status: { tone: 'off', text: 'Nothing recorded for these types' } },
           ])}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <Button size="sm" variant="primary" icon="plus" onClick={openNewType}>New type</Button>
+          </div>
           <DataTable loading={loading} rows={fleetTypes.map(code => ({ id: code, code }))}
             columns={[
               { key: 'code', label: 'TYPE', render: r => (
@@ -1154,14 +1173,14 @@ export default function AdminPage() {
                 </div>) },
               { key: 'fleet', label: 'IN THE FLEET', render: r => (
                 <span style={monoStyle(13, T.graphite)}>{activeAc.filter(a => a.typeDesig === r.code).map(a => a.callSign || a.registration).join(' · ') || '—'}</span>) },
-              { key: 'g', label: 'LOAD FACTORS', render: r => {
+              { key: 'g', label: 'G ALERT + / −', render: r => {
                 const L = types[r.code]
                 return <span style={monoStyle(14, T.ink)}>{L && (L.gPos != null || L.gNeg != null)
                   ? `${L.gPos ?? '—'} / ${L.gNeg ?? '—'} g` : '—'}</span> } },
               { key: 'v', label: 'VNE', render: r => <span style={monoStyle(14, T.ink)}>{types[r.code]?.vne != null ? `${types[r.code].vne} kt` : '—'}</span> },
               { key: 'st', label: 'STATUS', render: r => {
                 const L = types[r.code]
-                if (!L || (L.gPos == null && L.gNeg == null)) return <StatusDot tone="off" label="NO LIMITS" />
+                if (!L || (L.gPos == null && L.gNeg == null)) return <StatusDot tone="off" label="NOT SET" />
                 return L.confirmed ? <StatusDot tone="ok" label="CONFIRMED" /> : <StatusDot tone="caution" label="TO CONFIRM" /> } },
               { key: 'act', label: '', render: r => (
                 <Actions><Button size="sm" variant="ghost" icon="edit" onClick={() => openTypeForm(r.code)}>Open</Button></Actions>) },
@@ -1253,7 +1272,7 @@ export default function AdminPage() {
       {/* (23/09) Tiroir des LIMITES PAR TYPE. Un seul écran de saisie pour tout le parc d'un
           type : modifier ici vaut pour chaque appareil de ce type. */}
       <Drawer open={!!typeForm} onClose={() => setTypeForm(null)}
-        title={typeForm ? `${typeForm.code} — structural limits` : ''}
+        title={typeForm ? `${typeForm.code || 'New type'} — G alert thresholds` : ''}
         subtitle={typeForm ? (findAircraftType(typeForm.code)?.name || undefined) : undefined}
         footer={typeForm ? (
           <>
@@ -1265,10 +1284,24 @@ export default function AdminPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             {error && <div style={{ gridColumn: '1 / -1' }}><Banner tone="caution">{error}</Banner></div>}
             <div style={{ gridColumn: '1 / -1' }}>
-              <Banner tone="info">These limits apply to <b>every {typeForm.code}</b> of the club.
-                Take each figure from the flight manual — a wrong value means either an alert that
-                never fires, or a flight wrongly flagged.</Banner>
+              <Banner tone="info">These thresholds apply to <b>every {typeForm.code || 'aircraft of this type'}</b>.
+                They are WATCH thresholds — the load factor above which a flight is worth a look —
+                not the airframe\u2019s structural limits.</Banner>
             </div>
+            {typeForm.isNew && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <Label>TYPE DESIGNATOR</Label>
+                <Select
+                  value={typeForm.code}
+                  onChange={v => setTypeForm(p => ({ ...p, ...typeDefaults(v), isNew: true }))}
+                  options={[{ value: '', label: 'Select an ICAO designator…' },
+                    ...[...AIRCRAFT_TYPES].sort((a, b) => compareText(a.code, b.code))
+                      .map(t => ({ value: t.code, label: `${t.code} — ${t.name}` }))]}
+                />
+                <Hint>The designator is the key: picking it fills the model, and the thresholds
+                  start at ± 2 g. One record per type, shared by every aircraft of that type.</Hint>
+              </div>
+            )}
             <div>
               <Label>MANUFACTURER</Label>
               <Input value={typeForm.manufacturer} onChange={v => setTypeForm(p => ({ ...p, manufacturer: v }))} placeholder="e.g. JMB Aircraft" />
@@ -1278,15 +1311,16 @@ export default function AdminPage() {
               <Input value={typeForm.model} onChange={v => setTypeForm(p => ({ ...p, model: v }))} placeholder="e.g. VL-3 Evolution" />
             </div>
             <div>
-              <Label>LOAD FACTOR + (G)</Label>
+              <Label>G ALERT + </Label>
               <Input value={typeForm.gPos} onChange={v => setTypeForm(p => ({ ...p, gPos: v, confirmed: false }))} placeholder="e.g. 4" />
             </div>
             <div>
-              <Label>LOAD FACTOR − (G)</Label>
+              <Label>G ALERT − </Label>
               <Input value={typeForm.gNeg} onChange={v => setTypeForm(p => ({ ...p, gNeg: v, confirmed: false }))} placeholder="e.g. -2" />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <Hint>Load factors are the only limits that raise an alert on a flight.</Hint>
+              <Hint>The only thresholds that raise an alert. Default ± 2 g — a flight going beyond is
+                flagged and its points are marked on the track.</Hint>
             </div>
             <div><Label>VNE (KT)</Label><Input value={typeForm.vne} onChange={v => setTypeForm(p => ({ ...p, vne: v }))} placeholder="—" /></div>
             <div><Label>VNO (KT)</Label><Input value={typeForm.vno} onChange={v => setTypeForm(p => ({ ...p, vno: v }))} placeholder="—" /></div>
@@ -1298,7 +1332,7 @@ export default function AdminPage() {
             <div style={{ gridColumn: '1 / -1' }}>
               <Label>SOURCE</Label>
               <Input value={typeForm.source} onChange={v => setTypeForm(p => ({ ...p, source: v, confirmed: false }))}
-                placeholder="Flight manual, revision and page" />
+                placeholder="Where these figures come from" />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <Label>CONFIRMED</Label>
@@ -1307,7 +1341,7 @@ export default function AdminPage() {
                 <Toggle active={!!typeForm.confirmed} onClick={() => setTypeForm(p => ({ ...p, confirmed: true }))}>Confirmed</Toggle>
               </div>
               <Hint>{typeForm.confirmed
-                ? `Flights of every ${typeForm.code} are checked against these load factors.`
+                ? `Flights of every ${typeForm.code} are checked against these thresholds.`
                 : 'Nothing is checked until this is confirmed. Editing a limit or its source clears the confirmation.'}</Hint>
             </div>
           </div>
