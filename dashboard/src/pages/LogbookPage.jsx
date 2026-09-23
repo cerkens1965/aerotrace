@@ -101,11 +101,25 @@ function Route({ f }) {
 // PLEINE à texte encre — un aplat se voit d'un coup d'œil dans une colonne de chiffres, là où
 // un simple point se noyait. L'approche du seuil (90 %) garde le point, sans aplat.
 const G_ALERT_DEFAULT = 2.0
+// Seuil applicable à un vol : celui du TYPE si sa fiche est confirmée, sinon le défaut.
+const gThresholdOf = f => Number(f?.study?.gLimits?.gPos) || G_ALERT_DEFAULT
+const gIsOver = (f) => { const v = f?.maxG; return !!v && (f?.study?.gState === 'over' || v > gThresholdOf(f)) }
+// Pastille d'alerte — ambre pleine, texte encre (pas de rouge : règle de la charte).
+function GAlert({ f }) {
+  if (!gIsOver(f)) return null
+  return (
+    <span title={`Above the ${gThresholdOf(f)} g alert threshold`} style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '2px 7px', borderRadius: T.radius.sm, background: T.amber,
+      fontFamily: T.mono, fontSize: 11, fontWeight: 600, color: T.ink, whiteSpace: 'nowrap',
+    }}>{`${f.maxG.toFixed(1)} G`}</span>
+  )
+}
 function GMax({ f, g }) {
   const v = g ?? f?.maxG
   if (!v) return DASH
-  const thr = Number(f?.study?.gLimits?.gPos) || G_ALERT_DEFAULT
-  const over = f?.study?.gState === 'over' || v > thr
+  const thr = gThresholdOf(f)
+  const over = gIsOver(f)
   const near = !over && v > thr * 0.9
   if (over) return (
     <span title={`Above the ${thr} g alert threshold`} style={{
@@ -659,6 +673,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     if (filterType)     list = list.filter(f => f.flightType === filterType)
     if (filterStatus === 'validated') list = list.filter(f => !f._pending)
     if (filterStatus === 'pending')   list = list.filter(f =>  f._pending)
+    if (filterStatus === 'galert')    list = list.filter(gIsOver)   // (23/09) les vols au-dessus du seuil de G
     if (q.trim()) list = list.filter(f => matches(q, acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig, getPilotName(pilots, f.pilotId),
       f.instructorId ? getPilotName(pilots, f.instructorId) : '', f.depIcao, f.arrIcao, FLIGHT_TYPES[f.flightType]?.label,
       formatDate(f.startTs), f._pending ? 'to assign' : 'validated'))
@@ -698,7 +713,16 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
       </span>
     ) },
     COL_DURATION,
-    { key: 'status', label: 'STATUS', render: f => <ValidBadge validated={!f._pending} /> },
+    // (23/09) L'ALERTE G vit ICI : le tableau « All flights » n'a pas de colonne G MAX (elle a
+    // été retirée en resserrant les colonnes), donc un vol au-dessus du seuil n'y apparaissait
+    // pas — alors que c'est LA liste qu'on regarde. Pas de colonne en plus : la pastille se
+    // range sous le badge de validation.
+    { key: 'status', label: 'STATUS', render: f => (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+        <ValidBadge validated={!f._pending} />
+        <GAlert f={f} />
+      </span>
+    ) },
     { key: 'actions', label: '', align: 'right', render: f => (
       <RowActions f={f} onReplay={onReplay} onAssign={onAssign} canDelete={canDelete} onDelete={onDelete} />
     ) },
@@ -710,7 +734,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     instr: sortOptions(instructors.map(p => ({ value: p.id, label: `${p.firstName || ''} ${p.lastName || ''}`.trim() }))),
     ac: sortOptions(aircraft.map(a => { const cs = a.callSign || a.registration; return { value: cs, label: `${cs} · ${a.typeDesig || a.type || '−'}` } })),
     types: sortOptions(Object.entries(FLIGHT_TYPES).map(([k, v]) => ({ value: k, label: v.label }))),
-    status: [{ value: '', label: 'Any status' }, { value: 'validated', label: 'Validated' }, { value: 'pending', label: `To assign (${pendingAll})` }],
+    status: [{ value: '', label: 'Any status' }, { value: 'validated', label: 'Validated' }, { value: 'pending', label: `To assign (${pendingAll})` }, { value: 'galert', label: 'G alert' }],
   }
 
   return (
