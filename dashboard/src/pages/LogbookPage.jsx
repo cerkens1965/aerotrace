@@ -678,6 +678,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
       f.instructorId ? getPilotName(pilots, f.instructorId) : '', f.depIcao, f.arrIcao, FLIGHT_TYPES[f.flightType]?.label,
       formatDate(f.startTs), f._pending ? 'to assign' : 'validated'))
     const key = f => sortKey === 'duration' ? (f.duration || 0)
+      : sortKey === 'g' ? (f.maxG || 0)                      // (23/09) tri par facteur de charge
       : sortKey === 'aircraft' ? acLabel(f.aircraftIdent)
       : sortKey === 'pilot' ? getPilotName(pilots, f.pilotId)
       : tsMillis(f.startTs)
@@ -693,7 +694,9 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     return out
   }, [filtered, groupBy, acLabel, pilots])
 
-  const setSort = k => { if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir(k === 'date' || k === 'duration' ? 'desc' : 'asc') } }
+  // (23/09) Les grandeurs numériques s'ouvrent en DESCENDANT : sur un tri par G, on veut le
+  // vol le plus chargé en tête, pas le plus calme.
+  const setSort = k => { if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir(k === 'date' || k === 'duration' || k === 'g' ? 'desc' : 'asc') } }
   const review = () => { setFilterStatus('pending'); setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0) }
 
   const pendingShown = filtered.filter(f => f._pending).map(f => f.id)
@@ -720,7 +723,10 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     { key: 'status', label: 'STATUS', render: f => (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
         <ValidBadge validated={!f._pending} />
-        <GAlert f={f} />
+        {/* la pastille au-dessus du seuil ; sinon la valeur en gris quand on trie sur le G,
+            faute de quoi le tri paraîtrait sans effet (le tableau n'a pas de colonne G MAX) */}
+        {gIsOver(f) ? <GAlert f={f} />
+          : (sortKey === 'g' && f.maxG ? <span style={{ ...monoStyle(11, T.graphite) }}>{`${f.maxG.toFixed(1)} G`}</span> : null)}
       </span>
     ) },
     { key: 'actions', label: '', align: 'right', render: f => (
@@ -761,6 +767,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
               {toggle(sortKey === 'aircraft', () => setSort('aircraft'), 'AIRCRAFT')}
               {toggle(sortKey === 'pilot', () => setSort('pilot'), 'PILOT')}
               {toggle(sortKey === 'duration', () => setSort('duration'), 'DURATION')}
+              {toggle(sortKey === 'g', () => setSort('g'), 'G MAX')}
               <Toggle mono onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))} title="Reverse the order">{sortDir === 'asc' ? '↑' : '↓'}</Toggle>
             </div>
           </div>
