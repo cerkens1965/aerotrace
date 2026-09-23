@@ -54,7 +54,7 @@ The dashboard is a single SPA with three functional surfaces, gated by role from
 |------|-------|-------|---------|
 | LivePage | `/live` | all | Live map + SafeSky traffic + AIP airspace |
 | EnVolPage | `/en-vol` | instructor, admin | Fleet status from `/fdr_status/*` |
-| ReplayPage | `/replay/:flightId?` | all | Post-flight replay with 2D/3D map, charts, six-pack |
+| ReplayPage | `/replay/:flightId?` | all | Post-flight replay: 2D map, charts, six-pack (3D retired 23/09) |
 | LogbookPage | `/logbook` | instructor, admin | Flight CSV → pilot/aircraft assignment |
 | AdminPage | `/admin` | admin | CRUD for clubs/aircraft/pilots |
 
@@ -93,7 +93,12 @@ Two MapLibre maps with shared design but very different responsibilities:
 - `components/map/AerotraceMap.jsx` — LIVE. SafeSky polling, AIP airspaces (CTR/TMA/DANGER sliders + AIRPORTS), basemap switcher, traffic altitude filter.
 - `components/map/ReplayMap.jsx` — REPLAY. Frame-driven aircraft marker, ghost trace + colored played trace, 2D/3D cockpit view, terrain DEM with tile pre-caching, AIP panel mirroring LIVE minus traffic.
 
-The 2D/3D toggle is rendered in `ReplayPage.jsx` (overlaid on the map), **not** inside `ReplayMap.jsx`. Keep it that way.
+**3D access removed (23/09/2026, Christophe's call).** The cockpit view was of no practical use and will be
+redesigned as a proper module in a separate study. Only the ENTRY POINT is gone: `ReplayPage.jsx` no longer
+renders the 2D/3D toggle and no longer passes `is3D`, so `ReplayMap` keeps its default `is3D = false`.
+All 3D machinery (cockpit camera, terrain DEM, tile pre-caching, COCKPIT/FREE button, camera sliders) is
+already gated behind `is3D` and is therefore dormant — nothing extra loads. Do not re-add a toggle without
+asking; the replacement is a design decision, not a rollback.
 
 The aircraft marker is `/icons/VL3.svg` injected as an HTML `<img>` element wrapped in `maplibregl.Marker({ element })` — MapLibre's `map.loadImage()` does not support SVG via WebGL.
 

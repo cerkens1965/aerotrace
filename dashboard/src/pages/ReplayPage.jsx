@@ -166,7 +166,6 @@ export default function ReplayPage() {
   const [currentTs,    setCurrentTs]    = useState(0)
   const [playing,      setPlaying]      = useState(false)
   const [speed,        setSpeed]        = useState(1)
-  const [is3D,         setIs3D]         = useState(false)
   const animRef     = useRef(null)
   const lastTimeRef = useRef(null)
   const csvAbortRef = useRef(null)   // annule le fetch CSV précédent si le vol change
@@ -321,21 +320,11 @@ export default function ReplayPage() {
               <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
                 {/* MapLibre map */}
                 <div style={{ flex: 1, position: 'relative' }}>
-                  <ReplayMap frames={view.frames} currentFrame={currentFrame} is3D={is3D} isPlaying={playing} speed={speed} />
-
-                  {/* ── Bouton 2D / 3D ── */}
-                  <Button
-                    variant={is3D ? 'primary' : 'secondary'}
-                    size="sm"
-                    onClick={() => setIs3D(v => !v)}
-                    aria-pressed={is3D}
-                    style={{
-                      position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 20,
-                      fontFamily: T.mono, letterSpacing: '0.08em', padding: '0 16px', userSelect: 'none',
-                    }}
-                  >
-                    {is3D ? '3D' : '2D'}
-                  </Button>
+                  {/* (23/09, décision Christophe) VUE 3D RETIRÉE de Loop : la vue cockpit actuelle
+                      est sans intérêt à l'usage et sera reprise comme un module à part entière
+                      (étude séparée). Seul l'ACCÈS est supprimé — la machinerie 3D reste dans
+                      ReplayMap (is3D par défaut false), prête à être rebranchée ou remplacée. */}
+                  <ReplayMap frames={view.frames} currentFrame={currentFrame} isPlaying={playing} speed={speed} />
                 </div>
 
                 {/* Six-pack */}
