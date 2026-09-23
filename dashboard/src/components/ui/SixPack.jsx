@@ -12,14 +12,19 @@ import { T } from './tokens'
 // ombre portée et une bordure blanche de 2 px. Tout est repris sur les jetons :
 //   fond encre plat · filet 1 px rule-dark · aiguilles et repères blancs · graduations etch ·
 //   chiffres muted-dark · valeur lue en Geist Mono BLANC · ambre réservé au repère « avion ».
+// (23/09, 2e passe — Christophe : « fond noir sur fond noir, pas OK ») Les cadrans encre
+// étaient posés sur une colonne encre : deux surfaces sombres l'une sur l'autre, sans
+// séparation lisible. Les instruments passent sur fond BLANC, comme toutes les cartes du
+// dashboard ; l'encre redevient ce qu'elle doit être — la couleur des MARQUES (aiguilles,
+// horizon, repères), pas celle des fonds empilés.
 const C = {
-  face:   T.ink,          // fond de cadran — encre, à plat (les dégradés sont proscrits)
-  border: T.ruleDark,     // filet 1 px
-  mark:   T.white,        // aiguilles, horizon, repères majeurs
+  face:   T.card,         // fond de cadran — blanc, à plat (les dégradés sont proscrits)
+  border: T.rule,         // filet 1 px
+  mark:   T.ink,          // aiguilles, horizon, repères majeurs
   tick:   T.etch,         // graduations mineures
-  num:    T.mutedDark,    // chiffres de cadran
+  num:    T.graphite,     // chiffres de cadran
   own:    T.amber,        // repère « avion » (même convention que l'own-ship du radar AKview)
-  text:   T.white,        // valeur numérique
+  text:   T.ink,          // valeur numérique
   mono:   T.mono,
 }
 
@@ -70,11 +75,11 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
     const pitchOffset = pitch * 2
 
     // Sky
-    ctx.fillStyle = T.ruleDark   // ciel — gris foncé de la palette
+    ctx.fillStyle = T.rule    // ciel — gris clair de la palette
     ctx.fillRect(0, 0, size, cy + pitchOffset)
 
     // Ground
-    ctx.fillStyle = T.graphite   // sol — gris chaud, plus clair que le ciel : la ligne d'horizon blanche fait la séparation
+    ctx.fillStyle = T.etch    // sol — gris moyen : franchement distinct du ciel, l'horizon encre fait la séparation
     ctx.fillRect(0, cy + pitchOffset, size, size)
 
     // Horizon line

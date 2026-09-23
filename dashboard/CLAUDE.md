@@ -179,6 +179,12 @@ AirKi: connected flight recorder for light aviation and ultralight aircraft.
 6. All figures — altitudes, speeds, times, Hobbs, serials, registrations, table numerics —
    are Geist Mono, tabular.
 7. Text on dark panels is white or `#9A9A94`. No muted/alpha type on colour.
+7b. **Never stack an ink surface on an ink surface** (added 23/09/2026 after the six-pack
+    sat as a dark panel inside a dark column — "fond noir sur fond noir, pas OK").
+    Ink is the colour of MARKS and of map overlays, not a background to be layered.
+    Instruments, cards and side panels are white `#FFFFFF` on paper `#F4F2ED`, separated
+    by 1 px `#DDD9D2` rules. A dark panel is legitimate only ON the map, where it sits
+    over imagery, never over another dark panel.
 8. No shadows. Borders are always 1 px.
 9. AKT / AKV are technical designators: labels, serials, firmware, fleet tables.
    Customer-facing copy says AirKi Core and AirKi View.

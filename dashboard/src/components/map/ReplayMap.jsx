@@ -153,6 +153,58 @@ function addTraceLayers(map) {
       paint:  { 'line-color': T.amber, 'line-width': 4, 'line-opacity': 1 },
     })
   }
+  // (23/09, demande Christophe) POINTS DE FACTEUR DE CHARGE sur la trace.
+  // Pas de croix rouge : la charte n'admet pas le rouge, et l'ambre est déjà la couleur de la
+  // mise en garde. Le repère est donc une pastille ambre posée dans un disque encre — même
+  // grammaire que l'avion de la flotte sur le Live (anneau ambre), lisible sur fond clair
+  // comme sur satellite. Le chiffre du G s'affiche à côté du repère au-delà du zoom 10, pour
+  // ne pas charger la carte quand on voit le vol entier.
+  if (!map.getSource('g-events')) {
+    map.addSource('g-events', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    map.addLayer({ id: 'g-events-halo', type: 'circle', source: 'g-events',
+      paint: { 'circle-radius': 7, 'circle-color': T.ink, 'circle-opacity': 0.9 } })
+    map.addLayer({ id: 'g-events-dot', type: 'circle', source: 'g-events',
+      paint: { 'circle-radius': 4, 'circle-color': T.amber } })
+    map.addLayer({ id: 'g-events-label', type: 'symbol', source: 'g-events',
+      minzoom: 10,
+      layout: { 'text-field': ['get', 'label'], 'text-size': 11, 'text-offset': [0, -1.5],
+                'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'], 'text-allow-overlap': false },
+      paint:  { 'text-color': T.ink, 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } })
+  }
+}
+
+// (23/09) Points où le facteur de charge dépasse le seuil. Les dépassements durent plusieurs
+// secondes : on ne pose PAS un repère par ligne du CSV (on aurait un chapelet illisible), mais
+// un seul par épisode, AU PIC, les épisodes étant séparés d'au moins 10 s. Le seuil est
+// symétrique (|nz| > 2) : une poussée négative compte autant qu'une ressource.
+const G_EVENT_LIMIT = 2.0
+function _updateGEvents(map, frames) {
+  const src = map.getSource('g-events')
+  if (!src) return
+  const feats = []
+  let cur = null
+  for (const f of (frames || [])) {
+    const g = f.normAc
+    if (g == null || Number.isNaN(g)) continue
+    if (Math.abs(g) > G_EVENT_LIMIT) {
+      if (cur && f.ts - cur.lastTs <= 10000) {
+        cur.lastTs = f.ts
+        if (Math.abs(g) > Math.abs(cur.g)) { cur.g = g; cur.lon = f.lon; cur.lat = f.lat; cur.ts = f.ts }
+      } else {
+        if (cur) feats.push(cur)
+        cur = { g, lon: f.lon, lat: f.lat, ts: f.ts, lastTs: f.ts }
+      }
+    }
+  }
+  if (cur) feats.push(cur)
+  src.setData({
+    type: 'FeatureCollection',
+    features: feats.filter(e => e.lon != null && e.lat != null).map(e => ({
+      type: 'Feature',
+      properties: { label: `${e.g > 0 ? '+' : ''}${e.g.toFixed(1)} g` },
+      geometry: { type: 'Point', coordinates: [e.lon, e.lat] },
+    })),
+  })
 }
 
 function applyTerrain(map) {
@@ -347,6 +399,7 @@ export default function ReplayMap({
     const apply = () => {
       addTraceLayers(map)
       _updateGhostTrace(map, frames)
+      _updateGEvents(map, frames)
       if (is3D) {
         preCacheTiles(map, frames, 12)
       } else {
@@ -427,7 +480,7 @@ export default function ReplayMap({
       addTraceLayers(map)
       if (is3D) { applyTerrain(map); applyFog(map) }
       const f = framesRef.current
-      if (f?.length) _updateGhostTrace(map, f)
+      if (f?.length) { _updateGhostTrace(map, f); _updateGEvents(map, f) }
     })
   }, [activeAirports, is3D, cockpitMode])
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { getDoc, doc } from 'firebase/firestore'
 import { ref, getDownloadURL } from 'firebase/storage'
@@ -92,6 +92,51 @@ function Timeline({ frames, currentTs, playing, onPlayPause, speed, onSpeedChang
           {fmtTime(total)}<span style={{ color: T.graphite, marginLeft: 8 }}>{fmtUTC(startTs + total)}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Résumé du vol ────────────────────────────────────────────────────────────
+// (23/09, Christophe : « je voudrais voir affiché clairement V max, Alt max, G max et la durée »)
+// Quatre chiffres, lus une fois pour toutes sur la trace complète — ils ne dépendent pas de la
+// position de lecture, contrairement au bandeau d'instruments. Charte : libellé + unité en
+// capitales 10 px etch, valeur Geist Mono tabulaire, filet 1 px, aucune ombre.
+// Le G est le plus grand ÉCART à 1 g, signe conservé : un −1,5 g doit se lire « −1.5 » et non
+// « 1.5 » (c'est la poussée négative qui est dimensionnante sur une cellule entoilée).
+const G_MARK_LIMIT = 2.0   // seuil de marquage sur la trace (demande Christophe)
+
+function FlightSummary({ frames, flight }) {
+  const st = useMemo(() => {
+    if (!frames?.length) return null
+    let vmax = 0, amax = 0, gEx = 1
+    for (const f of frames) {
+      if (f.spd > vmax) vmax = f.spd
+      if (f.alt > amax) amax = f.alt
+      const g = f.normAc
+      if (g != null && !Number.isNaN(g) && Math.abs(g - 1) > Math.abs(gEx - 1)) gEx = g
+    }
+    const dur = flight?.duration || Math.round((frames[frames.length - 1].ts - frames[0].ts) / 1000)
+    return { vmax: Math.round(vmax), amax: Math.round(amax), g: gEx, dur }
+  }, [frames, flight])
+  if (!st) return null
+  const cell = { padding: '8px 10px', border: T.border, borderRadius: T.radius.sm, background: T.card }
+  const items = [
+    { l: 'GS MAX KT', v: String(st.vmax) },
+    { l: 'ALT MAX FT', v: String(st.amax) },
+    { l: 'G MAX',     v: st.g.toFixed(2), dot: Math.abs(st.g) > G_MARK_LIMIT ? T.amber : null },
+    { l: 'BLOCK',     v: formatDuration(st.dur) },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
+      {items.map(it => (
+        <div key={it.l} style={cell}>
+          <div style={labelStyle(T.etch)}>{it.l}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+            {it.dot && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill, background: it.dot, flexShrink: 0 }} />}
+            <span style={{ ...monoStyle(18, T.ink), fontWeight: 500, lineHeight: 1 }}>{it.v}</span>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -328,11 +373,12 @@ export default function ReplayPage() {
                 </div>
 
                 {/* Six-pack */}
-                {/* (23/09) Colonne des instruments : fond ENCRE et filet rule-dark, comme les
-                    panneaux de la carte — le six-pack ne flotte plus dans une boîte à lui. */}
-                <div style={{ width: 300, padding: '14px 12px', display: 'flex', alignItems: 'center',
-                  borderLeft: `1px solid ${T.ruleDark}`, background: T.ink }}>
-                  <SixPack frame={currentFrame} size={124} />
+                {/* (23/09) Colonne des instruments : surface BLANCHE, filet 1 px. Le six-pack ne
+                    flotte plus dans une boîte à lui, et on n'empile plus deux fonds sombres. */}
+                <div style={{ width: 300, padding: '14px 12px', display: 'flex', flexDirection: 'column',
+                  gap: 14, borderLeft: T.border, background: T.card, overflowY: 'auto' }}>
+                  <FlightSummary frames={view.frames} flight={selected} />
+                  <SixPack frame={currentFrame} size={118} />
                 </div>
               </div>
 
