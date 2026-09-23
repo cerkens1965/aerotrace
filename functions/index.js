@@ -328,7 +328,7 @@ async function resolveClubByAircraft(db, icao24, reg) {
   const m = byReg || byCall || byIcao
   return m ? { clubId: m.clubId || null, registration: m.registration || reg,
                ownership: m.ownership || 'club', ownerPilotId: m.ownerPilotId || '',
-               limits: m.limits || null } : null   // (2026-09-21) propriétaire · (23/09) limites structurelles
+               typeDesig: m.typeDesig || null } : null   // (2026-09-21) propriétaire · (23/09) type → limites
 }
 
 // PIN → pilote, uniquement si le match est unique dans le club (sinon admin).
@@ -378,7 +378,15 @@ async function normalizeFlightDoc(db, flightId, data) {
   // LA VITESSE N'EST PAS ÉVALUÉE (décision Christophe 23/09) : sans pitot, le CSV ne porte que
   // la vitesse SOL, qu'un vent arrière suffit à pousser au-delà de la Vne sans que la cellule
   // n'ait rien subi. Elle reste un relevé (avgSpd / maxSpd), pas une alerte.
-  const lim = resolved?.limits
+  // (23/09, 2e passe — décision Christophe) Les limites sont portées par le TYPE
+  // (`aircraftTypes/{désignateur OACI}`), pas par l'immatriculation : un club avec trois VL3
+  // ne les saisit qu'une fois. Un type sans fiche, ou dont la fiche n'est pas confirmée,
+  // n'arme rien.
+  let lim = null
+  if (resolved?.typeDesig) {
+    try { const ts = await db.doc(`aircraftTypes/${resolved.typeDesig}`).get()
+          if (ts.exists) lim = ts.data() } catch (e) { console.warn(`limits ${resolved.typeDesig}: ${e.message}`) }
+  }
   const armed = !!(lim && lim.confirmed === true)
   const gPos = armed && Number.isFinite(Number(lim.gPos)) ? Number(lim.gPos) : null
   const gNeg = armed && Number.isFinite(Number(lim.gNeg)) ? Number(lim.gNeg) : null
@@ -409,7 +417,7 @@ async function normalizeFlightDoc(db, flightId, data) {
       gMaxTs: stats.gMaxTs ?? null,
       gMinTs: stats.gMinTs ?? null,
       gState,                             // 'over' | 'near' | 'ok' | 'unknown' (limites non confirmées)
-      gLimits: armed ? { gPos, gNeg, source: lim.source || null } : null,
+      gLimits: armed ? { gPos, gNeg, type: resolved?.typeDesig || null, source: lim.source || null } : null,
       gEvents,
     } : null,
     aircraftType: data.aircraft_type || null,

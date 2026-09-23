@@ -65,6 +65,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Limites structurelles PAR TYPE (23/09) ────────────────────────────────
+    // Clé = désignateur OACI (VL3, FK9, SV4…). Collection GLOBALE : les limites d'un type
+    // ne dépendent pas du club qui l'exploite. Écriture réservée aux admins — c'est une
+    // donnée de sécurité, elle décide si un vol est signalé ou non.
+    match /aircraftTypes/{code} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     // ── Pilots ─────────────────────────────────────────────────────────────────
     match /pilots/{id} {
       allow read:  if isSignedIn();
