@@ -577,7 +577,9 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const dispLat = prevDr ? prevDr.dispLat : ac.latitude
       const dispLon = prevDr ? prevDr.dispLon : ac.longitude
       drRef.current[ac.id] = { lat: ac.latitude, lon: ac.longitude, gs: ac.ground_speed || 0,
-                               course: rot, turn: Number(ac.turn_rate) || 0, fixMs, dispLat, dispLon }
+                               course: rot, turn: Number(ac.turn_rate) || 0, fixMs, dispLat, dispLon,
+                               // (23/09) cap AFFICHÉ (lissé, déduit du déplacement réel à l'écran)
+                               dispBrg: prevDr ? prevDr.dispBrg : rot }
 
       let o = markersRef.current[ac.id]
       if (!o) {
@@ -665,16 +667,34 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
   }, [allTargets, fleetRole, fleetOwn, visible.traffic, activeBasemap])
 
   // (2026-08-11) DEAD RECKONING d'affichage (demande Christophe) : entre deux polls (5 s), chaque
-  // cible avance au cap/vitesse connus (tick 500 ms) ; quand la position réelle arrive, l'affichage
-  // CONVERGE vers elle (25 %/tick ≈ correction en ~1,5 s) au lieu de sauter. Gardes : pas
-  // d'anticipation sous 15 kt (jitter sol) ni au-delà de 30 s sans donnée (cible gelée).
+  // cible avance au cap/vitesse connus ; quand la position réelle arrive, l'affichage CONVERGE
+  // vers elle au lieu de sauter. Gardes : pas d'anticipation sous 15 kt (jitter sol) ni au-delà
+  // de 30 s sans donnée (cible gelée).
+  //
+  // (23/09, retour Christophe « les avions se déplacent en crabe, ce n'est pas fluide ») DEUX
+  // CORRECTIONS, qui expliquaient l'écart avec le viewer SafeSky :
+  //  1. CADENCE — la boucle tournait à 500 ms : 2 images par seconde, donc un déplacement en
+  //     escalier. Elle passe en requestAnimationFrame (≈60 Hz) avec un lissage exponentiel
+  //     piloté par le temps écoulé (constante de temps 1,2 s) : même vitesse de convergence
+  //     qu'avant, mais continue. Coupée automatiquement quand l'onglet passe en arrière-plan.
+  //  2. LE CRABE — l'icône était orientée au cap transmis, alors que la correction de position
+  //     (retour vers le vrai point quand le fix arrive) se fait dans une direction QUELCONQUE :
+  //     l'avion glissait de biais tout en pointant ailleurs. L'icône est maintenant orientée
+  //     sur son déplacement RÉELLEMENT AFFICHÉ, lissé — elle pointe donc toujours là où elle
+  //     va. Sous 15 kt (ou déplacement négligeable) on retombe sur le cap transmis, sinon le
+  //     bruit de position ferait tourner l'avion sur place au parking.
   useEffect(() => {
-    const t = setInterval(() => {
-      const now = Date.now()
-      Object.entries(drRef.current).forEach(([k, d]) => {
-        const o = markersRef.current[k]
+    let raf = 0, last = performance.now()
+    const TAU = 1200   // ms — constante de temps de convergence vers la position vraie
+    const tick = (now) => {
+      const dt = Math.min(now - last, 250); last = now
+      const k  = 1 - Math.exp(-dt / TAU)    // lissage indépendant de la cadence d'images
+      Object.entries(drRef.current).forEach(([key, d]) => {
+        const o = markersRef.current[key]
         if (!o) return
-        let age = (now - d.fixMs) / 1000
+        // l'âge se mesure sur l'horloge murale : fixMs est un timestamp epoch, alors que
+        // l'argument de requestAnimationFrame part du chargement de la page.
+        let age = (Date.now() - d.fixMs) / 1000
         if (age < 0) age = 0                                     // garde horloge client en avance
         let tgtLat = d.lat, tgtLon = d.lon
         if (d.gs > 15 && age < 60) {
@@ -691,12 +711,30 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
           tgtLat = d.lat + (dist * Math.cos(cr)) / 111320
           tgtLon = d.lon + (dist * Math.sin(cr)) / (111320 * Math.cos(d.lat * Math.PI / 180))
         }
-        d.dispLat += (tgtLat - d.dispLat) * 0.25
-        d.dispLon += (tgtLon - d.dispLon) * 0.25
+        const pLat = d.dispLat, pLon = d.dispLon
+        d.dispLat += (tgtLat - d.dispLat) * k
+        d.dispLon += (tgtLon - d.dispLon) * k
         o.marker.setLngLat([d.dispLon, d.dispLat])
+
+        // Orientation = direction du déplacement AFFICHÉ (fin du crabe)
+        const dLat = d.dispLat - pLat
+        const dLon = (d.dispLon - pLon) * Math.cos(d.dispLat * Math.PI / 180)
+        if (d.gs > 15 && (Math.abs(dLat) > 1e-9 || Math.abs(dLon) > 1e-9)) {
+          const brg = (Math.atan2(dLon, dLat) * 180 / Math.PI + 360) % 360
+          let diff = ((brg - d.dispBrg + 540) % 360) - 180        // plus court chemin angulaire
+          d.dispBrg = (d.dispBrg + diff * Math.min(1, dt / 250) + 360) % 360
+        } else if (d.course != null) {
+          let diff = ((d.course - d.dispBrg + 540) % 360) - 180
+          d.dispBrg = (d.dispBrg + diff * Math.min(1, dt / 400) + 360) % 360
+        }
+        if (o.img) o.img.style.transform = `rotate(${d.dispBrg.toFixed(1)}deg)`
       })
-    }, 500)
-    return () => clearInterval(t)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    const onVis = () => { last = performance.now() }               // retour d'onglet : pas de saut
+    document.addEventListener('visibilitychange', onVis)
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis) }
   }, [])
 
   // ── Habillage (22/09, Claude Design « Live ») : panneaux encre, bord 1 px #2C2C2C, rayon 6, aucune ombre.
