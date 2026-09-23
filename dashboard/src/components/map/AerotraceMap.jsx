@@ -6,6 +6,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
 import { T, labelStyle, monoStyle, Banner, Icon } from '../ui'
+import useBreakpoint from '../../hooks/useBreakpoint'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
@@ -336,11 +337,17 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
   const [activeAirports, setActiveAirports] = useState(['fixed'])
   const [altRange, setAltRange] = useState([0, ALT_MAX])
+  const { isCompact } = useBreakpoint()
+  // (23/09, chantier mobile) Sur téléphone et tablette, les calques démarrent REPLIÉS : la
+  // carte est ce qu'on vient voir, le panneau ne doit pas la couvrir d'entrée. Sur bureau on
+  // garde le choix mémorisé du pilote.
   const [panelOpen, setPanelOpen] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) return { layers: false, map: false }
     try { return { layers: localStorage.getItem('ak_live_layers') !== '0', map: false } } catch { return { layers: true, map: false } }
   })
-  useEffect(() => { try { localStorage.setItem('ak_live_layers', panelOpen.layers ? '1' : '0') } catch { /* ignore */ } }, [panelOpen.layers])
-  const [showLegend, setShowLegend] = useState(true)
+  useEffect(() => { if (isCompact) return   // (23/09) le repli mobile n'écrase pas la préférence bureau
+    try { localStorage.setItem('ak_live_layers', panelOpen.layers ? '1' : '0') } catch { /* ignore */ } }, [panelOpen.layers, isCompact])
+  const [showLegend, setShowLegend] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 1023px)').matches)   // (23/09) légende repliée sur écran compact
   // Réf. à jour des couches/trames : réappliquées après un changement de fond (setStyle recrée les couches).
   const layerStateRef = useRef({})
   useEffect(() => { layerStateRef.current = { visible, opacity } }, [visible, opacity])
@@ -779,7 +786,10 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
       {/* Haut, centre : bandeau FLEET (LivePage) + bannière trafic indisponible */}
-      <div style={{ position: 'absolute', top: 20, left: 252, right: 60, zIndex: 11, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', top: isCompact ? 8 : 20,
+        left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
+        marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
         {topCenter}
         {trafficDown && (
           <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
@@ -790,8 +800,15 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         )}
       </div>
 
-      {/* Haut, gauche : LAYERS */}
-      <div style={{ ...inkPanel, position: 'absolute', left: 20, top: 20, width: 212, zIndex: 10, maxHeight: 'calc(100% - 40px)', overflowY: 'auto' }}>
+      {/* Haut, gauche : LAYERS — (23/09, chantier mobile) sur écran compact le panneau se
+          réduit à son en-tête (replié par défaut, cf. panelOpen) et se colle au bord : 212 px
+          fixes à 20 px du bord mangeaient plus de la moitié d'un téléphone, par-dessus la
+          carte qu'on est venu regarder. Ouvert, il reste plafonné à 60 % de la hauteur pour
+          qu'on voie toujours où on est. */}
+      <div style={{ ...inkPanel, position: 'absolute',
+        left: isCompact ? 8 : 20, top: isCompact ? 8 : 20,
+        width: isCompact ? 178 : 212, zIndex: 10,
+        maxHeight: isCompact ? '60%' : 'calc(100% - 40px)', overflowY: 'auto' }}>
         <button type="button" className="ak-focus" onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))} aria-expanded={panelOpen.layers}
           title={panelOpen.layers ? 'Collapse layers' : 'Show layers'}
           style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
