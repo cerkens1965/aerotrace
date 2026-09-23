@@ -93,13 +93,31 @@ function Route({ f }) {
 }
 
 // G max : au-delà de 2.5 G, valeur en gras précédée d'un point ambre (statut, jamais du texte ambre ni rouge).
-function GMax({ g }) {
-  if (!g) return DASH
-  const high = g > 2.5
+// (23/09, Christophe : « on devrait voir une alerte si les G ont dépassé les 2 G »)
+// Le seuil vient du TYPE de l'avion quand la fiche est confirmée (study.gLimits, posé par la
+// fonction cloud), sinon du défaut convenu : 2 g. Il était codé en dur à 2,5 ici — donc un vol
+// à 2,3 g passait inaperçu alors que les seuils annoncent 2.
+// Pas de rouge (règle de la charte, cf. CLAUDE.md) : le dépassement prend une PASTILLE AMBRE
+// PLEINE à texte encre — un aplat se voit d'un coup d'œil dans une colonne de chiffres, là où
+// un simple point se noyait. L'approche du seuil (90 %) garde le point, sans aplat.
+const G_ALERT_DEFAULT = 2.0
+function GMax({ f, g }) {
+  const v = g ?? f?.maxG
+  if (!v) return DASH
+  const thr = Number(f?.study?.gLimits?.gPos) || G_ALERT_DEFAULT
+  const over = f?.study?.gState === 'over' || v > thr
+  const near = !over && v > thr * 0.9
+  if (over) return (
+    <span title={`Above the ${thr} g alert threshold`} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '2px 7px', borderRadius: T.radius.sm, background: T.amber,
+      fontFamily: T.mono, fontSize: 12, fontWeight: 600, color: T.ink, whiteSpace: 'nowrap',
+    }}>{`${v.toFixed(1)} G`}</span>
+  )
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: high ? 600 : 400, color: high ? T.ink : T.graphite }}>
-      {high && <Dot color={T.amber} />}
-      {`${g.toFixed(1)}G`}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: near ? T.ink : T.graphite }}>
+      {near && <Dot color={T.amber} />}
+      {`${v.toFixed(1)}G`}
     </span>
   )
 }
@@ -228,7 +246,7 @@ function FlightsByPeriod({ flights, columns: baseColumns }) {
 }
 const COL_TYPE     = { key: 'type', label: 'TYPE', render: f => <TypeBadge type={f.flightType} /> }
 const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
-const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax g={f.maxG} /> }
+const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax f={f} /> }
 const colAircraft  = acLabel => ({
   key: 'aircraft', label: 'AIRCRAFT', mono: true,
   render: f => <span title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</span>,
