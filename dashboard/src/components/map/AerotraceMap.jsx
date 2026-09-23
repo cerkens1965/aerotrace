@@ -557,7 +557,12 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       // (23/09, Christophe) La FLOTTE DU CLUB a sa couleur propre : AMBRE. Avant, elle était
       // peinte comme le trafic radio (encre sur fond clair) et ne se distinguait que par un
       // anneau — deux avions noirs côte à côte, on ne savait pas lequel était à nous.
-      const symClr     = isFleet ? T.amber : (!isSharer ? fg : SAFESKY_CLR)
+      // (23/09, 3e passe) La flotte se lit désormais comme un BADGE : silhouette ENCRE posée
+      // sur un DISQUE AMBRE PLEIN. L'avion ambre nu (2e passe) avait trop peu de contraste sur
+      // un fond clair, et un simple liseré ne suffisait pas — c'est la SURFACE qui accroche
+      // l'œil, pas le contour. Grammaire de la charte : l'ambre est l'accent (une surface),
+      // l'encre est la marque. Même logique que les repères de G sur la trace du Loop.
+      const symClr     = isFleet ? T.ink : (!isSharer ? fg : SAFESKY_CLR)
       // (23/09) L'ÉTIQUETTE reste dans la couleur du texte de la carte, même pour la flotte :
       // l'ambre sert à identifier l'AVION, pas à écrire. Une immat ambre au-dessus d'une
       // altitude noire n'avait aucune cohérence (et l'ambre n'est pas une couleur de texte).
@@ -594,7 +599,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         const sym = document.createElement('div')          // boîte du symbole (26 px, 40 px avec anneau flotte)
         sym.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;'
         const ring = document.createElement('div')
-        ring.style.cssText = 'position:absolute;inset:0;border-radius:50%;border-style:solid;border-width:1px;box-sizing:border-box;opacity:0.75;'   // (23/09) filet 1 px, discret — couleur posée plus bas selon le fond
+        ring.style.cssText = 'position:absolute;inset:0;border-radius:50%;border-style:solid;border-width:1px;box-sizing:border-box;'   // (23/09) disque/anneau — fond et couleur posés plus bas selon le rôle
         const img = document.createElement('div')          // icône par type, colorée par masque CSS
         img.style.cssText = 'transform-origin:center center;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;'
         sym.append(ring, img)
@@ -641,22 +646,19 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
         const icon = isFleet ? 34 : 34
-        const box  = ringOn ? Math.round(icon * 1.12) : icon   // (23/09) 1,35 → 1,18 → 1,06, puis 1,12 : l'icône a grandi, le liseré a besoin d'air
+        const box  = isFleet ? Math.round(icon * 1.3) : icon   // (23/09) le disque entoure l'avion sans l'étouffer
         o.sym.style.width = o.sym.style.height = `${box}px`
-        o.ring.style.display = ringOn ? 'block' : 'none'
-        // Anneau dans la couleur des marques du fond (encre sur carte claire, blanc sur carte
-        // sombre) : en ambre il se confondrait désormais avec l'avion, qui est ambre lui aussi.
-        o.ring.style.borderColor = fg
+        // DISQUE AMBRE pour les avions du CLUB (pas les propriétaires privés, qui gardent la
+        // silhouette encre nue). Filet encre 1 px : il détache le disque d'un fond clair ou
+        // d'une zone déjà ambrée (espaces aériens).
+        o.ring.style.display = isFleet ? 'block' : 'none'
+        o.ring.style.background = ringOn ? T.amber : 'transparent'
+        o.ring.style.borderColor = ringOn ? T.ink : fg
+        o.ring.style.opacity = '1'
         o.img.style.width = o.img.style.height = `${icon}px`
         o.img.style.webkitMaskImage = o.img.style.maskImage = `url(${iconSrc})`
         o.img.style.background = symClr
-        // (23/09, Christophe : « les icônes du club sont moins visibles que les autres »)
-        // L'ambre a moins de contraste que l'encre sur un fond clair : l'avion du club
-        // ressortait MOINS que le trafic, exactement l'inverse du but. On lui pose un LISERÉ
-        // dans la couleur des marques du fond (encre sur carte claire, blanc sur carte sombre),
-        // même remède que pour les traces du Loop : la couleur garde son sens, le liseré porte
-        // la lisibilité. Double ombre portée = contour dense, sans épaissir le dessin.
-        o.img.style.filter = isFleet ? `drop-shadow(0 0 1.5px ${fg}) drop-shadow(0 0 1px ${fg})` : 'none'
+        o.img.style.filter = 'none'   // (23/09) le liseré ne sert plus : le disque porte le contraste
         o.img.style.transform = `rotate(${rot}deg)`
         o.callEl.style.color = callClr; o.callEl.textContent = callTxt
         o.altEl.style.color  = altClr;  o.altEl.textContent  = altTxt

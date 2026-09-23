@@ -686,13 +686,27 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     return list
   }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, q, sortKey, sortDir, acLabel, acOf, pilots])
 
+  // (23/09, Christophe : « si la boule ne remonte pas dans le classement, je ne peux pas
+  // pointer le vol ») RÈGLE D'AFFICHAGE : UNE LIGNE DE GROUPE PORTE TOUJOURS LE PIRE ÉTAT DE
+  // SON CONTENU. Sans cela, trier par G en mode groupé ne servait à rien : le classement ne
+  // jouait qu'À L'INTÉRIEUR de groupes repliés, donc invisible. Trois conséquences :
+  //   · le groupe affiche le G le plus fort qu'il contient, et sa pastille s'il dépasse ;
+  //   · trier par G MAX ordonne aussi les GROUPES, du plus chargé au plus calme ;
+  //   · filtrer sur « G alert » ouvre les groupes d'office — on cherche les vols, pas les
+  //     dossiers qui les contiennent.
   const groups = useMemo(() => {
-    if (groupBy === 'none') return [{ key: 'all', title: null, rows: filtered }]
+    const withG = (g) => {
+      const gs = g.rows.map(f => f.maxG || 0)
+      return { ...g, gMax: gs.length ? Math.max(...gs) : 0, gOver: g.rows.filter(gIsOver).length }
+    }
+    if (groupBy === 'none') return [withG({ key: 'all', title: null, rows: filtered })]
     const label = f => groupBy === 'aircraft' ? acLabel(f.aircraftIdent) : groupBy === 'pilot' ? getPilotName(pilots, f.pilotId) : dayCaps(f.startTs)
     const out = []
     filtered.forEach(f => { const k = label(f); let g = out.find(x => x.key === k); if (!g) { g = { key: k, title: k, rows: [] }; out.push(g) } g.rows.push(f) })
-    return out
-  }, [filtered, groupBy, acLabel, pilots])
+    const res = out.map(withG)
+    if (sortKey === 'g') res.sort((a, b) => (sortDir === 'desc' ? b.gMax - a.gMax : a.gMax - b.gMax))
+    return res
+  }, [filtered, groupBy, acLabel, pilots, sortKey, sortDir])
 
   // (23/09) Les grandeurs numériques s'ouvrent en DESCENDANT : sur un tri par G, on veut le
   // vol le plus chargé en tête, pas le plus calme.
@@ -787,7 +801,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
         {groups.length === 0 && <DataTable columns={columns} rows={[]} empty={<EmptyState text="No flights match these filters." />} />}
         {groups.map(g => {
           // Groupé (jour / avion / pilote) : une LIGNE par groupe, dépliable. À plat ou pendant une recherche : tout ouvert.
-          const open = !g.title || !!q.trim() || openGroups.has(g.key)
+          const open = !g.title || !!q.trim() || filterStatus === 'galert' || openGroups.has(g.key)
           const pending = g.rows.filter(f => f._pending).length
           return (
             <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -800,6 +814,16 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
                   <span style={{ ...headingStyle(13), whiteSpace: 'nowrap' }}>{g.title}</span>
                   <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 18 }}>
                     {pending > 0 && <StatusDot tone="caution" text={`${pending} TO ASSIGN`} />}
+                    {g.gOver > 0 && (
+                      <span title={`${g.gOver} flight${g.gOver > 1 ? 's' : ''} above the G alert threshold`} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '2px 8px', borderRadius: T.radius.sm, background: T.amber,
+                        fontFamily: T.mono, fontSize: 11, fontWeight: 600, color: T.ink, whiteSpace: 'nowrap',
+                      }}>{`${g.gOver} G · ${g.gMax.toFixed(1)} MAX`}</span>
+                    )}
+                    {g.gOver === 0 && sortKey === 'g' && g.gMax > 0 && (
+                      <span style={{ ...monoStyle(12, T.graphite), whiteSpace: 'nowrap' }}>{`${g.gMax.toFixed(1)} G MAX`}</span>
+                    )}
                     <span style={{ ...monoStyle(12, T.graphite), minWidth: 84, textAlign: 'right' }}>{nFlights(g.rows.length)}</span>
                     <span style={{ ...monoStyle(14, T.ink), fontWeight: 500, minWidth: 64, textAlign: 'right' }}>{formatDuration(sumDuration(g.rows))}</span>
                   </span>
