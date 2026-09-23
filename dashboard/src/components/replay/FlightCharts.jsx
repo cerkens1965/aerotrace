@@ -44,11 +44,25 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
   const data = useMemo(() => subsampleFrames(frames || [], 1000), [frames])
   const activeParams = PARAMS.filter(p => active[p.key])
 
+  // (23/09, « en 30x cela saute ») Le graphique était redessiné à CHAQUE image de la lecture
+  // (60 Hz) : jusqu'à 8 séries × 2 tracés × 1000 points, sur un canvas désormais à la
+  // résolution réelle de l'écran. On plafonne à ~20 images/s — invisible à l'œil sur des
+  // courbes, six fois moins de travail — avec un dernier rendu différé pour que l'image finale
+  // soit toujours juste à l'arrêt.
+  const lastDrawRef = useRef(0)
+  const [redrawTick, setRedrawTick] = useState(0)   // force le rendu différé (un ref seul ne relance rien)
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !cssW || !data || data.length < 2 || activeParams.length === 0) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const since = nowMs - lastDrawRef.current
+    if (since < 50) {
+      const id = setTimeout(() => { lastDrawRef.current = 0; setRedrawTick(t => t + 1) }, 50 - since)
+      return () => clearTimeout(id)
+    }
+    lastDrawRef.current = nowMs
 
     const dpr = Math.min(window.devicePixelRatio || 1, 3)
     if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(height * dpr)) {
@@ -111,7 +125,7 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
     ctx.lineTo(cx, H)
     ctx.stroke()
 
-  }, [data, currentTs, activeParams, cssW, height])
+  }, [data, currentTs, activeParams, cssW, height, redrawTick])
 
   // Drag to seek
   const handleMouseDown = (e) => {

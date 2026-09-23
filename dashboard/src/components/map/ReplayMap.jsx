@@ -53,15 +53,11 @@ const AIRPORT_TYPES = [
   { id: 'sea',   label: 'Seaplane bases'              },
 ]
 
-// (22/09) mêmes couleurs de phase que la frise de la page Loop (charte AirKi : jamais de rouge).
-const PHASE_COLORS = {
-  GROUND:   '#ffffff',
-  CRUISE:   T.ok,
-  MANEUVER: T.info,
-  APPROACH: T.amber,
-  CRITICAL: T.ink,
-}
-const PHASE_LABELS = { CRUISE: 'Cruise', MANEUVER: 'Manoeuvre', APPROACH: 'Approach', CRITICAL: 'Critical' }
+// (23/09) Les tables PHASE_COLORS / PHASE_LABELS ont été retirées de la carte : la trace
+// parcourue est d'une seule couleur. La détection de phase (csvParser) est inopérante sur un
+// AKcore — « rpm < 800 » classe tout en GROUND faute de capteur moteur, et l'AGL est absent.
+// À reprendre si un jour une vraie détection de phase est écrite (altitude relative au terrain
+// de départ + vitesse), avec sa légende.
 
 // ─── HELPERS GÉOGRAPHIQUES ───────────────────────────────────────────────────
 
@@ -131,8 +127,8 @@ function addOpenAIPLayers(map, activeAirportTypes) {
 // Le liseré n'est pas décoratif : c'est lui qui garantit la lecture sur clair, sur satellite
 // et sur relief, sans introduire de couleur hors charte.
 //   · vol à venir  : traitillé ENCRE sur ruban blanc  → lisible sur sombre ET sur clair
-//   · vol parcouru : couleur de phase sur liseré ENCRE, sauf la phase CRITICAL (déjà encre)
-//                    qui reçoit un liseré BLANC — d'où un liseré choisi par segment.
+//   · vol parcouru : AMBRE sur liseré ENCRE — une seule couleur depuis le 23/09 (le code
+//                    couleur par phase de vol était inopérant, cf. la note sur la légende).
 function addTraceLayers(map) {
   const round = { 'line-join': 'round', 'line-cap': 'round' }
   if (!map.getSource('ghost-trace')) {
@@ -150,11 +146,11 @@ function addTraceLayers(map) {
     map.addSource('played-trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     map.addLayer({ id: 'played-trace-casing', type: 'line', source: 'played-trace',
       layout: round,
-      paint:  { 'line-color': ['get', 'casing'], 'line-width': 7, 'line-opacity': 0.9 },
+      paint:  { 'line-color': T.ink, 'line-width': 7, 'line-opacity': 0.9 },
     })
     map.addLayer({ id: 'played-trace', type: 'line', source: 'played-trace',
       layout: round,
-      paint:  { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 1 },
+      paint:  { 'line-color': T.amber, 'line-width': 4, 'line-opacity': 1 },
     })
   }
 }
@@ -286,6 +282,7 @@ export default function ReplayMap({
   // UI state
   const [cockpitMode,  setCockpitMode]  = useState(true)
   const [zoomOffset,   setZoomOffset]   = useState(1.0) // zoom visual offset (-2 wide → +3 close)
+  const lastTraceMs = useRef(0)   // (23/09) throttle de la trace parcourue pendant la lecture
   const [cockpitPitch, setCockpitPitch] = useState(72)  // degrees
   const [activeBasemap,  setActiveBasemap]  = useState('outdoor-v2')
   const [visible,        setVisible]        = useState({ ctr: true, tma: true, danger: true, airports: true })
@@ -305,6 +302,13 @@ export default function ReplayMap({
       pitch:     0,
       maxPitch:  85,
       antialias: true,
+      // (23/09, « en 30x cela saute ») RÉGLAGES DE CACHE — aucun n'était posé, on subissait
+      // les défauts. En lecture rapide la carte balaie tout le vol : avec le cache par défaut
+      // (dimensionné sur la fenêtre visible) les tuiles déjà vues sont évincées puis
+      // re-téléchargées à chaque passage → à-coups et clignotements.
+      maxTileCacheSize:    600,    // garde la route entière en mémoire après un 1er passage
+      refreshExpiredTiles: false,  // pas de revalidation HTTP pendant la lecture
+      fadeDuration:        0,      // pas de fondu d'apparition : en panoramique rapide il se voit comme un clignotement
     })
     mapObj.current = map
 
@@ -472,15 +476,12 @@ export default function ReplayMap({
     if (!is3D) {
       // Caméra suit l'avion quand replay en cours
       if (isPlaying) {
-        const frameInterval = 1000 / speed
-        const dur = Math.max(16, frameInterval * 0.75)
-        map.easeTo({
-          center:   [lon, lat],
-          pitch:    0,
-          bearing:  0,
-          duration: dur,
-          easing:   t => t,
-        })
+        // (23/09) CAUSE PRINCIPALE DES SAUTS : on lançait un easeTo à CHAQUE image (60 Hz)
+        // avec une durée calculée sur la vitesse de lecture (25 ms à 30x). Chaque nouvel
+        // easeTo annulait le précédent avant sa fin et repartait de la position en retard :
+        // la caméra ne rattrapait jamais l'avion et saccadait. La boucle de lecture produit
+        // déjà 60 positions/s — il suffit de POSER la caméra, sans seconde animation.
+        map.jumpTo({ center: [lon, lat], pitch: 0, bearing: 0 })
       }
       // Marker : toujours mis à jour (même en pause)
       if (markerRef.current) {
@@ -590,10 +591,20 @@ export default function ReplayMap({
     // ── Mise à jour sources GeoJSON (traces) ──────────────────────
     if (!frames || !map.isStyleLoaded()) return
 
-    // Ghost trace (futur, grisé)
-    _updateGhostTrace(map, frames)
+    // (23/09) La trace du vol à venir N'EST PLUS RECONSTRUITE ICI : elle représente le vol
+    // entier, donc elle ne change pas pendant la lecture. On la rebâtissait pourtant à chaque
+    // image — ré-échantillonnage de tout le vol à 3000 points, GeoJSON reconstruit et renvoyé
+    // au GPU 60 fois par seconde, pour un résultat identique. Elle est posée au chargement du
+    // vol et au changement de fond de carte, c'est tout.
 
-    // Played trace (passé, coloré par phase)
+    // Trace parcourue — (23/09) rafraîchie au plus 10 fois par seconde : elle s'allonge
+    // lentement, et chaque mise à jour relit tout le vol puis re-tessellise la ligne. À 60 Hz
+    // c'était le deuxième poste de saccade. Hors lecture (pause, déplacement du curseur) la
+    // mise à jour reste immédiate.
+    const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    if (isPlaying && nowMs - lastTraceMs.current < 100) return
+    lastTraceMs.current = nowMs
+
     const played = frames.filter(f => f.ts <= currentFrame.ts)
     const sub    = subsampleFrames(played, 2000)
     const features = []
@@ -605,11 +616,7 @@ export default function ReplayMap({
           if (coords.length >= 2)
             features.push({
               type: 'Feature',
-              properties: (() => {
-                const color = PHASE_COLORS[curPhase] ?? T.ok
-                // liseré opposé : encre sous une couleur claire, blanc sous l'encre
-                return { color, casing: color === T.ink ? '#ffffff' : T.ink }
-              })(),
+              properties: {},   // (23/09) plus de couleur par phase : la détection est inopérante sans capteur moteur ni AGL
               geometry: { type: 'LineString', coordinates: [...coords] },
             })
           coords = [[sub[i].lon, sub[i].lat]]
@@ -756,16 +763,13 @@ export default function ReplayMap({
           </div>
         )}
 
-        {/* Légende phases */}
-        <div style={{ background: T.ink, borderRadius: 6, padding: '10px 12px', border: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
-          <span style={labelStyle(T.mutedDark)}>FLIGHT PHASE</span>
-          {Object.entries(PHASE_COLORS).filter(([p]) => p !== 'GROUND').map(([phase, color]) => (
-            <div key={phase} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 16, height: 3, background: color, outline: color === T.ink ? `1px solid ${T.etch}` : 'none' }} />
-              <span style={{ fontFamily: T.sans, fontSize: 12, color: T.white }}>{PHASE_LABELS[phase]}</span>
-            </div>
-          ))}
-        </div>
+        {/* (23/09, Christophe) LÉGENDE DES PHASES SUPPRIMÉE — elle annonçait quatre couleurs
+            qu'on ne voyait jamais. Cause : la détection de phase (csvParser) classe GROUND dès
+            que « rpm < 800 », or un AKcore n'a pas de capteur moteur → rpm = 0 sur toute la
+            trace. Sans AGL non plus (le G3X ne le fournit pas), les autres phases ne peuvent
+            pas se déclencher. Le code couleur était donc mort : une seule teinte, non documentée.
+            La trace parcourue est désormais d'UNE couleur (ambre, comme l'avion sur le radar
+            AKview), ce qui la rend lisible sans rien prétendre sur la phase de vol. */}
       </div>
     </div>
   )
