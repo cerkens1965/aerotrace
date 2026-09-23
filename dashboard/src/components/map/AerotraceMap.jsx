@@ -554,7 +554,10 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const darkMap    = isDarkMap(activeBasemap)
       const fg         = darkMap ? T.white : T.ink
       // (22/09, Christophe) radio = quasi-noir sur fond clair (blanc sur fond sombre), plus grand : le gris etch se perdait.
-      const symClr     = isFleet || !isSharer ? fg : SAFESKY_CLR
+      // (23/09, Christophe) La FLOTTE DU CLUB a sa couleur propre : AMBRE. Avant, elle était
+      // peinte comme le trafic radio (encre sur fond clair) et ne se distinguait que par un
+      // anneau — deux avions noirs côte à côte, on ne savait pas lequel était à nous.
+      const symClr     = isFleet ? T.amber : (!isSharer ? fg : SAFESKY_CLR)
       const callClr    = symClr
       const altClr     = isFleet || !isSharer ? (darkMap ? T.mutedDark : T.graphite) : T.etch
       const iconSrc    = `/icons/${iconForBeacon(ac.beacon_type)}.svg`
@@ -627,11 +630,20 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       }
 
       // MAJ visuelle SEULEMENT si un attribut a changé (le src ne bouge pas → pas de reload SVG)
-      const sig = `${iconSrc}|${symClr}|${isFleet}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
+      // (23/09) L'ANNEAU ne marque plus « la flotte » mais LES AVIONS DU CLUB : un appareil
+      // privé (owner) porte la couleur flotte sans anneau. Et son diamètre est DÉRIVÉ de
+      // l'icône (× 1,35) au lieu d'être codé en dur : avant, 44 px d'anneau pour 28 px d'icône
+      // laissaient un large vide — un cercle de visée plutôt qu'un marqueur.
+      const ringOn = isFleet && !isOwner
+      const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
-        const box = isFleet ? 44 : 34, icon = isFleet ? 28 : 34
+        const icon = isFleet ? 30 : 34
+        const box  = ringOn ? Math.round(icon * 1.35) : icon
         o.sym.style.width = o.sym.style.height = `${box}px`
-        o.ring.style.display = isFleet ? 'block' : 'none'
+        o.ring.style.display = ringOn ? 'block' : 'none'
+        // Anneau dans la couleur des marques du fond (encre sur carte claire, blanc sur carte
+        // sombre) : en ambre il se confondrait désormais avec l'avion, qui est ambre lui aussi.
+        o.ring.style.borderColor = fg
         o.img.style.width = o.img.style.height = `${icon}px`
         o.img.style.webkitMaskImage = o.img.style.maskImage = `url(${iconSrc})`
         o.img.style.background = symClr
