@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aerotrace — Backend Architecture</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      background: #f0f2f8;
+      color: #0a0e1e;
+      padding: 40px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* PRINT */
+    @media print {
+      body { padding: 20px; background: white; }
+      .no-print { display: none; }
+      .card { break-inside: avoid; }
+      h1 { font-size: 22px; }
+    }
+
+    /* HEADER */
+    .header {
+      background: #0a0e1e;
+      color: #ffffff;
+      border-radius: 12px;
+      padding: 32px 36px;
+      margin-bottom: 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: 0; right: 0;
+      width: 200px; height: 200px;
+      background: radial-gradient(circle at 80% 20%, rgba(245,166,35,0.15), transparent 60%);
+    }
+    .header .tag {
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: #F5A623;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+    .header .subtitle {
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+    }
+    .header .date {
+      position: absolute;
+      top: 32px; right: 36px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    /* SECTION TITLES */
+    h2 {
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #F5A623;
+      margin: 36px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+    }
+    h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0a0e1e;
+      margin: 20px 0 8px;
+    }
+
+    /* CARDS */
+    .card {
+      background: rgba(255,255,255,0.97);
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+    .card p {
+      font-size: 12px;
+      line-height: 1.8;
+      color: rgba(10,14,30,0.75);
+    }
+    .card strong { color: #0a0e1e; }
+
+    /* GRID */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+    /* PHASE CARDS */
+    .phase {
+      background: rgba(255,255,255,0.97);
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .phase .badge {
+      display: inline-block;
+      font-size: 9px;
+      letter-spacing: 2px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+    .phase p { font-size: 11px; line-height: 1.7; color: rgba(10,14,30,0.7); }
+
+    .badge-preflight  { background: rgba(59,130,246,0.12); color: #3b82f6; }
+    .badge-flight     { background: rgba(34,197,94,0.12);  color: #16a34a; }
+    .badge-postflight { background: rgba(245,166,35,0.15); color: #b45309; }
+    .badge-sleep      { background: rgba(107,114,128,0.12);color: #6b7280; }
+
+    /* FLOW DIAGRAM */
+    .flow {
+      background: #0a0e1e;
+      border-radius: 10px;
+      padding: 24px 28px;
+      margin: 16px 0;
+    }
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .flow-row:last-child { margin-bottom: 0; }
+    .flow-box {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 10px;
+      color: #ffffff;
+      white-space: nowrap;
+    }
+    .flow-box.amber { border-color: rgba(245,166,35,0.4); color: #F5A623; }
+    .flow-box.green { border-color: rgba(34,197,94,0.4);  color: #4ade80; }
+    .flow-box.blue  { border-color: rgba(96,165,250,0.4); color: #93c5fd; }
+    .flow-arrow {
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .flow-label {
+      font-size: 9px;
+      color: rgba(255,255,255,0.3);
+      letter-spacing: 1px;
+    }
+
+    /* HARDWARE SPEC */
+    .hw-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .hw-table th {
+      text-align: left;
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: rgba(10,14,30,0.4);
+      padding: 6px 12px;
+      background: rgba(0,0,0,0.03);
+      border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .hw-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+      color: rgba(10,14,30,0.8);
+      line-height: 1.5;
+    }
+    .hw-table td:first-child { font-weight: 700; color: #0a0e1e; width: 30%; }
+
+    /* HIGHLIGHT BOX */
+    .highlight {
+      background: rgba(245,166,35,0.08);
+      border: 1px solid rgba(245,166,35,0.25);
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 11px;
+      line-height: 1.7;
+      color: rgba(10,14,30,0.8);
+    }
+    .highlight strong { color: #b45309; }
+
+    /* CHUNK DIAGRAM */
+    .chunk-row {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .chunk {
+      height: 22px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    /* FOOTER */
+    .footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      font-size: 9px;
+      color: rgba(10,14,30,0.3);
+      letter-spacing: 1px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ICON INLINE */
+    .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .no-print {
+      background: #0a0e1e;
+      color: #F5A623;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      cursor: pointer;
+      margin-bottom: 32px;
+      letter-spacing: 1px;
+    }
+    .no-print:hover { background: #1a2040; }
+  </style>
+</head>
+<body>
+
+<button class="no-print" onclick="window.print()">⬇ SAVE AS PDF — File → Print → Save as PDF</button>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="date">2026-05-03</div>
+  <div class="tag">Aerotrace · Technical Overview</div>
+  <h1>Backend Architecture</h1>
+  <div class="subtitle">ESP32 / SIM7600G · LTE · Firebase · SD Card Upload</div>
+</div>
+
+<!-- WHAT IS THIS -->
+<h2>What is Aerotrace?</h2>
+<div class="card">
+  <p>
+    <strong>Aerotrace</strong> is a flight school management system. A small electronic box (the FDR — Flight Data Recorder) is installed in each aircraft. It records GPS position, speed, altitude, heading, RPM, CO levels, and more — then sends this data over the mobile network (4G LTE) to a cloud database. Instructors can watch every aircraft in real time on a map, and replay any flight in full detail after landing.
+  </p>
+</div>
+
+<!-- HARDWARE -->
+<h2>The Hardware Box</h2>
+<div class="card">
+  <table class="hw-table">
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>LILYGO T-SIM7600G</td>
+        <td>Main computer + 4G LTE modem. Runs the firmware, connects to the cloud, sends data every 5 seconds.</td>
+      </tr>
+      <tr>
+        <td>SD Card</td>
+        <td>Local storage. The full flight log (1 data point per second) is written here during the flight as a CSV file.</td>
+      </tr>
+      <tr>
+        <td>LILYGO T-RGB 2.8"</td>
+        <td>Small touchscreen in the cockpit. Shows flight status, pilot info, and warnings. Connected via Bluetooth.</td>
+      </tr>
+      <tr>
+        <td>GPS + Sensors</td>
+        <td>Provides lat/lon, altitude, speed, heading. Additional sensors for RPM and CO (carbon monoxide).</td>
+      </tr>
+      <tr>
+        <td>SIM Card (Emnify)</td>
+        <td>4G LTE connectivity. Works across Europe on any carrier tower.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- FLIGHT PHASES -->
+<h2>The Four Operating Modes</h2>
+<div class="grid">
+  <div class="phase">
+    <div class="badge badge-preflight">MODE_PREFLIGHT</div>
+    <h3>Before Take-Off</h3>
+    <p>Box powers on. GPS acquires position. Pilot identifies themselves (PIN code, NFC card in future). System sends a "ready" status to the cloud every 5 seconds. Aircraft appears as <strong>grounded</strong> on the instructor map.</p>
+  </div>
+  <div class="phase">
+    <div class="badge badge-flight">MODE_FLIGHT</div>
+    <h3>In Flight</h3>
+    <p>Box sends position, speed, altitude, heading, RPM and CO every <strong>5 seconds</strong> via 4G LTE. All data is also saved locally to the SD card at <strong>1 point per second</strong> for full-resolution replay later. Aircraft appears as <strong>airborne</strong> on the map.</p>
+  </div>
+  <div class="phase">
+    <div class="badge badge-postflight">MODE_POSTFLIGHT</div>
+    <h3>After Landing ← NEW</h3>
+    <p>Aircraft is back on the ground. Box continues sending status. Then it reads the CSV flight log from the SD card and <strong>uploads it to the cloud</strong> automatically. Once done, the flight appears in the logbook for replay.</p>
+  </div>
+  <div class="phase">
+    <div class="badge badge-sleep">MODE_SLEEP</div>
+    <h3>Parked</h3>
+    <p>Upload complete. Box powers down most systems to save power. Aircraft disappears from the live map after a timeout.</p>
+  </div>
+</div>
+
+<!-- LIVE DATA FLOW -->
+<h2>Live Data Flow — Every 5 Seconds</h2>
+<div class="card">
+  <p style="margin-bottom:16px;">This is the "heartbeat" of the system — it already works and is the foundation for the live map.</p>
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-box amber">ESP32 + GPS sensors</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box">4G LTE network</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box green">Firestore /fdr_status/{icao24}</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-label" style="margin-left:0">Updated fields:</div>
+      <div class="flow-label">lat · lon · alt · speed · heading · RPM · CO · mode · pilot · timestamp</div>
+    </div>
+    <div class="flow-row" style="margin-top:8px;">
+      <div class="flow-box green">Firestore (cloud database)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box blue">Dashboard (real-time listener)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box blue">Live map + Fleet status</div>
+    </div>
+  </div>
+  <p><strong>icao24</strong> is the unique identifier of the aircraft (like a tail number in hex format, e.g. <code>3C6B3A</code>). It is the key in the database.</p>
+</div>
+
+<!-- SD CARD UPLOAD -->
+<h2>SD Card Upload — After Landing (To Build)</h2>
+
+<div class="card">
+  <p style="margin-bottom:12px;">
+    During the flight, the SD card stores <strong>1 data point per second</strong> — much higher resolution than the 5-second live feed. This is the full flight log used for replay, charts, and debriefing. After landing, it needs to go to the cloud.
+  </p>
+  <div class="highlight">
+    <strong>Why not just use the live 5-second data for replay?</strong><br>
+    The 5-second data is fine for a live map dot. But for smooth replay, charts, instrument simulation, and safety analysis, you need every second. A 2-hour flight = 7,200 data points. That detail only lives on the SD card.
+  </div>
+</div>
+
+<div class="card">
+  <h3>Upload Method: Resumable Chunked Upload</h3>
+  <p style="margin-bottom:14px;">
+    A 2-hour flight CSV file is roughly <strong>1.5 MB</strong>. Over 4G LTE in a rural airfield, the connection can be slow or briefly drop. A "resumable" upload solves this: the file is cut into small chunks, and if the connection drops, the upload resumes from where it stopped — no need to start over.
+  </p>
+
+  <div class="chunk-row">
+    <div class="chunk" style="width:90px; background:rgba(34,197,94,0.2); color:#16a34a; border:1px solid rgba(34,197,94,0.3);">CHUNK 1</div>
+    <div class="chunk" style="width:90px; background:rgba(34,197,94,0.2); color:#16a34a; border:1px solid rgba(34,197,94,0.3);">CHUNK 2</div>
+    <div class="chunk" style="width:90px; background:rgba(245,166,35,0.2); color:#b45309; border:1px solid rgba(245,166,35,0.3);">CHUNK 3</div>
+    <div class="chunk" style="width:40px; background:rgba(107,114,128,0.1); color:#9ca3af; border:1px solid rgba(107,114,128,0.2);">...</div>
+    <span style="font-size:10px; color:rgba(10,14,30,0.5); margin-left:8px;">← 128 KB each · retried on LTE drop</span>
+  </div>
+
+  <p style="margin-top:14px;">
+    Firebase Storage (Google's file hosting) supports this natively via its REST API. The ESP32 can call it directly using the same API key already used for the database — <strong>no extra server needed</strong>.
+  </p>
+</div>
+
+<!-- FULL POSTFLIGHT FLOW -->
+<h2>Full Post-Flight Upload Sequence</h2>
+<div class="flow" style="background:#0a0e1e;">
+  <div class="flow-row">
+    <div class="flow-box amber">1. Aircraft lands → MODE_POSTFLIGHT</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box">Continue 5s live status (grounded on map)</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box amber">2. Open CSV file on SD card</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box">3. Start resumable upload → Firebase Storage</div>
+    <div class="flow-label">flights/{icao24}_{timestamp}.csv</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box">4. Upload chunks of 128 KB (retry on failure)</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box green">5. Upload complete → write /flights/{id} in Firestore</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box green">6. Flight appears in Logbook + available for Replay</div>
+  </div>
+  <div class="flow-row" style="padding-left:20px;">
+    <div class="flow-arrow" style="transform:rotate(90deg);">→</div>
+    <div class="flow-box">7. MODE_SLEEP — box powers down</div>
+  </div>
+</div>
+
+<!-- DASHBOARD SIDE -->
+<h2>What the Dashboard Receives</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Live Map (EnVolPage)</h3>
+    <p>Shows all aircraft in real time. Each dot is updated every 5 seconds from the FDR. Colour indicates status: airborne, grounded, uploading. Instructors see <strong>all club aircraft at a glance</strong>.</p>
+  </div>
+  <div class="card">
+    <h3>Logbook (LogbookPage)</h3>
+    <p>Once the SD card upload is complete, the flight appears here automatically. Instructor can assign it to a pilot, verify duration and route, then open it in Replay.</p>
+  </div>
+  <div class="card">
+    <h3>Replay (ReplayPage)</h3>
+    <p>Full 1-second resolution playback. 2D/3D map, six-pack instruments (airspeed, altitude, attitude, heading, VSI, turn coordinator), colour-coded flight phase trail, charts.</p>
+  </div>
+  <div class="card">
+    <h3>Live Traffic (LivePage)</h3>
+    <p>Overlays nearby ATC traffic from SafeSky on the map alongside the club's own aircraft. Gives instructors situational awareness of the surrounding airspace.</p>
+  </div>
+</div>
+
+<!-- WHAT NEEDS TO BE BUILT -->
+<h2>Work Remaining (Backend)</h2>
+<div class="card">
+  <table class="hw-table">
+    <thead>
+      <tr><th>Item</th><th>Description</th><th>Where</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>SD upload firmware</td>
+        <td>Detect POSTFLIGHT → read CSV → chunked upload → write Firestore doc</td>
+        <td>fdr-firmware / ESP32</td>
+      </tr>
+      <tr>
+        <td>Storage security rules</td>
+        <td>Allow ESP32 to write to <code>flights/{icao24}_*.csv</code> only</td>
+        <td>Firebase Console</td>
+      </tr>
+      <tr>
+        <td>Firestore rules update</td>
+        <td>Allow ESP32 to write <code>/flights/{id}</code> after upload</td>
+        <td>firestore.rules</td>
+      </tr>
+      <tr>
+        <td>Upload status field</td>
+        <td>Add <code>uploadStatus</code> to <code>/fdr_status/</code> so dashboard shows progress</td>
+        <td>Firmware + Dashboard</td>
+      </tr>
+      <tr>
+        <td>Auto-detect FDR flights</td>
+        <td>Logbook distinguishes manual G3X uploads from automatic FDR uploads</td>
+        <td>LogbookPage + schema</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- KEY DECISIONS -->
+<h2>Key Design Decisions</h2>
+<div class="card">
+  <p style="margin-bottom:10px;"><span class="dot" style="background:#4ade80;"></span><strong>No extra server needed.</strong> The ESP32 talks directly to Firebase (database + file storage) using Google's public REST API. One less thing to maintain and pay for.</p>
+  <p style="margin-bottom:10px;"><span class="dot" style="background:#4ade80;"></span><strong>Resumable upload handles LTE drops.</strong> Rural airfields often have weak signal. Chunked upload means a 30-second signal drop doesn't restart a 10-minute file transfer.</p>
+  <p style="margin-bottom:10px;"><span class="dot" style="background:#4ade80;"></span><strong>SD card as truth, cloud as distribution.</strong> Even if the LTE connection fails completely, the full flight data is safe on the SD card. Upload can be retried next time the box powers on.</p>
+  <p><span class="dot" style="background:#F5A623;"></span><strong>Future: NFC pilot identification.</strong> Currently the pilot identifies by PIN code. A NFC card reader (PN532) is planned to make it one-tap identification.</p>
+</div>
+
+<div class="footer">
+  <span>AEROTRACE · CONFIDENTIAL</span>
+  <span>aerotrace-74217.web.app</span>
+  <span>v0.1 · 2026-05-03</span>
+</div>
+
+</body>
+</html>

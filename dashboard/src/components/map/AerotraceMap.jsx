@@ -822,11 +822,12 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 18 }}>
                         {AIRPORT_TYPES.map(t => {
                           const checked = activeAirports.includes(t.id)
+                          // (23/09) coche encre sur lavis, blanche sur encre
                           return (
                             <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
                               <input type="checkbox" className="ak-focus" checked={checked} onChange={() => toggleAirportType(t.id)}
                                 style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 14, height: 14, borderRadius: 2, cursor: 'pointer',
-                                         border: `1.5px solid ${checked ? PP.text : T.etch}`, background: checked ? PP.text : 'transparent' }} />   /* (23/09) coche encre sur lavis, blanche sur encre */
+                                         border: `1.5px solid ${checked ? PP.text : T.etch}`, background: checked ? PP.text : 'transparent' }} />
                               <span style={{ ...rowText(checked), fontSize: 11 }}>{t.label}</span>
                             </label>
                           )
@@ -882,7 +883,8 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
         marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
-        {topCenter}   /* (23/09) bandeau encre sur bureau, bandeau d'une ligne en lavis sous 1024 px (cf. LivePage) */
+        {/* (23/09) bandeau encre sur bureau, bandeau d'une ligne en lavis sous 1024 px (cf. LivePage) */}
+        {topCenter}
         {trafficDown && (
           <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
             <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
