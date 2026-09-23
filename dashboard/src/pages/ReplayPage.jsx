@@ -105,7 +105,7 @@ function Timeline({ frames, currentTs, playing, onPlayPause, speed, onSpeedChang
 // « 1.5 » (c'est la poussée négative qui est dimensionnante sur une cellule entoilée).
 const G_MARK_LIMIT = 2.0   // seuil de marquage sur la trace (demande Christophe)
 
-function FlightSummary({ frames, flight }) {
+function FlightSummary({ frames, flight, bad = 0 }) {
   const st = useMemo(() => {
     if (!frames?.length) return null
     // (23/09, correction) On affichait le plus grand ÉCART à 1 g sous l'étiquette « G MAX » :
@@ -135,6 +135,17 @@ function FlightSummary({ frames, flight }) {
   ]
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
+      {/* (23/09) Les points GPS aberrants sont écartés à la lecture du CSV — on le DIT, un vol
+          dont le récepteur décroche souvent doit se voir. */}
+      {bad > 0 && (
+        <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 7,
+          padding: '6px 10px', border: T.border, borderRadius: T.radius.sm, background: T.paper }}>
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill, background: T.amber, flexShrink: 0 }} />
+          <span style={{ fontFamily: T.sans, fontSize: 12, color: T.graphite }}>
+            {bad} GPS {bad > 1 ? 'fixes' : 'fix'} dropped
+          </span>
+        </div>
+      )}
       {items.map(it => (
         <div key={it.l} style={{ ...cell, gridColumn: it.l.includes('/') ? '1 / -1' : undefined }}>
           <div style={labelStyle(T.etch)}>{it.l}</div>
@@ -384,7 +395,7 @@ export default function ReplayPage() {
                     flotte plus dans une boîte à lui, et on n'empile plus deux fonds sombres. */}
                 <div style={{ width: 300, padding: '14px 12px', display: 'flex', flexDirection: 'column',
                   gap: 14, borderLeft: T.border, background: T.card, overflowY: 'auto' }}>
-                  <FlightSummary frames={view.frames} flight={selected} />
+                  <FlightSummary frames={view.frames} flight={selected} bad={parsed?.stats?.badFixes || 0} />
                   <SixPack frame={currentFrame} size={118} />
                 </div>
               </div>

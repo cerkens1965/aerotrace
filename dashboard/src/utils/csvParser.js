@@ -105,6 +105,7 @@ export function parseG3XCSV(content) {
   let minLat = Infinity, maxLat = -Infinity
   let minLon = Infinity, maxLon = -Infinity
   let maxAlt = -Infinity, maxSpd = -Infinity, maxG = -Infinity, maxRpm = -Infinity
+  let badFixes = 0, lastFix = null   // (23/09) rejet des points GPS aberrants
 
   for (let i = 3; i < lines.length; i++) {
     const parts = lines[i].split(',')
@@ -135,7 +136,26 @@ export function parseG3XCSV(content) {
 
     const lat = num('lat')
     const lon = num('lon')
-    if (lat === 0 && lon === 0) continue
+    // ── (23/09, Christophe : « parfois le GPS perd sa position ») REJET DES POINTS ABERRANTS ──
+    // Un vol belge se terminait par un trait droit jusqu'au golfe de Guinée : une trame dont
+    // la position est retombée à 0/0 (« null island »), le temps que le récepteur retrouve un
+    // point. Trois filtres, du plus sûr au plus fin :
+    //  1. position absente, hors domaine, ou 0/0 exact ;
+    //  2. SAUT IMPOSSIBLE : distance depuis le dernier point valide qui exigerait plus de
+    //     600 kt — au-delà, ce n'est pas un avion qui a bougé, c'est le fix qui a sauté ;
+    //  3. les trames rejetées sont COMPTÉES et remontées (`stats.badFixes`) : un vol dont le
+    //     GPS décroche souvent doit pouvoir se voir, pas se corriger en silence.
+    if (lat == null || lon == null || Number.isNaN(lat) || Number.isNaN(lon)) { badFixes++; continue }
+    if (lat === 0 && lon === 0) { badFixes++; continue }
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) { badFixes++; continue }
+    if (lastFix) {
+      const dtS = Math.max((ts - lastFix.ts) / 1000, 0.25)
+      const dLat = (lat - lastFix.lat) * 111320
+      const dLon = (lon - lastFix.lon) * 111320 * Math.cos(lat * Math.PI / 180)
+      const kt = Math.hypot(dLat, dLon) / dtS * 1.94384
+      if (kt > 600) { badFixes++; continue }
+    }
+    lastFix = { lat, lon, ts }
 
     const frame = {
       ts,
@@ -221,6 +241,7 @@ export function parseG3XCSV(content) {
     frames,
     stats: {
       frameCount: frames.length,
+      badFixes,        // (23/09) trames écartées : position absente, 0/0, hors domaine, ou saut > 600 kt
       duration,        // seconds
       durationHuman: `${Math.floor(duration/3600)}h${String(Math.floor((duration%3600)/60)).padStart(2,'0')}`,
       startTs: frames[0].ts,

@@ -241,6 +241,7 @@ function parseG3XStats(text) {
   let gMax = -Infinity, gMin = Infinity, gMaxTs = null, gMinTs = null
   const gPeaks = []
   let spdSum = 0, spdN = 0
+  let badFixes = 0, lastFix = null   // (23/09) points GPS écartés
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity
   let startPos = null, endPos = null
   for (let i = 3; i < lines.length; i++) {
@@ -255,8 +256,20 @@ function parseG3XStats(text) {
       const ofs = iOfst >= 0 ? parseUtcOffsetMin(parts[iOfst]) : null
       if (ofs !== null) ts -= ofs * 60000   // offset illisible → on garde tel quel
     }
+    // (23/09) MÊME REJET DES POINTS ABERRANTS que le lecteur du dashboard : un fix retombé
+    // à 0/0 (« null island ») ou un saut impossible faussait l'emprise du vol, donc la carte
+    // ET les terrains de départ/arrivée déduits de la 1re et de la dernière position.
     const lat = numAt(parts, iLat), lon = numAt(parts, iLon)
-    if (lat === 0 && lon === 0) continue
+    if (lat == null || lon == null) continue
+    if (lat === 0 && lon === 0) { badFixes++; continue }
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) { badFixes++; continue }
+    if (lastFix) {
+      const dtS = Math.max((ts - lastFix.ts) / 1000, 0.25)
+      const dLat = (lat - lastFix.lat) * 111320
+      const dLon = (lon - lastFix.lon) * 111320 * Math.cos(lat * Math.PI / 180)
+      if (Math.hypot(dLat, dLon) / dtS * 1.94384 > 600) { badFixes++; continue }
+    }
+    lastFix = { lat, lon, ts }
     if (startTs === null) startTs = ts
     endTs = ts
     // 1re / dernière position fixée → terrain de départ / d'arrivée (cf nearestIcao)
@@ -296,6 +309,7 @@ function parseG3XStats(text) {
     avgSpd: spdN ? Math.round(spdSum / spdN) : null,
     maxRpm: isFinite(maxRpm) ? Math.round(maxRpm) : null,
     bounds: isFinite(minLat) ? { minLat, maxLat, minLon, maxLon } : null,
+    badFixes,
     depIcao: nearestIcao(startPos),
     arrIcao: nearestIcao(endPos),
   }
@@ -416,7 +430,8 @@ async function normalizeFlightDoc(db, flightId, data) {
       gMin:   stats.gMin ?? null,
       gMaxTs: stats.gMaxTs ?? null,
       gMinTs: stats.gMinTs ?? null,
-      gState,                             // 'over' | 'near' | 'ok' | 'unknown' (limites non confirmées)
+      badFixes: stats.badFixes ?? 0,      // points GPS écartés (0/0, hors domaine, saut > 600 kt)
+      gState,                             // 'over' | 'near' | 'ok' | 'unknown' (seuils non confirmés)
       gLimits: armed ? { gPos, gNeg, type: resolved?.typeDesig || null, source: lim.source || null } : null,
       gEvents,
     } : null,
