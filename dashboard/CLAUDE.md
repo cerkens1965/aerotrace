@@ -186,6 +186,15 @@ AirKi: connected flight recorder for light aviation and ultralight aircraft.
     by 1 px `#DDD9D2` rules. A dark panel is legitimate only ON the map, where it sits
     over imagery, never over another dark panel.
 8. No shadows. Borders are always 1 px.
+8b. **Nothing opaque sits on a map** (generalised 23/09/2026, from the airspace rule).
+    Anything drawn over cartography — airspace, aircraft markers, event points, halos — is a
+    WASH: **14–18 % fill with a crisp 1 px edge**, never a solid. The map must stay readable
+    underneath; a filled disc reads as a blot and hides the terrain the pilot is looking at.
+    The colour carries the meaning, the edge carries the legibility. In force on the live map
+    (fleet aircraft: amber 18 % + 1 px amber edge + ink aircraft), on the Loop map (G event
+    markers) and on the AKview radar.
+    Corollary for traces over cartography: give them a CASING in the opposite value — the
+    colour alone does not survive a light basemap and a satellite one at once.
 9. AKT / AKV are technical designators: labels, serials, firmware, fleet tables.
    Customer-facing copy says AirKi Core and AirKi View.
 10. Loop is text only, Semibold, ink — never with the monogram, never coloured.
