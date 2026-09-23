@@ -51,6 +51,43 @@ function fmtMB(mb) {
   if (mb == null) return '—'
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`
 }
+// (23/09, demande Christophe) TOTAUX DE CONSOMMATION SUR LA SÉLECTION COURANTE — jour, mois,
+// année. Les cartes du haut donnent le total FLOTTE ; ici on somme les lignes RÉELLEMENT
+// affichées (recherche et filtres compris), pour répondre à « combien consomment ces
+// boîtiers-là ». Les trois périodes viennent telles quelles d'EMnify, par carte SIM
+// (lastDayMB / dataUsageMB / yearMB) : rien n'est recalculé ni extrapolé ici.
+// Le coût n'existe qu'au MOIS côté EMnify — on ne l'affiche donc pas au jour ni à l'année,
+// plutôt que d'inventer une répartition.
+function UsageTotals({ rows, total, meta }) {
+  const sum = (k) => rows.reduce((a, d) => a + (Number(d[k]) || 0), 0)
+  const day = sum('lastDayMB'), month = sum('dataUsageMB'), year = sum('yearMB')
+  const cost = rows.reduce((a, d) => a + (Number(d.dataCost) || 0), 0)
+  const cur = meta?.currency || 'EUR'
+  const dayLbl = meta?.lastDayDate ? `DAY · ${meta.lastDayDate.slice(8)}/${meta.lastDayDate.slice(5, 7)}` : 'DAY'
+  const items = [
+    { l: dayLbl, v: fmtMB(day) },
+    { l: `MONTH · ${(monthLabel(meta?.monthKey).split(' ')[0] || '').slice(0, 3).toUpperCase()}`, v: fmtMB(month), sub: `${cost.toFixed(2)} ${cur}` },
+    { l: `YEAR · ${meta?.year || ''}`.trim(), v: fmtMB(year) },
+  ]
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28, flexWrap: 'wrap',
+      padding: '12px 16px', border: T.border, borderTop: 'none', background: T.card }}>
+      <span style={{ ...labelStyle(T.etch), minWidth: 130 }}>
+        TOTAL · {rows.length} OF {total} UNITS
+      </span>
+      {items.map(it => (
+        <div key={it.l}>
+          <div style={labelStyle(T.etch)}>{it.l}</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 3 }}>
+            <span style={{ ...monoStyle(18, T.ink), fontWeight: 500 }}>{it.v}</span>
+            {it.sub && <span style={{ ...monoStyle(12, T.graphite) }}>{it.sub}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // fmtMB découpé en [valeur, unité] pour MetricCard.
 function mbParts(mb) {
   if (mb == null) return [null, null]
@@ -557,6 +594,7 @@ export default function FleetPage() {
             </div>
             <DataTable columns={columns} rows={shownRows} rowKey="id" onRowClick={openConfig}
               empty={<EmptyState text="No unit matches this filter." />} />
+            <UsageTotals rows={shownRows} total={devices.length} meta={emnify} />
             <span style={lab}>{pubLine}</span>
           </section>
         </>)}
