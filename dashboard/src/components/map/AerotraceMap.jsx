@@ -558,7 +558,10 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       // peinte comme le trafic radio (encre sur fond clair) et ne se distinguait que par un
       // anneau — deux avions noirs côte à côte, on ne savait pas lequel était à nous.
       const symClr     = isFleet ? T.amber : (!isSharer ? fg : SAFESKY_CLR)
-      const callClr    = symClr
+      // (23/09) L'ÉTIQUETTE reste dans la couleur du texte de la carte, même pour la flotte :
+      // l'ambre sert à identifier l'AVION, pas à écrire. Une immat ambre au-dessus d'une
+      // altitude noire n'avait aucune cohérence (et l'ambre n'est pas une couleur de texte).
+      const callClr    = isFleet ? fg : symClr
       const altClr     = isFleet || !isSharer ? (darkMap ? T.mutedDark : T.graphite) : T.etch
       const iconSrc    = `/icons/${iconForBeacon(ac.beacon_type)}.svg`
       const rot        = ac.course || 0
@@ -638,7 +641,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
         const icon = isFleet ? 30 : 34
-        const box  = ringOn ? Math.round(icon * 1.18) : icon   // (23/09) 1,35 → 1,18 : l'anneau serre l'avion au lieu de l'encercler
+        const box  = ringOn ? Math.round(icon * 1.06) : icon   // (23/09) 1,35 → 1,18 → 1,06 : l'anneau épouse l'icône
         o.sym.style.width = o.sym.style.height = `${box}px`
         o.ring.style.display = ringOn ? 'block' : 'none'
         // Anneau dans la couleur des marques du fond (encre sur carte claire, blanc sur carte
