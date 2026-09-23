@@ -28,6 +28,24 @@ const C = {
   mono:   T.mono,
 }
 
+// (23/09, Christophe : « j'ai toujours le sentiment d'un flou sur les textes ») MÊME BUG QUE
+// LE GRAPHIQUE DU LOOP : les six cadrans étaient dessinés dans un canvas de `size` pixels
+// BRUTS, puis affichés sur `size` pixels CSS. Sur un écran à densité 2 (tous les Mac récents),
+// chaque pixel dessiné est étiré sur quatre — d'où des chiffres et des graduations baveux.
+// On dimensionne désormais le canvas à size × densité, et on dessine en pixels CSS
+// (ctx.setTransform) : tout le code de tracé reste écrit en `size`, mais chaque trait tombe
+// sur un vrai pixel de l'écran.
+function hidpi(canvas, size) {
+  if (!canvas) return null
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  const dpr = Math.min(window.devicePixelRatio || 1, 3)
+  const px = Math.round(size * dpr)
+  if (canvas.width !== px || canvas.height !== px) { canvas.width = px; canvas.height = px }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return ctx
+}
+
 // ─── Canvas instrument base ───────────────────────────────────────────────────
 function Instrument({ label, size = 110, children }) {
   return (
@@ -55,7 +73,8 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size / 2, cy = size / 2, r = size / 2 - 2
 
     ctx.clearRect(0, 0, size, size)
@@ -125,7 +144,7 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
 
   }, [pitch, roll, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── Airspeed Indicator ───────────────────────────────────────────────────────
@@ -135,7 +154,8 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size/2, cy = size/2, r = size/2 - 4
 
     ctx.clearRect(0, 0, size, size)
@@ -196,7 +216,7 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
     ctx.fillText(`${Math.round(kmh)}km/h`, cx, cy + 22)
   }, [ias, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── Altimeter ────────────────────────────────────────────────────────────────
@@ -205,7 +225,8 @@ function Altimeter({ alt = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size/2, cy = size/2, r = size/2 - 4
 
     ctx.clearRect(0, 0, size, size)
@@ -267,7 +288,7 @@ function Altimeter({ alt = 0, size = 110 }) {
     ctx.fillText(`${Math.round(alt)}ft`, cx, cy + 22)
   }, [alt, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── VSI — Vertical Speed ─────────────────────────────────────────────────────
@@ -276,7 +297,8 @@ function VSI({ vspd = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size/2, cy = size/2, r = size/2 - 4
 
     ctx.clearRect(0, 0, size, size)
@@ -332,7 +354,7 @@ function VSI({ vspd = 0, size = 110 }) {
     ctx.fillText(`${vspd > 0 ? '+' : ''}${Math.round(vspd)}`, cx, cy + 22)
   }, [vspd, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── Heading Indicator ────────────────────────────────────────────────────────
@@ -341,7 +363,8 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size/2, cy = size/2, r = size/2 - 4
 
     ctx.clearRect(0, 0, size, size)
@@ -402,7 +425,7 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
     ctx.fillText(`${Math.round(hdg).toString().padStart(3,'0')}°`, cx, cy + 22)
   }, [hdg, trk, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── Turn Coordinator ─────────────────────────────────────────────────────────
@@ -411,7 +434,8 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const ctx = canvas.getContext('2d')
+    const ctx = hidpi(canvas, size)
+    if (!ctx) return
     const cx = size/2, cy = size/2, r = size/2 - 4
 
     ctx.clearRect(0, 0, size, size)
@@ -459,7 +483,7 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
 
   }, [roll, latAc, size])
 
-  return <canvas ref={canvasRef} width={size} height={size} style={{ borderRadius: '50%' }} />
+  return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
 
 // ─── Main SixPack component ───────────────────────────────────────────────────
