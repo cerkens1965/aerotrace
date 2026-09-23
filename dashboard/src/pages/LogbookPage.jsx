@@ -1276,8 +1276,14 @@ export default function LogbookPage({ role }) {
   const clubLine = [club?.name, club?.icao, new Date().getFullYear()].filter(Boolean).join(' · ')
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: T.paper, fontFamily: T.sans, color: T.ink }}>
-      <div style={{ padding: '28px 32px 48px', maxWidth: 1280, margin: '0 auto' }}>
+    // (23/09, Christophe : « si je descends de biais, le contenu part de biais ») Le conteneur
+    // n'était pas borné en largeur : dès qu'un élément dépassait (grilles à colonnes minimales,
+    // barres de filtres), il s'élargissait et le défilement devenait diagonal. In flight ne
+    // bougeait pas parce qu'il posait width:100%. On borne, et on interdit le débordement
+    // horizontal : un contenu trop large se replie, il ne fait plus glisser la page.
+    <div style={{ width: '100%', maxWidth: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden',
+      background: T.paper, fontFamily: T.sans, color: T.ink }}>
+      <div style={{ padding: 'clamp(14px, 3.5vw, 28px) clamp(12px, 4vw, 32px) 48px', maxWidth: 1280, margin: '0 auto' }}>
 
         <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

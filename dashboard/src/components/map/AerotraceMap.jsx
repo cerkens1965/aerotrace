@@ -882,7 +882,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
         marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
-        {!isCompact && topCenter}   /* (23/09) le bandeau encre masquait la carte et le zoom : la flotte vit dans l'onglet Fleet */
+        {topCenter}   /* (23/09) bandeau encre sur bureau, bandeau d'une ligne en lavis sous 1024 px (cf. LivePage) */
         {trafficDown && (
           <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
             <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import AerotraceMap from '../components/map/AerotraceMap'
 import useBreakpoint from '../hooks/useBreakpoint'
 import FleetStrip from '../components/map/FleetStrip'
+import FleetStripWash from '../components/map/FleetStripWash'
 import LiveInFlightPanel from '../components/map/LiveInFlightPanel'
 import useFleet from '../hooks/useFleet'
 import useOwnerNames from '../hooks/useOwnerNames'
@@ -39,7 +40,13 @@ export default function LivePage() {
         <AerotraceMap
           flyTo={focus ?? state?.flyTo ?? null}
           onTrafficState={setTrafficDown}
-          topCenter={clubId ? <FleetStrip {...fleetState} onLocate={locate} /> : null}
+          /* (23/09) Le bandeau de bureau est un panneau ENCRE sur deux lignes : sur téléphone
+             il masquait la carte et le zoom. Sous 1024 px on sert la version d'UNE ligne en
+             lavis prévue par le design — mêmes comptes, mêmes immats tapables. */
+          topCenter={!clubId ? null : isCompact
+            ? <FleetStripWash inFlight={fleetState.inFlight} onGround={fleetState.grounded}
+                noSignal={fleetState.unknown} onLocate={locate} />
+            : <FleetStrip {...fleetState} onLocate={locate} />}
           /* (23/09, Claude Design) Sous 1024 px le panneau latéral des vols n'est plus à côté
              de la carte : il devient l'onglet Fleet de la feuille. Même composant, même
              données — c'est sa place qui change, pas son contenu. */

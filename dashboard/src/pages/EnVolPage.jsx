@@ -242,8 +242,8 @@ export default function EnVolPage() {
   const grid = (min) => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`, gap: 12 })
 
   return (
-    <div style={{ width: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
-      <main style={{ padding: '28px 32px 48px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400 }}>
+    <div style={{ width: '100%', maxWidth: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto', overflowX: 'hidden' }}>
+      <main style={{ padding: 'clamp(14px, 3.5vw, 28px) clamp(12px, 4vw, 32px) 48px', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400 }}>
         <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <h1 style={{ ...headingStyle(28), margin: 0 }}>In flight</h1>

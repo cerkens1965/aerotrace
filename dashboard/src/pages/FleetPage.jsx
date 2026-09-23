@@ -498,8 +498,10 @@ export default function FleetPage() {
   const pubLine = `PUBLISHED NOW · FLEET CHANNEL AKC ${published.s3 ?? MISSING} / AKV ${published.atv_ws241 ?? MISSING} · DEV CHANNEL AKC ${published.s3dev ?? MISSING} / AKV ${published.atv_ws241dev ?? MISSING}`
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: T.paper, color: T.ink, fontFamily: T.sans }}>
-      <main style={{ maxWidth: 1400, padding: '28px 32px 48px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+    // (23/09) même correction que Logbook : conteneur borné, pas de défilement horizontal.
+    <div style={{ width: '100%', maxWidth: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden',
+      background: T.paper, color: T.ink, fontFamily: T.sans }}>
+      <main style={{ maxWidth: 1400, padding: 'clamp(14px, 3.5vw, 28px) clamp(12px, 4vw, 32px) 48px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         <header style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
           <div style={col(6)}>
             <span style={lab}>FIRMWARE · SIM DATA · WIFI</span>

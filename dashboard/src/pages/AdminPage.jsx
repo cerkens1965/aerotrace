@@ -1090,8 +1090,8 @@ export default function AdminPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ width: '100%', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
-      <main style={{ padding: '28px 32px 48px', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1320 }}>
+    <div style={{ width: '100%', maxWidth: '100%', overflowX: 'hidden', height: '100%', background: T.paper, fontFamily: T.sans, color: T.ink, overflowY: 'auto' }}>
+      <main style={{ padding: 'clamp(14px, 3.5vw, 28px) clamp(12px, 4vw, 32px) 48px', display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1320 }}>
         <header style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={lab}>{[club?.name, club?.icao].filter(Boolean).join(' · ').toUpperCase() || 'CLUB RECORDS'}</span>
           <h1 style={{ ...headingStyle(28), margin: 0 }}>Admin</h1>
