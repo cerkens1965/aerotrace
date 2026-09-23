@@ -1,0 +1,8 @@
+[{"maxAgeSeconds": 3600, "method": ["GET"], "origin": [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "https://aerotrace-74217.web.app",
+  "https://aerotrace-74217.firebaseapp.com",
+  "https://aerotrace-74217--airki-ga6j3gbt.web.app"
+]}]
