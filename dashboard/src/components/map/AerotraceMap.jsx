@@ -640,8 +640,8 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const ringOn = isFleet && !isOwner
       const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
-        const icon = isFleet ? 30 : 34
-        const box  = ringOn ? Math.round(icon * 1.06) : icon   // (23/09) 1,35 → 1,18 → 1,06 : l'anneau épouse l'icône
+        const icon = isFleet ? 34 : 34
+        const box  = ringOn ? Math.round(icon * 1.12) : icon   // (23/09) 1,35 → 1,18 → 1,06, puis 1,12 : l'icône a grandi, le liseré a besoin d'air
         o.sym.style.width = o.sym.style.height = `${box}px`
         o.ring.style.display = ringOn ? 'block' : 'none'
         // Anneau dans la couleur des marques du fond (encre sur carte claire, blanc sur carte
@@ -650,6 +650,13 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         o.img.style.width = o.img.style.height = `${icon}px`
         o.img.style.webkitMaskImage = o.img.style.maskImage = `url(${iconSrc})`
         o.img.style.background = symClr
+        // (23/09, Christophe : « les icônes du club sont moins visibles que les autres »)
+        // L'ambre a moins de contraste que l'encre sur un fond clair : l'avion du club
+        // ressortait MOINS que le trafic, exactement l'inverse du but. On lui pose un LISERÉ
+        // dans la couleur des marques du fond (encre sur carte claire, blanc sur carte sombre),
+        // même remède que pour les traces du Loop : la couleur garde son sens, le liseré porte
+        // la lisibilité. Double ombre portée = contour dense, sans épaissir le dessin.
+        o.img.style.filter = isFleet ? `drop-shadow(0 0 1.5px ${fg}) drop-shadow(0 0 1px ${fg})` : 'none'
         o.img.style.transform = `rotate(${rot}deg)`
         o.callEl.style.color = callClr; o.callEl.textContent = callTxt
         o.altEl.style.color  = altClr;  o.altEl.textContent  = altTxt
