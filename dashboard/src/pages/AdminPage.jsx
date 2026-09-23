@@ -49,6 +49,10 @@ const EMPTY_AIRCRAFT = {
   photoUrl: '', photoStoragePath: '',
   photoCredit: '', photoLink: '', photoSource: '',   // (2026-08-31) photo web auto (planespotters)
   photoZoom: 1, photoX: 50, photoY: 50,              // (21/09) cadrage de la photo (zoom 1–3, point visé en %)
+  // (23/09) LIMITES STRUCTURELLES — vides par défaut, JAMAIS de valeur pré-remplie : elles
+  // n'ont d'autorité que si elles viennent du manuel de vol de CET appareil.
+  limGPos: '', limGNeg: '', limVne: '', limVno: '', limVa: '',
+  limSource: '', limConfirmed: false,
 }
 
 // ─── Reusable form components (déclarés au niveau module : pas de remontage) ──
@@ -556,6 +560,58 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [] }) {
         )}
       </Section>
 
+      {/* (23/09, demande Christophe) LIMITES STRUCTURELLES — base par appareil.
+          Deux partis pris assumés :
+          · aucune valeur n'est pré-remplie ni héritée d'un « type » : l'autorité, c'est le
+            manuel de vol de CET avion (un même type varie selon la masse maxi et la version) ;
+          · rien n'est évalué tant que la case « confirmée » n'est pas cochée — une limite
+            saisie mais non confirmée s'affiche, et ne déclenche aucune alerte. */}
+      <Section title="STRUCTURAL LIMITS">
+        <div>
+          <Label>LOAD FACTOR + (g)</Label>
+          <Input value={form.limGPos} onChange={v => setForm(p => ({ ...p, limGPos: v, limConfirmed: false }))} placeholder="e.g. 4" />
+        </div>
+        <div>
+          <Label>LOAD FACTOR − (g)</Label>
+          <Input value={form.limGNeg} onChange={v => setForm(p => ({ ...p, limGNeg: v, limConfirmed: false }))} placeholder="e.g. -2" />
+        </div>
+        <div style={full}>
+          <Hint>Load factors are the only limits that raise an alert on a flight. Enter them as
+            written in the flight manual, negative value included.</Hint>
+        </div>
+        <div>
+          <Label>VNE (KT)</Label>
+          <Input value={form.limVne} onChange={v => setForm(p => ({ ...p, limVne: v }))} placeholder="—" />
+        </div>
+        <div>
+          <Label>VNO (KT)</Label>
+          <Input value={form.limVno} onChange={v => setForm(p => ({ ...p, limVno: v }))} placeholder="—" />
+        </div>
+        <div>
+          <Label>VA (KT)</Label>
+          <Input value={form.limVa} onChange={v => setForm(p => ({ ...p, limVa: v }))} placeholder="—" />
+        </div>
+        <div style={full}>
+          <Hint>Speeds are kept for reference only — no alert. An AKcore has no pitot: the
+            recording holds ground speed, which a tailwind alone can push past VNE.</Hint>
+        </div>
+        <div style={full}>
+          <Label>SOURCE</Label>
+          <Input value={form.limSource} onChange={v => setForm(p => ({ ...p, limSource: v, limConfirmed: false }))}
+            placeholder="Flight manual, revision and page" />
+        </div>
+        <div style={full}>
+          <Label>CONFIRMED</Label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Toggle active={!form.limConfirmed} onClick={() => setForm(p => ({ ...p, limConfirmed: false }))}>To confirm</Toggle>
+            <Toggle active={!!form.limConfirmed} onClick={() => setForm(p => ({ ...p, limConfirmed: true }))}>Confirmed</Toggle>
+          </div>
+          <Hint>{form.limConfirmed
+            ? 'Flights of this aircraft are checked against these load factors.'
+            : 'Nothing is checked until this is confirmed. Editing a limit or its source clears the confirmation.'}</Hint>
+        </div>
+      </Section>
+
       <Section title="PHOTO">
         <AircraftPhotoField form={form} setForm={setForm} />
       </Section>
@@ -757,7 +813,17 @@ export default function AdminPage() {
 
   // ── Aircraft CRUD ───────────────────────────────────────────────────────────
   const openNewAircraft  = () => { setEditId(null); setAircraftForm({ ...EMPTY_AIRCRAFT }); setError('') }
-  const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...EMPTY_AIRCRAFT, ...a }); setError('') }
+  const openEditAircraft = (a) => {
+    // (23/09) les limites sont stockées imbriquées (a.limits) mais saisies à plat dans le
+    // formulaire : sans cette remise à plat, rouvrir une fiche effacerait ses limites au Save.
+    const L = a.limits || {}
+    const str = v => (v == null || v === '' ? '' : String(v))
+    setEditId(a.id)
+    setAircraftForm({ ...EMPTY_AIRCRAFT, ...a,
+      limGPos: str(L.gPos), limGNeg: str(L.gNeg), limVne: str(L.vne), limVno: str(L.vno), limVa: str(L.va),
+      limSource: L.source || '', limConfirmed: !!L.confirmed })
+    setError('')
+  }
 
   const saveAircraft = async () => {
     if (!aircraftForm.callSign) return setError('Call sign required')
@@ -778,6 +844,17 @@ export default function AdminPage() {
         photoCredit:      aircraftForm.photoCredit || '',
         photoLink:        aircraftForm.photoLink   || '',
         photoSource:      aircraftForm.photoSource || '',
+        // (23/09) limites structurelles : champ vide → null (pas 0, qui serait une limite réelle)
+        limits: {
+          gPos:      aircraftForm.limGPos === '' ? null : Number(aircraftForm.limGPos),
+          gNeg:      aircraftForm.limGNeg === '' ? null : Number(aircraftForm.limGNeg),
+          vne:       aircraftForm.limVne  === '' ? null : Number(aircraftForm.limVne),
+          vno:       aircraftForm.limVno  === '' ? null : Number(aircraftForm.limVno),
+          va:        aircraftForm.limVa   === '' ? null : Number(aircraftForm.limVa),
+          source:    aircraftForm.limSource || '',
+          confirmed: !!aircraftForm.limConfirmed,
+          updatedAt: new Date().toISOString(),
+        },
         photoZoom:        Number(aircraftForm.photoZoom) || 1,
         photoX:           Number(aircraftForm.photoX ?? 50),
         photoY:           Number(aircraftForm.photoY ?? 50),

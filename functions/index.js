@@ -233,6 +233,14 @@ function parseG3XStats(text) {
   }
   let startTs = null, endTs = null
   let maxAlt = -Infinity, maxSpd = -Infinity, maxG = -Infinity, maxRpm = -Infinity
+  // (23/09) ÉTUDE DU VOL — le G était réduit à un unique |max|, ce qui perdait le signe : un
+  // −1,5 g (poussée négative, dimensionnante sur une cellule entoilée) ressortait comme « 1,5 ».
+  // On garde donc le max ET le min SIGNÉS, leur instant, et la liste horodatée des écarts
+  // notables (|nz − 1| > 0,8 g) : c'est elle qui permettra de POINTER les moments sur la trace.
+  // Les limites n'interviennent pas ici : elles sont propres à l'avion (cf. normalizeFlightDoc).
+  let gMax = -Infinity, gMin = Infinity, gMaxTs = null, gMinTs = null
+  const gPeaks = []
+  let spdSum = 0, spdN = 0
   let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity
   let startPos = null, endPos = null
   for (let i = 3; i < lines.length; i++) {
@@ -262,8 +270,14 @@ function parseG3XStats(text) {
     const ias = numAt(parts, iIas)
     const spd = ias != null ? ias : numAt(parts, iGs)
     if (spd != null && spd > maxSpd) maxSpd = spd
+    if (spd != null && spd > 30) { spdSum += spd; spdN++ }   // moyenne EN VOL (roulage exclu)
     const nz = numAt(parts, iNz)
-    if (nz != null && Math.abs(nz) > maxG) maxG = Math.abs(nz)
+    if (nz != null) {
+      if (Math.abs(nz) > maxG) maxG = Math.abs(nz)
+      if (nz > gMax) { gMax = nz; gMaxTs = ts }
+      if (nz < gMin) { gMin = nz; gMinTs = ts }
+      if (Math.abs(nz - 1) > 0.8 && gPeaks.length < 400) gPeaks.push({ t: ts, g: Math.round(nz * 100) / 100 })
+    }
     const rpm = numAt(parts, iRpm)
     if (rpm != null && rpm > maxRpm) maxRpm = rpm
     if (lat != null) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat }
@@ -276,6 +290,10 @@ function parseG3XStats(text) {
     maxAlt: isFinite(maxAlt) ? Math.round(maxAlt) : null,
     maxSpd: isFinite(maxSpd) ? Math.round(maxSpd) : null,
     maxG:   isFinite(maxG)   ? Math.round(maxG * 10) / 10 : null,
+    gMax:   isFinite(gMax)   ? Math.round(gMax * 100) / 100 : null,
+    gMin:   isFinite(gMin)   ? Math.round(gMin * 100) / 100 : null,
+    gMaxTs, gMinTs, gPeaks,
+    avgSpd: spdN ? Math.round(spdSum / spdN) : null,
     maxRpm: isFinite(maxRpm) ? Math.round(maxRpm) : null,
     bounds: isFinite(minLat) ? { minLat, maxLat, minLon, maxLon } : null,
     depIcao: nearestIcao(startPos),
@@ -309,7 +327,8 @@ async function resolveClubByAircraft(db, icao24, reg) {
   }
   const m = byReg || byCall || byIcao
   return m ? { clubId: m.clubId || null, registration: m.registration || reg,
-               ownership: m.ownership || 'club', ownerPilotId: m.ownerPilotId || '' } : null   // (2026-09-21) propriétaire
+               ownership: m.ownership || 'club', ownerPilotId: m.ownerPilotId || '',
+               limits: m.limits || null } : null   // (2026-09-21) propriétaire · (23/09) limites structurelles
 }
 
 // PIN → pilote, uniquement si le match est unique dans le club (sinon admin).
@@ -350,9 +369,49 @@ async function normalizeFlightDoc(db, flightId, data) {
   const ownerAc   = resolved?.ownership === 'owner' && resolved?.ownerPilotId ? resolved.ownerPilotId : null
   const ownerAuto = !!ownerAc && !instructor && (!pilot || pilot.id === ownerAc)
 
+  // ── (23/09, demande Christophe) ÉTUDE DU VOL : dépassements de facteur de charge ──
+  // GARDE-FOU VOULU : on n'évalue QUE des limites saisies pour CET avion et explicitement
+  // CONFIRMÉES (limits.confirmed), avec leur source. Une limite absente ou non confirmée ne
+  // déclenche rien — jamais de valeur par défaut, jamais de limite « de type » appliquée à
+  // l'aveugle : une valeur fausse ici, c'est soit une alerte qui ne part pas, soit un vol
+  // déclaré suspect à tort.
+  // LA VITESSE N'EST PAS ÉVALUÉE (décision Christophe 23/09) : sans pitot, le CSV ne porte que
+  // la vitesse SOL, qu'un vent arrière suffit à pousser au-delà de la Vne sans que la cellule
+  // n'ait rien subi. Elle reste un relevé (avgSpd / maxSpd), pas une alerte.
+  const lim = resolved?.limits
+  const armed = !!(lim && lim.confirmed === true)
+  const gPos = armed && Number.isFinite(Number(lim.gPos)) ? Number(lim.gPos) : null
+  const gNeg = armed && Number.isFinite(Number(lim.gNeg)) ? Number(lim.gNeg) : null
+  let gEvents = [], gState = armed ? 'ok' : 'unknown'
+  if (stats && (gPos != null || gNeg != null)) {
+    for (const pk of (stats.gPeaks || [])) {
+      const over = (gPos != null && pk.g > gPos) || (gNeg != null && pk.g < gNeg)
+      const near = !over && ((gPos != null && pk.g > gPos * 0.9) || (gNeg != null && pk.g < gNeg * 0.9))
+      if (over || near) gEvents.push({ t: pk.t, g: pk.g, level: over ? 'over' : 'near' })
+    }
+    // Les plus sévères d'abord, 20 au plus : de quoi pointer les moments sans gonfler la fiche.
+    gEvents.sort((a, b) => Math.abs(b.g - 1) - Math.abs(a.g - 1))
+    gEvents = gEvents.slice(0, 20)
+    gState = gEvents.some(e => e.level === 'over') ? 'over'
+           : gEvents.length ? 'near' : 'ok'
+  }
+
   const patch = {
     clubId,
     aircraftIdent,
+    // Étude du vol (relevés + dépassements G) — recalculée à chaque normalisation.
+    study: stats ? {
+      avgSpd: stats.avgSpd ?? null,       // vitesse SOL moyenne en vol (> 30 kt), relevé seul
+      maxSpd: stats.maxSpd ?? null,       // vitesse SOL max, relevé seul
+      maxAlt: stats.maxAlt ?? null,
+      gMax:   stats.gMax ?? null,         // signés : un −1,5 g ne doit pas se lire « 1,5 »
+      gMin:   stats.gMin ?? null,
+      gMaxTs: stats.gMaxTs ?? null,
+      gMinTs: stats.gMinTs ?? null,
+      gState,                             // 'over' | 'near' | 'ok' | 'unknown' (limites non confirmées)
+      gLimits: armed ? { gPos, gNeg, source: lim.source || null } : null,
+      gEvents,
+    } : null,
     aircraftType: data.aircraft_type || null,
     icao24: data.icao24 || null,
     fileName: (data.csvStoragePath || `${data.flight_id || flightId}.csv`).split('/').pop(),
