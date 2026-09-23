@@ -362,12 +362,17 @@ export default function FleetPage() {
     const days = seen ? (now - seen) / DAY_MS : Infinity
     const reg = regOf(dev), issues = []
     if (days >= STALE_DAYS) issues.push({ key: 'silent', text: seen ? `NOT SEEN ${Math.floor(days)} D` : 'NEVER SEEN', detail: seen ? `Last report ${dayUtc(seen)} · ${utc(seen)}${dev.wifiSsid ? `, on ${dev.wifiSsid}` : ''}.${dev.board === 'wrover' ? ' WROVER board, due to be retired.' : ''}` : 'No report received from this box yet.' })
-    if ((dev.otaState || '') === 'failed') issues.push({ key: 'failed', text: 'UPDATE FAILED', detail: `AKcore ${dev.fwVersion ?? MISSING} did not move to ${info.atcLatest ?? MISSING}. It will retry at the next WiFi.` })
+    if ((dev.otaState || '') === 'failed') issues.push({ key: 'failed', text: 'UPDATE FAILED', detail: `AKcore ${dev.fwVersion ?? MISSING} did not move to ${info.atcLatest ?? MISSING}. It does not retry on its own — start it again from the AKview.` })
     else if (!info.upToDate) {
       const parts = []
       if (!info.atcUpToDate) parts.push(`AKcore ${dev.fwVersion ?? MISSING} → ${info.atcLatest}`)
       if (dev.atvVersion != null && typeof info.atvLatest === 'number' && dev.atvVersion < info.atvLatest) parts.push(`AKview ${dev.atvVersion} → ${info.atvLatest}`)
-      issues.push({ key: 'update', routine: true, text: 'UPDATE AVAILABLE', detail: `${parts.join(' and ') || 'Behind its channel'}. Applies at the next WiFi.` })
+      // (23/09) LIBELLÉ CORRIGÉ — « applies at the next WiFi » laissait croire à une bascule
+      // automatique. Vérifié dans le firmware : le boîtier DÉTECTE la version au boot et pendant
+      // ses sessions WiFi, mais l'installation n'est armée que par le bouton Update de l'AKview
+      // (ou la console USB). Elle n'arrive donc jamais seule, et la flotte bascule au rythme des
+      // pilotes — ce que le dashboard doit dire, sinon on attend une mise à jour qui ne vient pas.
+      issues.push({ key: 'update', routine: true, text: 'UPDATE AVAILABLE', detail: `${parts.join(' and ') || 'Behind its channel'}. The pilot installs it from the AKview: Update.` })
     }
     if (!reg) issues.push({ key: 'unlinked', text: 'NO AIRCRAFT LINKED', detail: 'Reporting, but its flights cannot be credited to an aircraft.', action: 'Link' })
     const mbh = mbhOf(dev)
@@ -386,7 +391,7 @@ export default function FleetPage() {
   const isAlert = (d) => d._d.issues.some(i => !i.routine)
   const attention = diagRows.filter(isAlert)
   const ISSUE_GROUPS = [
-    { key: 'failed', label: 'UPDATE FAILED', hint: 'The update did not install. It retries at the next WiFi; if it keeps failing, the box needs a look.' },
+    { key: 'failed', label: 'UPDATE FAILED', hint: 'The update did not install, and it does not retry on its own. Start it again from the AKview; if it keeps failing, the box needs a look.' },
     { key: 'silent', label: `NOT SEEN FOR ${STALE_DAYS} DAYS OR MORE`, hint: 'No report received. Aircraft grounded, or the box has no known WiFi or 4G.' },
     { key: 'unlinked', label: 'NO AIRCRAFT LINKED', hint: 'Reporting, but its flights cannot be credited to an aircraft.' },
     { key: 'data', label: 'HIGH DATA USE', hint: `More than twice the fleet median MB per flight hour${medianMbh ? ` (${medianMbh.toFixed(1)})` : ''}.` },
@@ -583,7 +588,7 @@ export default function FleetPage() {
               </div>
             )}
             {pendingUpdate.length > 0 && (
-              <span style={labelStyle(T.mutedDark)}>{pendingUpdate.length} UNIT{pendingUpdate.length === 1 ? '' : 'S'} WAITING FOR AN UPDATE · APPLIED AT THE NEXT WIFI · NOT AN ISSUE</span>
+              <span style={labelStyle(T.mutedDark)}>{pendingUpdate.length} UNIT{pendingUpdate.length === 1 ? '' : 'S'} WAITING FOR AN UPDATE · INSTALLED BY THE PILOT FROM THE AKview · NOT AN ISSUE</span>
             )}
           </section>
 
