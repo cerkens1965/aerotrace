@@ -125,16 +125,20 @@ function FlightSummary({ frames, flight, bad = 0 }) {
     return { vmax: Math.round(vmax), amax: Math.round(amax), gMax, gMin, dur }
   }, [frames, flight])
   if (!st) return null
-  const cell = { padding: '8px 10px', border: T.border, borderRadius: T.radius.sm, background: T.card }
+  // (23/09) Grille 2 × 2 STRICTE — le bloc s'étalait sur trois rangées parce que la case des G
+  // prenait toute la largeur, laissant BLOCK seul sur sa ligne et de grands vides (Christophe :
+  // « les espaces libres sont trop généreux »). Valeur en 16 px et « / » resserré : « 2.40/0.47 »
+  // tient dans une demi-colonne.
+  const cell = { padding: '7px 9px', border: T.border, borderRadius: T.radius.sm, background: T.card, minWidth: 0 }
   const items = [
     { l: 'GS MAX KT', v: String(st.vmax) },
     { l: 'ALT MAX FT', v: String(st.amax) },
-    { l: 'G MAX / MIN', v: st.gMax == null ? '−−−' : `${st.gMax.toFixed(2)} / ${st.gMin.toFixed(2)}`,
+    { l: 'G MAX / MIN', v: st.gMax == null ? '−−−' : `${st.gMax.toFixed(2)}/${st.gMin.toFixed(2)}`,
       dot: (st.gMax != null && (Math.abs(st.gMax) > G_MARK_LIMIT || Math.abs(st.gMin) > G_MARK_LIMIT)) ? T.amber : null },
     { l: 'BLOCK',     v: formatDuration(st.dur) },
   ]
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, width: '100%' }}>
       {/* (23/09) Les points GPS aberrants sont écartés à la lecture du CSV — on le DIT, un vol
           dont le récepteur décroche souvent doit se voir. */}
       {bad > 0 && (
@@ -147,11 +151,12 @@ function FlightSummary({ frames, flight, bad = 0 }) {
         </div>
       )}
       {items.map(it => (
-        <div key={it.l} style={{ ...cell, gridColumn: it.l.includes('/') ? '1 / -1' : undefined }}>
+        <div key={it.l} style={cell}>
           <div style={labelStyle(T.etch)}>{it.l}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
             {it.dot && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill, background: it.dot, flexShrink: 0 }} />}
-            <span style={{ ...monoStyle(18, T.ink), fontWeight: 500, lineHeight: 1 }}>{it.v}</span>
+            <span style={{ ...monoStyle(it.l.includes('/') ? 15 : 18, T.ink), fontWeight: 500, lineHeight: 1,
+              whiteSpace: 'nowrap' }}>{it.v}</span>
           </div>
         </div>
       ))}

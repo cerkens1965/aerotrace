@@ -358,7 +358,19 @@ function VSI({ vspd = 0, size = 110 }) {
 }
 
 // ─── Heading Indicator ────────────────────────────────────────────────────────
-function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
+// (23/09, Christophe : « c'est la boussole qui doit tourner ») La rose était pilotée par
+// `hdg` — la colonne « Heading » du CSV, qui est NaN sur tous nos fichiers : un AKcore n'a pas
+// de magnétomètre, il ne mesure JAMAIS de cap magnétique. hdg tombait donc à 0, la rose restait
+// bloquée au nord, et la seule chose qui bougeait était le repère de route vert. C'est
+// l'inverse de ce qu'on attend d'un conservateur de cap.
+// On prend désormais la même référence que le marqueur de la carte : `bearing`, que le lecteur
+// CSV calcule (route GPS, ou cap corrigé si un vrai cap existe un jour) — le CLAUDE.md la
+// désigne déjà comme LA source de vérité, « ne pas re-dériver depuis frame.hdg ».
+// Le repère de route disparaît : tant qu'il n'y a pas de cap magnétique, route et cap sont la
+// même valeur, et le repère se superposerait au trait fixe.
+function HeadingIndicator({ hdg = 0, trk = 0, bearing = null, size = 110 }) {
+  const dir = (bearing != null && !Number.isNaN(bearing)) ? bearing
+            : ((trk !== null && trk !== 0) ? trk : hdg)
   const canvasRef = useRef(null)
   useEffect(() => {
     const canvas = canvasRef.current
@@ -375,7 +387,7 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
 
     // Rotate compass rose
     ctx.translate(cx, cy)
-    ctx.rotate((-hdg * Math.PI) / 180)
+    ctx.rotate((-dir * Math.PI) / 180)
     ctx.translate(-cx, -cy)
 
     const cardinals = ['N','E','S','W']
@@ -399,15 +411,8 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
       }
     }
 
-    // Track bug (green)
-    const trkAngle = ((trk - hdg) * Math.PI) / 180 - Math.PI/2
-    ctx.strokeStyle = T.ok   // repère de route suivie : le vert reste réservé aux ÉTATS, c'en est un
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(cx + (r-8) * Math.cos(trkAngle), cy + (r-8) * Math.sin(trkAngle))
-    ctx.lineTo(cx + (r-3) * Math.cos(trkAngle), cy + (r-3) * Math.sin(trkAngle))
-    ctx.stroke()
-
+    // (23/09) Repère de route RETIRÉ : sans magnétomètre, route et cap sont une seule et même
+    // valeur — le repère se serait superposé au trait fixe, en prétendant une différence.
     ctx.restore()
 
     // Fixed lubber line
@@ -422,8 +427,8 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
     ctx.fillStyle = C.text
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
-    ctx.fillText(`${Math.round(hdg).toString().padStart(3,'0')}°`, cx, cy + 22)
-  }, [hdg, trk, size])
+    ctx.fillText(`${(Math.round(dir) % 360).toString().padStart(3,'0')}°`, cx, cy + 22)
+  }, [dir, size])
 
   return <canvas ref={canvasRef} style={{ width: size, height: size, borderRadius: '50%' }} />
 }
@@ -521,7 +526,7 @@ export default function SixPack({ frame, size = 110 }) {
         <VSI vspd={frame.vspd} size={size} />
       </Instrument>
       <Instrument label="HEADING" size={size}>
-        <HeadingIndicator hdg={frame.hdg} trk={frame.trk} size={size} />
+        <HeadingIndicator hdg={frame.hdg} trk={frame.trk} bearing={frame.bearing} size={size} />
       </Instrument>
       <Instrument label="TURN" size={size}>
         <TurnCoordinator roll={frame.roll} latAc={frame.latAc} size={size} />
