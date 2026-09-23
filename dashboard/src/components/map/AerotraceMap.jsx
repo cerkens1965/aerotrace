@@ -591,7 +591,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         const sym = document.createElement('div')          // boîte du symbole (26 px, 40 px avec anneau flotte)
         sym.style.cssText = 'position:relative;display:flex;align-items:center;justify-content:center;'
         const ring = document.createElement('div')
-        ring.style.cssText = `position:absolute;inset:0;border-radius:50%;border:1.5px solid ${T.amber};box-sizing:border-box;`
+        ring.style.cssText = 'position:absolute;inset:0;border-radius:50%;border-style:solid;border-width:1px;box-sizing:border-box;opacity:0.75;'   // (23/09) filet 1 px, discret — couleur posée plus bas selon le fond
         const img = document.createElement('div')          // icône par type, colorée par masque CSS
         img.style.cssText = 'transform-origin:center center;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;'
         sym.append(ring, img)
@@ -638,7 +638,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       const sig = `${iconSrc}|${symClr}|${isFleet}|${ringOn}|${fg}|${rot}|${callClr}|${altClr}|${callTxt}|${altTxt}`
       if (o.sig !== sig) {
         const icon = isFleet ? 30 : 34
-        const box  = ringOn ? Math.round(icon * 1.35) : icon
+        const box  = ringOn ? Math.round(icon * 1.18) : icon   // (23/09) 1,35 → 1,18 : l'anneau serre l'avion au lieu de l'encercler
         o.sym.style.width = o.sym.style.height = `${box}px`
         o.ring.style.display = ringOn ? 'block' : 'none'
         // Anneau dans la couleur des marques du fond (encre sur carte claire, blanc sur carte
