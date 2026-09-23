@@ -328,9 +328,11 @@ export default function ReplayPage() {
                 </div>
 
                 {/* Six-pack */}
-                <div style={{ width: 300, padding: '8px', display: 'flex', alignItems: 'center',
-                  borderLeft: T.border, background: T.card }}>
-                  <SixPack frame={currentFrame} size={110} />
+                {/* (23/09) Colonne des instruments : fond ENCRE et filet rule-dark, comme les
+                    panneaux de la carte — le six-pack ne flotte plus dans une boîte à lui. */}
+                <div style={{ width: 300, padding: '14px 12px', display: 'flex', alignItems: 'center',
+                  borderLeft: `1px solid ${T.ruleDark}`, background: T.ink }}>
+                  <SixPack frame={currentFrame} size={124} />
                 </div>
               </div>
 

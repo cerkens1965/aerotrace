@@ -3,14 +3,24 @@
  * ADI / Airspeed / Altimeter / VSI / Heading / Turn Coordinator
  */
 import { useRef, useEffect } from 'react'
+import { T } from './tokens'
 
+// (23/09, Christophe : « meilleure intégration et dessin du six-pack »)
+// Le six-pack était le dernier îlot hors charte du dashboard : cadrans BLEU MARINE en dégradé
+// radial, arc ROUGE sur l'anémomètre, valeurs écrites en AMBRE — trois règles enfreintes
+// (pas de bleu marine, pas de rouge, l'ambre n'est jamais une couleur de texte), plus une
+// ombre portée et une bordure blanche de 2 px. Tout est repris sur les jetons :
+//   fond encre plat · filet 1 px rule-dark · aiguilles et repères blancs · graduations etch ·
+//   chiffres muted-dark · valeur lue en Geist Mono BLANC · ambre réservé au repère « avion ».
 const C = {
-  bg:     '#050814',
-  panel:  'rgba(10,14,30,0.95)',
-  border: '#ffffff',
-  amber:  '#F5A623',
-  text:   '#ffffff',
-  mono:   'monospace',
+  face:   T.ink,          // fond de cadran — encre, à plat (les dégradés sont proscrits)
+  border: T.ruleDark,     // filet 1 px
+  mark:   T.white,        // aiguilles, horizon, repères majeurs
+  tick:   T.etch,         // graduations mineures
+  num:    T.mutedDark,    // chiffres de cadran
+  own:    T.amber,        // repère « avion » (même convention que l'own-ship du radar AKview)
+  text:   T.white,        // valeur numérique
+  mono:   T.mono,
 }
 
 // ─── Canvas instrument base ───────────────────────────────────────────────────
@@ -19,15 +29,14 @@ function Instrument({ label, size = 110, children }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
       <div style={{
         width: size, height: size, borderRadius: '50%',
-        background: 'radial-gradient(circle at 30% 30%, #1a2040, #050814)',
-        border: `2px solid ${C.border}`,
-        boxShadow: '0 0 20px rgba(0,0,0,0.8), inset 0 0 30px rgba(0,0,0,0.5)',
+        background: C.face,
+        border: `1px solid ${C.border}`,
         position: 'relative', overflow: 'hidden',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         {children}
       </div>
-      <span style={{ fontFamily: C.mono, fontSize: 8, letterSpacing: '0.12em', color: '#ffffff' }}>
+      <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', color: C.num }}>
         {label}
       </span>
     </div>
@@ -61,15 +70,15 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
     const pitchOffset = pitch * 2
 
     // Sky
-    ctx.fillStyle = '#1a4a8a'
+    ctx.fillStyle = T.ruleDark   // ciel — gris foncé de la palette
     ctx.fillRect(0, 0, size, cy + pitchOffset)
 
     // Ground
-    ctx.fillStyle = '#6b3a1f'
+    ctx.fillStyle = T.graphite   // sol — gris chaud, plus clair que le ciel : la ligne d'horizon blanche fait la séparation
     ctx.fillRect(0, cy + pitchOffset, size, size)
 
     // Horizon line
-    ctx.strokeStyle = '#ffffff'
+    ctx.strokeStyle = C.mark
     ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(0, cy + pitchOffset)
@@ -81,7 +90,7 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
       if (p === 0) continue
       const y = cy + pitchOffset - p * 2
       const w = p % 10 === 0 ? 24 : 14
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(cx - w, y)
@@ -92,7 +101,7 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
     ctx.restore()
 
     // Fixed aircraft symbol (amber)
-    ctx.strokeStyle = C.amber
+    ctx.strokeStyle = C.own
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(cx - 20, cy); ctx.lineTo(cx - 8, cy)
@@ -104,7 +113,7 @@ function ADI({ pitch = 0, roll = 0, size = 110 }) {
     ctx.stroke()
 
     // Center dot
-    ctx.fillStyle = C.amber
+    ctx.fillStyle = C.text
     ctx.beginPath()
     ctx.arc(cx, cy, 2, 0, Math.PI * 2)
     ctx.fill()
@@ -130,19 +139,11 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
     ctx.arc(cx, cy, r, 0, Math.PI*2)
     ctx.clip()
 
-    // Speed arc colors (green 60-120kt, yellow 120-140kt)
-    const drawArc = (start, end, color) => {
-      const s = ((start/370) * 270 - 225) * Math.PI/180
-      const e = ((end/370) * 270 - 225) * Math.PI/180
-      ctx.beginPath()
-      ctx.arc(cx, cy, r-4, s, e)
-      ctx.strokeStyle = color
-      ctx.lineWidth = 4
-      ctx.stroke()
-    }
-    drawArc(110, 220, '#22c55e')
-    drawArc(220, 260, '#eab308')
-    drawArc(260, 300, '#ef4444')
+    // (23/09) ARCS DE PLAGE RETIRÉS. Ils étaient codés en dur (110/220/260/300 km/h, valeurs
+    // d'un VL3) et affichés à l'identique pour TOUS les appareils — donc faux dès qu'on relit
+    // le vol d'un autre avion — avec en prime un arc ROUGE, proscrit par la charte. Ils
+    // reviendront le jour où les limites seront saisies PAR AVION (Vne, Vno, Va depuis le
+    // manuel de vol) : c'est l'objet de l'étude de vol à venir.
 
     // Tick marks
     for (let v = 0; v <= 370; v += 20) {
@@ -152,12 +153,12 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
       ctx.beginPath()
       ctx.moveTo(cx + r1 * Math.cos(angle), cy + r1 * Math.sin(angle))
       ctx.lineTo(cx + (r-6) * Math.cos(angle), cy + (r-6) * Math.sin(angle))
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = isMajor ? 1.5 : 1
       ctx.stroke()
 
       if (isMajor && v > 0) {
-        ctx.fillStyle = '#ffffff'
+        ctx.fillStyle = C.num
         ctx.font = `${size < 100 ? 7 : 8}px monospace`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
@@ -171,20 +172,20 @@ function AirspeedIndicator({ ias = 0, size = 110 }) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + (r-8) * Math.cos(angle), cy + (r-8) * Math.sin(angle))
-    ctx.strokeStyle = '#ffffff'
+    ctx.strokeStyle = C.mark
     ctx.lineWidth = 2
     ctx.stroke()
 
     // Center
     ctx.beginPath()
     ctx.arc(cx, cy, 4, 0, Math.PI*2)
-    ctx.fillStyle = '#333'
+    ctx.fillStyle = C.border
     ctx.fill()
 
     ctx.restore()
 
     // Digital readout
-    ctx.fillStyle = C.amber
+    ctx.fillStyle = C.text
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
     ctx.fillText(`${Math.round(kmh)}km/h`, cx, cy + 22)
@@ -214,7 +215,7 @@ function Altimeter({ alt = 0, size = 110 }) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + (r-14) * Math.cos(angle100), cy + (r-14) * Math.sin(angle100))
-    ctx.strokeStyle = '#ffffff'
+    ctx.strokeStyle = C.mark
     ctx.lineWidth = 1.5
     ctx.stroke()
 
@@ -225,11 +226,11 @@ function Altimeter({ alt = 0, size = 110 }) {
       ctx.beginPath()
       ctx.moveTo(cx + (r - (isMajor ? 10 : 6)) * Math.cos(angle), cy + (r - (isMajor ? 10 : 6)) * Math.sin(angle))
       ctx.lineTo(cx + (r-3) * Math.cos(angle), cy + (r-3) * Math.sin(angle))
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = isMajor ? 1.5 : 1
       ctx.stroke()
       if (isMajor) {
-        ctx.fillStyle = '#ffffff'
+        ctx.fillStyle = C.num
         ctx.font = `${size < 100 ? 7 : 8}px monospace`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
@@ -244,18 +245,18 @@ function Altimeter({ alt = 0, size = 110 }) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + (r-6) * Math.cos(angle1000), cy + (r-6) * Math.sin(angle1000))
-    ctx.strokeStyle = '#ffffff'
+    ctx.strokeStyle = C.mark
     ctx.lineWidth = 2
     ctx.stroke()
 
     ctx.beginPath()
     ctx.arc(cx, cy, 4, 0, Math.PI*2)
-    ctx.fillStyle = '#333'
+    ctx.fillStyle = C.border
     ctx.fill()
     ctx.restore()
 
     // Digital
-    ctx.fillStyle = C.amber
+    ctx.fillStyle = C.text
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
     ctx.fillText(`${Math.round(alt)}ft`, cx, cy + 22)
@@ -288,11 +289,11 @@ function VSI({ vspd = 0, size = 110 }) {
       ctx.beginPath()
       ctx.moveTo(cx + (r - (isMajor ? 10 : 6)) * Math.cos(angle), cy + (r - (isMajor ? 10 : 6)) * Math.sin(angle))
       ctx.lineTo(cx + (r-3) * Math.cos(angle), cy + (r-3) * Math.sin(angle))
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = isMajor ? 1.5 : 1
       ctx.stroke()
       if (isMajor) {
-        ctx.fillStyle = v === 0 ? C.amber : '#ffffff'
+        ctx.fillStyle = v === 0 ? C.mark : C.num
         ctx.font = `${size < 100 ? 7 : 8}px monospace`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
@@ -308,18 +309,18 @@ function VSI({ vspd = 0, size = 110 }) {
     ctx.beginPath()
     ctx.moveTo(cx, cy)
     ctx.lineTo(cx + (r-6) * Math.cos(angle), cy + (r-6) * Math.sin(angle))
-    ctx.strokeStyle = '#ffffff'
+    ctx.strokeStyle = C.mark
     ctx.lineWidth = 2
     ctx.stroke()
 
     ctx.beginPath()
     ctx.arc(cx, cy, 4, 0, Math.PI*2)
-    ctx.fillStyle = '#333'
+    ctx.fillStyle = C.border
     ctx.fill()
     ctx.restore()
 
     // Digital
-    const color = vspd > 100 ? '#22c55e' : vspd < -100 ? '#ef4444' : C.amber
+    const color = C.text   // (23/09) plus de vert/rouge selon le sens : le signe se lit déjà, et le rouge est proscrit
     ctx.fillStyle = color
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
@@ -356,12 +357,12 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
       ctx.beginPath()
       ctx.moveTo(cx + (r - (isMajor ? 10 : 5)) * Math.cos(angle), cy + (r - (isMajor ? 10 : 5)) * Math.sin(angle))
       ctx.lineTo(cx + (r-2) * Math.cos(angle), cy + (r-2) * Math.sin(angle))
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = isMajor ? 1.5 : 0.5
       ctx.stroke()
 
       if (i % 9 === 0) {
-        ctx.fillStyle = i === 0 ? '#ef4444' : '#ffffff'
+        ctx.fillStyle = i === 0 ? C.mark : C.num   // (23/09) le N n'est plus rouge (proscrit)
         ctx.font = `bold ${size < 100 ? 8 : 9}px monospace`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
@@ -372,7 +373,7 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
 
     // Track bug (green)
     const trkAngle = ((trk - hdg) * Math.PI) / 180 - Math.PI/2
-    ctx.strokeStyle = '#22c55e'
+    ctx.strokeStyle = T.ok   // repère de route suivie : le vert reste réservé aux ÉTATS, c'en est un
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(cx + (r-8) * Math.cos(trkAngle), cy + (r-8) * Math.sin(trkAngle))
@@ -382,7 +383,7 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
     ctx.restore()
 
     // Fixed lubber line
-    ctx.strokeStyle = C.amber
+    ctx.strokeStyle = C.own
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(cx, cy - r + 2)
@@ -390,7 +391,7 @@ function HeadingIndicator({ hdg = 0, trk = 0, size = 110 }) {
     ctx.stroke()
 
     // Digital
-    ctx.fillStyle = C.amber
+    ctx.fillStyle = C.text
     ctx.font = `bold ${size < 100 ? 10 : 11}px monospace`
     ctx.textAlign = 'center'
     ctx.fillText(`${Math.round(hdg).toString().padStart(3,'0')}°`, cx, cy + 22)
@@ -422,7 +423,7 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
       ctx.beginPath()
       ctx.moveTo(cx + (r - (isMajor ? 10 : 6)) * Math.cos(angle), cy + (r - (isMajor ? 10 : 6)) * Math.sin(angle))
       ctx.lineTo(cx + (r-2) * Math.cos(angle), cy + (r-2) * Math.sin(angle))
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = C.mark
       ctx.lineWidth = isMajor ? 1.5 : 1
       ctx.stroke()
     })
@@ -430,7 +431,7 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
     // Miniature aircraft rotated by roll
     ctx.translate(cx, cy)
     ctx.rotate((roll * Math.PI) / 180)
-    ctx.strokeStyle = C.amber
+    ctx.strokeStyle = C.own
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(-18, 4); ctx.lineTo(-6, 4)
@@ -445,7 +446,7 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
     const ballOffset = Math.max(-20, Math.min(20, latAc * 30))
     ctx.beginPath()
     ctx.arc(cx + ballOffset, cy + r - 12, 5, 0, Math.PI*2)
-    ctx.fillStyle = '#ffffff'
+    ctx.fillStyle = C.mark
     ctx.fill()
     ctx.strokeStyle = '#333'
     ctx.lineWidth = 1
@@ -458,46 +459,44 @@ function TurnCoordinator({ roll = 0, latAc = 0, size = 110 }) {
 
 // ─── Main SixPack component ───────────────────────────────────────────────────
 export default function SixPack({ frame, size = 110 }) {
+  // (23/09) INTÉGRATION — le six-pack peignait sa PROPRE boîte sombre, arrondie et bordée de
+  // blanc, posée au milieu d'une colonne blanche : un îlot flottant. Il rend maintenant une
+  // simple grille 2 × 3 qui remplit la colonne (c'est la colonne, côté page, qui porte le fond
+  // encre et le filet de séparation) — même traitement que les panneaux de la carte.
+  const grid = {
+    display: 'grid', gridTemplateColumns: '1fr 1fr',
+    gap: 14, justifyItems: 'center', width: '100%',
+  }
   if (!frame) return (
-    <div style={{ display: 'flex', gap: 12, padding: 16,
-      background: 'rgba(5,8,20,0.8)', borderRadius: 10, border: '1px solid #ffffff' }}>
+    <div style={grid}>
       {['ADI','AIRSPEED','ALTITUDE','VSI','HEADING','TURN'].map(l => (
         <Instrument key={l} label={l} size={size}>
-          <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#ffffff' }}>--</span>
+          <span style={{ fontFamily: C.mono, fontSize: 11, color: C.num }}>−−</span>
         </Instrument>
       ))}
     </div>
   )
 
   return (
-    <div style={{ display: 'flex', gap: 12, padding: 16,
-      background: 'rgba(5,8,20,0.8)', borderRadius: 10, border: '1px solid #ffffff',
-      flexWrap: 'wrap', justifyContent: 'center' }}>
-
+    <div style={grid}>
       <Instrument label="ADI" size={size}>
         <ADI pitch={frame.pitch} roll={frame.roll} size={size} />
       </Instrument>
-
       <Instrument label="AIRSPEED" size={size}>
         <AirspeedIndicator ias={frame.spd} size={size} />
       </Instrument>
-
       <Instrument label="ALTITUDE" size={size}>
         <Altimeter alt={frame.alt} size={size} />
       </Instrument>
-
       <Instrument label="VSI" size={size}>
         <VSI vspd={frame.vspd} size={size} />
       </Instrument>
-
       <Instrument label="HEADING" size={size}>
         <HeadingIndicator hdg={frame.hdg} trk={frame.trk} size={size} />
       </Instrument>
-
       <Instrument label="TURN" size={size}>
         <TurnCoordinator roll={frame.roll} latAc={frame.latAc} size={size} />
       </Instrument>
-
     </div>
   )
 }
