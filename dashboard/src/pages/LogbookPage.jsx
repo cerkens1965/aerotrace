@@ -719,11 +719,24 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
       <QCheck checked={pendingShown.every(id => sel.has(id))} mixed={pendingShown.some(id => sel.has(id))}
         onChange={v => sel.set(pendingShown, v)} label={`Select the ${pendingShown.length} flights to assign shown`} />
     ), render: f => (f._pending ? <QCheck checked={sel.has(f.id)} onChange={v => sel.set([f.id], v)} label="Select this flight" /> : null) }] : []),
-    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} /> },
-    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} /> },
+    // (23/09) Sur téléphone la carte porte l'essentiel : date · heure sur UNE ligne, avion,
+    // terrain, pilote, durée, statut. Le type de vol et l'instructeur passent en pied de carte,
+    // sur la ligne dense — l'information reste, elle cesse d'occuper deux lignes chacune.
+    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
+      phoneRender: f => <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{`${formatDate(f.startTs)} · ${utcTime(f.startTs)}`}</span> },
+    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
+      phoneRender: f => <span style={monoStyle(13, T.ink)}>{[acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig || acOf(f).rec?.type].filter(Boolean).join(' · ')}</span> },
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    { key: 'pilot', label: 'PILOT', render: f => <Stack top={f.pilotId ? getPilotName(pilots, f.pilotId) : '—'} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} /> },
-    { key: 'kind', label: 'TYPE · INSTRUCTOR', render: f => (
+    { key: 'pilot', label: 'PILOT', render: f => <Stack top={f.pilotId ? getPilotName(pilots, f.pilotId) : '—'} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} />,
+      phoneRender: f => <span style={{ fontFamily: T.sans, fontSize: 13, color: T.ink }}>{f.pilotId ? getPilotName(pilots, f.pilotId) : '—'}</span> },
+    { key: 'kind', label: 'TYPE · INSTRUCTOR', phone: 'minor',
+      phoneRender: f => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <TypeBadge type={f.flightType} />
+          <span style={labelStyle(T.etch)}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
+        </span>
+      ),
+      render: f => (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
         <TypeBadge type={f.flightType} />
         <span style={{ ...labelStyle(T.etch), whiteSpace: 'nowrap' }}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
@@ -734,7 +747,14 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     // été retirée en resserrant les colonnes), donc un vol au-dessus du seuil n'y apparaissait
     // pas — alors que c'est LA liste qu'on regarde. Pas de colonne en plus : la pastille se
     // range sous le badge de validation.
-    { key: 'status', label: 'STATUS', render: f => (
+    { key: 'status', label: 'STATUS', phone: 'minor',
+      phoneRender: f => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <ValidBadge validated={!f._pending} />
+          {gIsOver(f) ? <GAlert f={f} /> : null}
+        </span>
+      ),
+      render: f => (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
         <ValidBadge validated={!f._pending} />
         {/* la pastille au-dessus du seuil ; sinon la valeur en gris quand on trie sur le G,
@@ -809,10 +829,10 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
                 <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus"
                   onClick={() => setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n })}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n }) } }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: T.border, background: open ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
+                  style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 10px', padding: '10px 12px', borderTop: T.border, background: open ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
                   <span style={{ display: 'flex', color: T.graphite, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={14} /></span>
                   <span style={{ ...headingStyle(13), whiteSpace: 'nowrap' }}>{g.title}</span>
-                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 18 }}>
+                  <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '4px 12px', minWidth: 0 }}>
                     {pending > 0 && <StatusDot tone="caution" text={`${pending} TO ASSIGN`} />}
                     {g.gOver > 0 && (
                       <span title={`${g.gOver} flight${g.gOver > 1 ? 's' : ''} above the G alert threshold`} style={{
@@ -824,8 +844,8 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
                     {g.gOver === 0 && sortKey === 'g' && g.gMax > 0 && (
                       <span style={{ ...monoStyle(12, T.graphite), whiteSpace: 'nowrap' }}>{`${g.gMax.toFixed(1)} G MAX`}</span>
                     )}
-                    <span style={{ ...monoStyle(12, T.graphite), minWidth: 84, textAlign: 'right' }}>{nFlights(g.rows.length)}</span>
-                    <span style={{ ...monoStyle(14, T.ink), fontWeight: 500, minWidth: 64, textAlign: 'right' }}>{formatDuration(sumDuration(g.rows))}</span>
+                    <span style={{ ...monoStyle(12, T.graphite), textAlign: 'right', whiteSpace: 'nowrap' }}>{nFlights(g.rows.length)}</span>
+                    <span style={{ ...monoStyle(14, T.ink), fontWeight: 500, textAlign: 'right', whiteSpace: 'nowrap' }}>{formatDuration(sumDuration(g.rows))}</span>
                   </span>
                 </div>
               )}
@@ -848,18 +868,28 @@ function MyFlights({ me, flights, pilots, acLabel, acOf, onReplay }) {
   const first = flights[flights.length - 1]
   const pending = flights.filter(f => f._pending).length
   const columns = [
-    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} /> },
-    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} /> },
+    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
+      phoneRender: f => <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{`${formatDate(f.startTs)} · ${utcTime(f.startTs)}`}</span> },
+    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
+      phoneRender: f => <span style={monoStyle(13, T.ink)}>{[acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig || acOf(f).rec?.type].filter(Boolean).join(' · ')}</span> },
     { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    ...(me.isInstructor ? [{ key: 'pilot', label: 'PILOT', render: f => <Stack strong={f.pilotId === me.id} top={getPilotName(pilots, f.pilotId)} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} /> }] : []),
-    { key: 'kind', label: 'TYPE · INSTRUCTOR', render: f => (
+    ...(me.isInstructor ? [{ key: 'pilot', label: 'PILOT', render: f => <Stack strong={f.pilotId === me.id} top={getPilotName(pilots, f.pilotId)} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} />,
+      phoneRender: f => <span style={{ fontFamily: T.sans, fontSize: 13, color: T.ink }}>{getPilotName(pilots, f.pilotId)}</span> }] : []),
+    { key: 'kind', label: 'TYPE · INSTRUCTOR', phone: 'minor',
+      phoneRender: f => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <TypeBadge type={f.flightType} />
+          <span style={labelStyle(T.etch)}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
+        </span>
+      ),
+      render: f => (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <TypeBadge type={f.flightType} />
         <span style={{ ...labelStyle(T.etch), whiteSpace: 'nowrap' }}>{f.instructorId ? `${getPilotName(pilots, f.instructorId).toUpperCase()} · ${presenceText(f).toUpperCase()}` : 'NO INSTRUCTOR'}</span>
       </span>
     ) },
     COL_DURATION,
-    { key: 'alt', label: 'MAX ALT FT', mono: true, align: 'right', render: f => (f.maxAlt ? Math.round(f.maxAlt) : DASH) },
+    { key: 'alt', label: 'MAX ALT FT', mono: true, align: 'right', phone: 'hide', render: f => (f.maxAlt ? Math.round(f.maxAlt) : DASH) },
     { key: 'actions', label: '', align: 'right', render: f => <Button size="sm" variant="ghost" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button> },
   ]
   return (

@@ -3,6 +3,10 @@
 // (libellés écrits en capitales dans la chaîne — jamais de text-transform, une table peut contenir « AirKi ») ;
 // lignes 13 px, chiffres tabulaires ; survol fond papier ; conteneur overflow-x:auto.
 // columns : [{ key, label, align?, mono?, width?, render?(row) }] ; rows ; rowKey (clé ou fn(row, i)) ;
+// Sur TÉLÉPHONE (carte par ligne), trois options par colonne — sans effet sur la table :
+//   phone: 'hide'   la colonne disparaît de la carte ;
+//   phone: 'minor'  elle passe en pied de carte, sur une ligne dense, sans son libellé ;
+//   phoneRender(row) rendu plus court que celui de la table (une ligne au lieu de deux…).
 // onRowClick?(row) (ligne cliquable + Entrée au clavier) ; empty (nœud) ; loading (lignes Skeleton).
 import { useState } from 'react'
 import useBreakpoint from '../../hooks/useBreakpoint'
@@ -88,8 +92,11 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRo
   // n'ont rien à annoncer, elles se rangent en pied de carte.
   if (isPhone && !loading && rows.length) {
     const [head, ...rest] = columns
-    const fields = rest.filter(c => c.label)
-    const tools  = rest.filter(c => !c.label)
+    const shown  = rest.filter(c => c.phone !== 'hide')
+    const fields = shown.filter(c => c.label && c.phone !== 'minor')
+    const minor  = shown.filter(c => c.label && c.phone === 'minor')
+    const tools  = shown.filter(c => !c.label)
+    const cell   = (c, row) => (c.phoneRender ? c.phoneRender(row) : c.render ? c.render(row) : row?.[c.key])
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, ...style }}>
         {rows.map((row, i) => {
@@ -101,28 +108,34 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRo
               onClick={clickable ? () => onRowClick(row) : undefined}
               onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onRowClick(row) } : undefined}
               style={{ background: T.card, border: T.border, borderRadius: T.radius.md,
-                padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10,
+                padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8,
                 cursor: clickable ? 'pointer' : 'default' }}>
               <div style={{ fontSize: 14, color: T.ink, fontFamily: head?.mono ? T.mono : T.sans, minWidth: 0 }}>
-                {head ? (head.render ? head.render(row) : row?.[head.key]) : null}
+                {head ? cell(head, row) : null}
               </div>
               {fields.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 14px' }}>
                   {fields.map(c => (
                     <div key={c.key} style={{ minWidth: 0 }}>
                       <div style={labelStyle(T.etch)}>{c.label}</div>
-                      <div style={{ fontSize: 13, color: T.ink, marginTop: 2,
+                      <div style={{ fontSize: 13, color: T.ink, marginTop: 1,
                         fontFamily: c.mono ? T.mono : T.sans, fontVariantNumeric: 'tabular-nums' }}>
-                        {c.render ? c.render(row) : row?.[c.key]}
+                        {cell(c, row)}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+              {minor.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 10px',
+                  fontSize: 12, color: T.graphite, minWidth: 0 }}>
+                  {minor.map(c => <span key={c.key} style={{ minWidth: 0 }}>{cell(c, row)}</span>)}
+                </div>
+              )}
               {tools.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-                  borderTop: T.border, paddingTop: 10 }}>
-                  {tools.map(c => <div key={c.key}>{c.render ? c.render(row) : row?.[c.key]}</div>)}
+                  borderTop: T.border, paddingTop: 8 }}>
+                  {tools.map(c => <div key={c.key}>{cell(c, row)}</div>)}
                 </div>
               )}
             </div>
