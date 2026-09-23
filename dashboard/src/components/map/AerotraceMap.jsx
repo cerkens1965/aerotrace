@@ -499,7 +499,9 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
       center: [CENTER.lon, CENTER.lat],
       zoom: 9,
     })
-    map.current.addControl(new maplibregl.NavigationControl(), 'top-right')
+    // (23/09, Christophe) Pas de boutons +/− sur tactile : on pince. Ils prenaient le coin
+    // haut-droit, sous le bandeau, pour une fonction que le geste rend inutile.
+    if (!window.matchMedia('(max-width: 1023px)').matches) map.current.addControl(new maplibregl.NavigationControl(), 'top-right')
 
     const updateBounds = () => {
       const b = map.current.getBounds()
@@ -780,7 +782,13 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
 
   // ── Habillage (22/09, Claude Design « Live ») : panneaux encre, bord 1 px #2C2C2C, rayon 6, aucune ombre.
   const inkPanel = { background: T.ink, border: `1px solid ${T.ruleDark}`, borderRadius: 6 }
-  const rowText = (on) => ({ fontFamily: T.sans, fontSize: 12, color: on ? T.white : T.mutedDark })
+  // (23/09) Le contenu des calques est écrit pour le panneau ENCRE du bureau. Servi dans la
+  // feuille, il se pose sur un LAVIS CLAIR : blanc sur blanc, illisible (constaté sur iPhone).
+  // Une table de correspondance, appliquée partout dans ce contenu.
+  const PP = isCompact
+    ? { text: T.ink,   muted: T.graphite,  rule: T.rule }
+    : { text: T.white, muted: T.mutedDark, rule: T.ruleDark }
+  const rowText = (on) => ({ fontFamily: T.sans, fontSize: 12, color: on ? PP.text : PP.muted })
   const bandCount = allTargets.length
   const chevron = (open) => (
     <span style={{ display: 'flex', color: T.etch, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={16} /></span>
@@ -817,8 +825,8 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
                           return (
                             <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}>
                               <input type="checkbox" className="ak-focus" checked={checked} onChange={() => toggleAirportType(t.id)}
-                                style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 10, height: 10, borderRadius: 2, cursor: 'pointer',
-                                         border: `1.5px solid ${checked ? T.white : T.etch}`, background: checked ? T.white : 'transparent' }} />
+                                style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 14, height: 14, borderRadius: 2, cursor: 'pointer',
+                                         border: `1.5px solid ${checked ? PP.text : T.etch}`, background: checked ? PP.text : 'transparent' }} />   /* (23/09) coche encre sur lavis, blanche sur encre */
                               <span style={{ ...rowText(checked), fontSize: 11 }}>{t.label}</span>
                             </label>
                           )
@@ -831,9 +839,9 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
             </div>
 
             {/* Trafic : interrupteur + bande d'altitude */}
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.ruleDark}` }}>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${PP.rule}` }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <span style={labelStyle(T.mutedDark)}>TRAFFIC BAND</span>
+                <span style={labelStyle(PP.muted)}>TRAFFIC BAND</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={monoStyle(11, trafficDown || !visible.traffic ? T.mutedDark : T.white)}>{trafficDown ? '−−−' : `${bandCount} AC`}</span>
                   <Switch on={visible.traffic} onClick={() => toggleLayer('traffic')} label="Show traffic" />
@@ -847,15 +855,15 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
             </div>
 
             {/* Fond de carte */}
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.ruleDark}` }}>
-              <div style={{ ...labelStyle(T.mutedDark), marginBottom: 8 }}>MAP</div>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${PP.rule}` }}>
+              <div style={{ ...labelStyle(PP.muted), marginBottom: 8 }}>MAP</div>
               <div role="radiogroup" aria-label="Map type" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {BASEMAPS.map(bm => {
                   const on = activeBasemap === bm.id
                   return (
                     <button key={bm.id} type="button" role="radio" aria-checked={on} className="ak-focus" onClick={() => changeBasemap(bm.id)}
                       style={{ all: 'unset', cursor: 'pointer', padding: '3px 8px', borderRadius: 4, fontFamily: T.sans, fontSize: 11,
-                               border: `1px solid ${on ? T.white : T.ruleDark}`, color: on ? T.white : T.mutedDark }}>
+                               border: `1px solid ${on ? T.white : PP.rule}`, color: on ? T.white : T.mutedDark }}>
                       {bm.label}
                     </button>
                   )
@@ -874,7 +882,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
         marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
-        {topCenter}
+        {!isCompact && topCenter}   /* (23/09) le bandeau encre masquait la carte et le zoom : la flotte vit dans l'onglet Fleet */
         {trafficDown && (
           <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
             <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
