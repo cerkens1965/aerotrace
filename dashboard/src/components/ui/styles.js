@@ -11,7 +11,20 @@ const CSS = `
 @media (prefers-reduced-motion: reduce) { .ak-skeleton { animation: none; } }
 .ak-nav:not([aria-current]):hover { color: #FFFFFF !important; }
 .ak-drawer { width: 440px; }
+/* (23/09, chantier mobile) TIROIR → FEUILLE DU BAS sous 640 px. Un panneau latéral pleine
+   hauteur sur un téléphone oblige à viser une croix en haut à droite, hors d'atteinte du pouce.
+   La feuille monte du bas, s'arrête à 92 % de la hauteur (on voit ce qu'il y a derrière, donc
+   on comprend qu'on peut fermer), et réserve la marge de sécurité du bas d'écran. */
 @media (max-width: 600px) { .ak-drawer { width: 100%; } }
+@media (max-width: 639px) {
+  .ak-drawer {
+    width: 100% !important; max-width: 100% !important;
+    top: auto !important; bottom: 0 !important; right: 0 !important; left: 0 !important;
+    height: auto !important; max-height: 92dvh !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  }
+}
 `
 
 export function ensureAirKiStyles() {

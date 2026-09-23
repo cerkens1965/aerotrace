@@ -5,6 +5,7 @@
 // columns : [{ key, label, align?, mono?, width?, render?(row) }] ; rows ; rowKey (clé ou fn(row, i)) ;
 // onRowClick?(row) (ligne cliquable + Entrée au clavier) ; empty (nœud) ; loading (lignes Skeleton).
 import { useState } from 'react'
+import useBreakpoint from '../../hooks/useBreakpoint'
 import { T, labelStyle } from './tokens'
 import Skeleton from './Skeleton'
 import EmptyState from './EmptyState'
@@ -22,6 +23,7 @@ function keyOf(row, i, rowKey) {
 
 export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRowClick, empty, loading = false, style }) {
   const [hovered, setHovered] = useState(null)
+  const { isPhone } = useBreakpoint()
   const clickable = typeof onRowClick === 'function'
 
   const th = (c) => ({
@@ -74,6 +76,60 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRo
         </tr>
       )
     })
+  }
+
+  // ── (23/09, chantier mobile) SUR TÉLÉPHONE, UNE LIGNE DEVIENT UNE CARTE ───────────────
+  // Le repli actuel — overflow-x — laissait un tableau de 8 à 11 colonnes qu'il fallait faire
+  // glisser latéralement, en perdant à chaque geste la colonne d'identité. On rend donc, sous
+  // 640 px, une carte par ligne : l'identité en tête (1re colonne), les mesures en paires
+  // libellé/valeur, les actions en pied. Une seule correction ici et Logbook, Fleet, Admin et
+  // Dev deviennent lisibles d'un coup — c'est tout l'intérêt d'avoir un composant unique.
+  // Les colonnes sans libellé (actions, cases à cocher) ne deviennent pas des paires : elles
+  // n'ont rien à annoncer, elles se rangent en pied de carte.
+  if (isPhone && !loading && rows.length) {
+    const [head, ...rest] = columns
+    const fields = rest.filter(c => c.label)
+    const tools  = rest.filter(c => !c.label)
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, ...style }}>
+        {rows.map((row, i) => {
+          const k = keyOf(row, i, rowKey)
+          return (
+            <div key={k}
+              className={clickable ? 'ak-focus' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={clickable ? () => onRowClick(row) : undefined}
+              onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onRowClick(row) } : undefined}
+              style={{ background: T.card, border: T.border, borderRadius: T.radius.md,
+                padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10,
+                cursor: clickable ? 'pointer' : 'default' }}>
+              <div style={{ fontSize: 14, color: T.ink, fontFamily: head?.mono ? T.mono : T.sans, minWidth: 0 }}>
+                {head ? (head.render ? head.render(row) : row?.[head.key]) : null}
+              </div>
+              {fields.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 14px' }}>
+                  {fields.map(c => (
+                    <div key={c.key} style={{ minWidth: 0 }}>
+                      <div style={labelStyle(T.etch)}>{c.label}</div>
+                      <div style={{ fontSize: 13, color: T.ink, marginTop: 2,
+                        fontFamily: c.mono ? T.mono : T.sans, fontVariantNumeric: 'tabular-nums' }}>
+                        {c.render ? c.render(row) : row?.[c.key]}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {tools.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+                  borderTop: T.border, paddingTop: 10 }}>
+                  {tools.map(c => <div key={c.key}>{c.render ? c.render(row) : row?.[c.key]}</div>)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   return (

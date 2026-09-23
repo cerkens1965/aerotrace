@@ -7,6 +7,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { auth, functions, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
 import Sidebar from './components/layout/Sidebar'
+import useBreakpoint from './hooks/useBreakpoint'
 import LivePage from './pages/LivePage'
 import EnVolPage from './pages/EnVolPage'
 import ReplayPage from './pages/ReplayPage'
@@ -150,6 +151,10 @@ export default function App() {
 // super_admin sans clubId courant → forcé sur /select-club.
 // admin sans clubId imposé → message d'erreur (compte non rattaché à un club).
 function AppLayout({ user, role, userClubId }) {
+  // (23/09) EN TÊTE, avant tout retour anticipé : un hook doit être appelé au même rang à
+  // chaque rendu (règle React), et ce composant sort tôt sur deux chemins (club manquant,
+  // accès en attente).
+  const { isPhone } = useBreakpoint()
   const { clubId, isSuperAdmin } = useClub()
 
   // super_admin sans choix → picker obligatoire
@@ -168,14 +173,19 @@ function AppLayout({ user, role, userClubId }) {
   }
 
   return (
+    // (23/09, chantier mobile) GABARIT — sur téléphone la navigation passe EN BAS, donc le
+    // contenu doit lui laisser la place : padding-bottom réservé à la barre (56 px) plus la
+    // marge de sécurité du bas d'écran. Et `100dvh` au lieu de `100vh` : sur iOS, `vh` compte
+    // la hauteur SANS la barre d'adresse, si bien que le bas de page passait sous celle-ci.
     <div style={{
-      width: '100vw', height: '100vh',
+      width: '100%', height: '100dvh',
       display: 'flex', flexDirection: 'row',
       overflow: 'hidden', background: 'var(--paper)',
     }}>
       <Sidebar user={user} role={role} />
 
-      <main style={{ flex: 1, minWidth: 0, overflow: 'hidden', position: 'relative' }}>
+      <main style={{ flex: 1, minWidth: 0, overflow: 'hidden', position: 'relative',
+        paddingBottom: isPhone ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 0 }}>
         <Routes>
           <Route path="/"         element={<Navigate to="/live" replace />} />
           <Route path="/live"     element={<LivePage />} />

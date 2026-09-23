@@ -10,9 +10,10 @@ import { signOut } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
 import { APP_VERSION, APP_CHANNEL, BUILD_DATE } from '../../version'
-import { AirKiLockup } from '../ui/AirKiMark'
+import AirKiMark, { AirKiLockup } from '../ui/AirKiMark'   // le monogramme est l'export par défaut
 import Icon from '../ui/Icon'
 import { ensureAirKiStyles } from '../ui/styles'
+import useBreakpoint from '../../hooks/useBreakpoint'
 
 ensureAirKiStyles()
 
@@ -71,35 +72,81 @@ const S = {
   },
 }
 
+// (23/09, chantier mobile) BARRE D'ONGLETS EN BAS sur téléphone. Une barre latérale de 180 px
+// sur un écran de 390 mange la moitié de la largeur utile, et le pouce ne l'atteint pas. On
+// garde exactement les mêmes entrées, le même actif, la même icône — seule la disposition
+// change : icône au-dessus du libellé, en bas de l'écran, avec la marge de sécurité de l'iPhone
+// (env(safe-area-inset-bottom)) pour ne pas passer sous la barre de gestes.
+// Ce que la barre du bas NE porte PAS : club, rôle, version, déconnexion. Ils vivent dans le
+// pied de la barre latérale, qui n'existe pas ici — ils seront repris dans un écran « Compte »
+// plutôt qu'entassés sur une barre de 56 px.
+function BottomNav({ nav, pathname, navigate }) {
+  return (
+    <nav aria-label="Sections" style={{
+      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40,
+      display: 'flex', background: 'var(--ink)', borderTop: '1px solid var(--rule-dark)',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    }}>
+      {nav.map(item => {
+        const active = isActive(item.path, pathname)
+        return (
+          <button key={item.path} className="ak-focus" onClick={() => navigate(item.path)}
+            aria-current={active ? 'page' : undefined}
+            style={{
+              flex: 1, minWidth: 0, border: 'none', background: 'transparent', cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+              padding: '9px 2px 10px',
+              color: active ? '#FFFFFF' : 'var(--muted-dark)',
+              borderTop: `2px solid ${active ? 'var(--amber)' : 'transparent'}`,
+              fontFamily: 'var(--font-sans)', fontWeight: 500, fontSize: 10, letterSpacing: '0.01em',
+            }}>
+            <Icon name={item.icon} size={20} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{item.label}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
 export default function Sidebar({ user, role }) {
   const location = useLocation()
   const navigate = useNavigate()
   const nav = getNav(role)
   const { club, isSuperAdmin, setClub } = useClub()
+  const { isPhone, isTablet } = useBreakpoint()
 
   const handleSignOut = async () => {
     try { await signOut(auth) } catch (err) { console.error('[Sidebar] signOut:', err) }
   }
   const handleSwitchClub = () => { setClub(''); navigate('/select-club') }
 
+  if (isPhone) return <BottomNav nav={nav} pathname={location.pathname} navigate={navigate} />
+
+  // (23/09) TABLETTE : rail d'icônes de 64 px. La barre complète coûte 180 px sur 768 — trop
+  // pour une carte ou un tableau — mais le pouce n'est pas en bas sur une tablette posée :
+  // on garde donc la colonne, réduite à ses icônes, libellé en infobulle.
   return (
-    <aside style={S.aside}>
-      <div style={S.head}>
-        <AirKiLockup size={22} color="#FFFFFF" />
+    <aside style={{ ...S.aside, ...(isTablet ? { width: 64 } : null) }}>
+      <div style={{ ...S.head, ...(isTablet ? { padding: '16px 0 14px', display: 'flex', justifyContent: 'center' } : null) }}>
+        {isTablet ? <AirKiMark size={26} color="#FFFFFF" /> : <AirKiLockup size={22} color="#FFFFFF" />}
       </div>
 
       <nav style={S.nav} aria-label="Sections">
         {nav.map(item => {
           const active = isActive(item.path, location.pathname)
           return (
-            <button key={item.path} className="ak-focus ak-nav" onClick={() => navigate(item.path)} style={S.item(active)} aria-current={active ? 'page' : undefined}>
-              <Icon name={item.icon} size={18} />{item.label}
+            <button key={item.path} className="ak-focus ak-nav" onClick={() => navigate(item.path)}
+              title={isTablet ? item.label : undefined}
+              style={{ ...S.item(active), ...(isTablet ? { justifyContent: 'center', padding: '11px 0', borderLeftWidth: isTablet ? 2 : 2 } : null) }}
+              aria-current={active ? 'page' : undefined}>
+              <Icon name={item.icon} size={18} />{!isTablet && item.label}
             </button>
           )
         })}
       </nav>
 
-      <div style={S.foot}>
+      <div style={{ ...S.foot, ...(isTablet ? { display: 'none' } : null) }}>
         {club && (
           <div>
             <div style={S.label}>Club</div>
