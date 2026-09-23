@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import AerotraceMap from '../components/map/AerotraceMap'
+import useBreakpoint from '../hooks/useBreakpoint'
 import FleetStrip from '../components/map/FleetStrip'
 import LiveInFlightPanel from '../components/map/LiveInFlightPanel'
 import useFleet from '../hooks/useFleet'
@@ -18,6 +19,7 @@ const readPanel = () => {
 }
 
 export default function LivePage() {
+  const { isCompact } = useBreakpoint()
   const { state } = useLocation()
   const { clubId } = useClub()
   const fleetState = useFleet(clubId)
@@ -38,9 +40,19 @@ export default function LivePage() {
           flyTo={focus ?? state?.flyTo ?? null}
           onTrafficState={setTrafficDown}
           topCenter={clubId ? <FleetStrip {...fleetState} onLocate={locate} /> : null}
+          /* (23/09, Claude Design) Sous 1024 px le panneau latéral des vols n'est plus à côté
+             de la carte : il devient l'onglet Fleet de la feuille. Même composant, même
+             données — c'est sa place qui change, pas son contenu. */
+          compactFleet={clubId ? (
+            <LiveInFlightPanel
+              inFlight={fleetState.inFlight} owners={owners}
+              loading={fleetState.loading} error={fleetState.error} updatedAt={fleetState.updatedAt}
+              trafficDown={trafficDown} open onToggle={null} onLocate={locate} embedded
+            />
+          ) : null}
         />
       </div>
-      {clubId && (
+      {clubId && !isCompact && (
         <LiveInFlightPanel
           inFlight={fleetState.inFlight} owners={owners}
           loading={fleetState.loading} error={fleetState.error} updatedAt={fleetState.updatedAt}

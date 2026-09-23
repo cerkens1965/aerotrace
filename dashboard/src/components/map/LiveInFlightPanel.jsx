@@ -77,7 +77,18 @@ function FlightCard({ ac, owner, onLocate }) {
   )
 }
 
-export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading, error, updatedAt, trafficDown, open, onToggle, onLocate }) {
+// (23/09, Claude Design) `embedded` : le panneau est servi DANS la feuille de la carte
+// (téléphone, tablette) — il perd alors son cadre, sa largeur fixe de 320 px, son fond encre
+// et son chevron de repli. Le contenu ne change pas : ce sont les mêmes cartes de vol, posées
+// sur le lavis de la feuille au lieu d'une colonne latérale.
+export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading, error, updatedAt, trafficDown, open, onToggle, onLocate, embedded = false }) {
+  // (23/09) Le contenu est écrit pour un fond ENCRE (texte blanc, libellés muted-dark). Servi
+  // dans la feuille de la carte, il se pose sur un LAVIS CLAIR : il faut donc inverser la
+  // palette, sinon le texte blanc disparaît. Une seule table de correspondance, pas neuf
+  // conditions éparpillées.
+  const P = embedded
+    ? { text: T.ink,   muted: T.graphite, dim: T.etch,  rule: T.rule }
+    : { text: T.white, muted: T.mutedDark, dim: T.etch, rule: T.ruleDark }
   const toggleBtn = (
     <button type="button" className="ak-focus" onClick={onToggle} title={open ? 'Collapse panel' : 'Show In flight panel'}
       aria-expanded={open}
@@ -90,18 +101,20 @@ export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading,
     <aside aria-label="In flight" style={{ width: 44, flexShrink: 0, background: T.ink, borderLeft: `1px solid ${T.ruleDark}`,
                                             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, paddingTop: 16 }}>
       {toggleBtn}
-      <span style={{ ...monoStyle(11, T.mutedDark) }}>{inFlight.length}</span>
-      <span style={{ ...labelStyle(T.mutedDark), writingMode: 'vertical-rl' }}>IN FLIGHT</span>
+      <span style={{ ...monoStyle(11, P.muted) }}>{inFlight.length}</span>
+      <span style={{ ...labelStyle(P.muted), writingMode: 'vertical-rl' }}>IN FLIGHT</span>
     </aside>
   )
 
   const stamp = updatedAt ? formatDateTime(updatedAt).toUpperCase() : '−−−'
   return (
-    <aside aria-label="In flight" style={{ width: 320, flexShrink: 0, background: T.ink, borderLeft: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <aside aria-label="In flight" style={embedded
+      ? { width: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }
+      : { width: 320, flexShrink: 0, background: T.ink, borderLeft: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 14px', borderBottom: `1px solid ${T.ruleDark}` }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontFamily: T.sans, fontSize: 14, color: T.white }}>In flight</span>
-          <span style={monoStyle(11, T.mutedDark)}>{loading ? '−' : inFlight.length}</span>
+          <span style={{ fontFamily: T.sans, fontSize: 14, color: P.text }}>In flight</span>
+          <span style={monoStyle(11, P.muted)}>{loading ? '−' : inFlight.length}</span>
         </div>
         {toggleBtn}
       </div>
@@ -110,11 +123,11 @@ export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading,
         {loading ? (
           <><Skeleton height={150} radius={6} /><Skeleton height={150} radius={6} /></>
         ) : error ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: T.sans, fontSize: 13, color: T.white, padding: '12px 2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: T.sans, fontSize: 13, color: P.text, padding: '12px 2px' }}>
             <StatusDot tone="caution" /> Fleet status unavailable.
           </div>
         ) : inFlight.length === 0 ? (
-          <EmptyState text={<span style={{ color: T.mutedDark }}>No aircraft in flight.</span>} />
+          <EmptyState text={<span style={{ color: P.muted }}>No aircraft in flight.</span>} />
         ) : (
           inFlight.map(ac => <FlightCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} onLocate={onLocate} />)
         )}

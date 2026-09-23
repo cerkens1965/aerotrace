@@ -7,6 +7,7 @@ import { doc, getDoc } from 'firebase/firestore'
 import { auth, functions, db } from './firebase/config'
 import LoginPage from './components/auth/LoginPage'
 import Sidebar from './components/layout/Sidebar'
+import AirKiMark from './components/ui/AirKiMark'
 import useBreakpoint from './hooks/useBreakpoint'
 import LivePage from './pages/LivePage'
 import EnVolPage from './pages/EnVolPage'
@@ -183,6 +184,21 @@ function AppLayout({ user, role, userClubId }) {
       overflow: 'hidden', background: 'var(--paper)',
     }}>
       <Sidebar user={user} role={role} />
+
+      {/* (23/09, Christophe) MONOGRAMME SUR TÉLÉPHONE. En passant la navigation en bas, le
+          lockup du haut de la barre latérale a disparu : plus aucune marque à l'écran. On le
+          remet en PETIT, EN BAS À GAUCHE, au-dessus de la barre d'onglets et à la MÊME PLACE
+          sur toutes les pages — y compris par-dessus la carte. Non cliquable, non sélectionnable :
+          c'est une signature, pas un bouton, et il ne doit voler aucun geste.
+          Le « A » deux couleurs (contreforme ambre) suffit : à 18 px le mot ne se lirait pas. */}
+      {isPhone && (
+        <div aria-hidden="true" style={{
+          position: 'fixed', left: 12, zIndex: 30, pointerEvents: 'none', userSelect: 'none',
+          bottom: 'calc(56px + env(safe-area-inset-bottom, 0px) + 10px)',
+        }}>
+          <AirKiMark size={18} color="var(--ink)" />
+        </div>
+      )}
 
       <main style={{ flex: 1, minWidth: 0, overflow: 'hidden', position: 'relative',
         paddingBottom: isPhone ? 'calc(56px + env(safe-area-inset-bottom, 0px))' : 0 }}>

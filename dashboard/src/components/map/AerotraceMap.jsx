@@ -7,6 +7,7 @@ import { db } from '../../firebase/config'
 import { useClub } from '../../contexts/ClubContext'
 import { T, labelStyle, monoStyle, Banner, Icon } from '../ui'
 import useBreakpoint from '../../hooks/useBreakpoint'
+import MapSheet, { MapControl } from './MapSheet'
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
 const OPENAIP_KEY = import.meta.env.VITE_OPENAIP_KEY
@@ -307,7 +308,7 @@ function useTrafficPoll(bounds) {
 
 // (22/09) Props : flyTo {lat,lon,zoom} · onTrafficState(bool trafic indisponible) · topCenter = nœud posé en haut
 // au centre (bandeau FLEET de LivePage), la bannière « Traffic unavailable » se place juste dessous.
-export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter = null }) {
+export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter = null, compactFleet = null }) {
   const { clubId } = useClub()
   const mapContainer = useRef(null)
   const map = useRef(null)
@@ -337,7 +338,11 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
   const [opacity, setOpacity] = useState({ ctr: 3, tma: 0, danger: 0 })
   const [activeAirports, setActiveAirports] = useState(['fixed'])
   const [altRange, setAltRange] = useState([0, ALT_MAX])
-  const { isCompact } = useBreakpoint()
+  const { isCompact, isPhone } = useBreakpoint()
+  // (23/09, Claude Design) Sous 1024 px les contrôles ne sont plus posés en permanence sur la
+  // carte : ils sont APPELÉS dans une feuille à deux onglets. Au repos, un téléphone ne montre
+  // que le bandeau flotte et deux boutons de 44 px à hauteur de pouce.
+  const [sheet, setSheet] = useState({ open: false, tab: 'layers' })
   // (23/09, chantier mobile) Sur téléphone et tablette, les calques démarrent REPLIÉS : la
   // carte est ce qu'on vient voir, le panneau ne doit pas la couvrir d'entrée. Sur bureau on
   // garde le choix mémorisé du pilote.
@@ -781,43 +786,11 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
     <span style={{ display: 'flex', color: T.etch, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={16} /></span>
   )
 
-  return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: T.ink }}>
-      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
-
-      {/* Haut, centre : bandeau FLEET (LivePage) + bannière trafic indisponible */}
-      <div style={{ position: 'absolute', top: isCompact ? 8 : 20,
-        left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
-        marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
-        {topCenter}
-        {trafficDown && (
-          <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
-            <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
-              SafeSky and the ADS-B feed did not answer. Club aircraft fitted with an AKcore are still shown.
-            </Banner>
-          </div>
-        )}
-      </div>
-
-      {/* Haut, gauche : LAYERS — (23/09, chantier mobile) sur écran compact le panneau se
-          réduit à son en-tête (replié par défaut, cf. panelOpen) et se colle au bord : 212 px
-          fixes à 20 px du bord mangeaient plus de la moitié d'un téléphone, par-dessus la
-          carte qu'on est venu regarder. Ouvert, il reste plafonné à 60 % de la hauteur pour
-          qu'on voie toujours où on est. */}
-      <div style={{ ...inkPanel, position: 'absolute',
-        left: isCompact ? 8 : 20, top: isCompact ? 8 : 20,
-        width: isCompact ? 178 : 212, zIndex: 10,
-        maxHeight: isCompact ? '60%' : 'calc(100% - 40px)', overflowY: 'auto' }}>
-        <button type="button" className="ak-focus" onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))} aria-expanded={panelOpen.layers}
-          title={panelOpen.layers ? 'Collapse layers' : 'Show layers'}
-          style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                   padding: '10px 12px', borderBottom: panelOpen.layers ? `1px solid ${T.ruleDark}` : 'none' }}>
-          <span style={labelStyle(T.mutedDark)}>LAYERS</span>
-          {chevron(panelOpen.layers)}
-        </button>
-
-        {panelOpen.layers && (
+  // (23/09, Claude Design) Le contenu des CALQUES est extrait dans une variable : il est
+  // servi soit dans le panneau flottant (bureau), soit dans l'onglet Layers de la feuille
+  // (téléphone et tablette). Un seul code, donc un seul comportement — dupliquer ces
+  // interrupteurs et ces curseurs aurait garanti qu'ils divergent.
+  const layersContent = (
           <div style={{ padding: 12 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {LAYERS.filter(l => l.id !== 'traffic').map(layer => {
@@ -890,8 +863,44 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
               </div>
             </div>
           </div>
+  )
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', background: T.ink }}>
+      <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
+
+      {/* Haut, centre : bandeau FLEET (LivePage) + bannière trafic indisponible */}
+      <div style={{ position: 'absolute', top: isCompact ? 8 : 20,
+        left: isCompact ? 8 : 252, right: isCompact ? 8 : 60, zIndex: 11,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, pointerEvents: 'none',
+        marginTop: isCompact ? 44 : 0 }}>   {/* (23/09) sous l'en-tête replié des calques */}
+        {topCenter}
+        {trafficDown && (
+          <div style={{ width: 520, maxWidth: '100%', pointerEvents: 'auto' }}>
+            <Banner tone="caution" title="Traffic unavailable, retrying…" retryLabel="Retry now" onRetry={retryTraffic}>
+              SafeSky and the ADS-B feed did not answer. Club aircraft fitted with an AKcore are still shown.
+            </Banner>
+          </div>
         )}
       </div>
+
+      {/* Haut, gauche : LAYERS — panneau flottant du BUREAU seulement. Sous 1024 px ce contenu
+          part dans la feuille (onglet Layers) : 212 px pinés à 20 px du coin couvraient la
+          moitié d'un téléphone, et le coin haut-gauche est justement celui que la main masque
+          en tendant le pouce. */}
+      {!isCompact && <div style={{ ...inkPanel, position: 'absolute',
+        left: 20, top: 20, width: 212, zIndex: 10,
+        maxHeight: 'calc(100% - 40px)', overflowY: 'auto' }}>
+        <button type="button" className="ak-focus" onClick={() => setPanelOpen(p => ({ ...p, layers: !p.layers }))} aria-expanded={panelOpen.layers}
+          title={panelOpen.layers ? 'Collapse layers' : 'Show layers'}
+          style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                   padding: '10px 12px', borderBottom: panelOpen.layers ? `1px solid ${T.ruleDark}` : 'none' }}>
+          <span style={labelStyle(T.mutedDark)}>LAYERS</span>
+          {chevron(panelOpen.layers)}
+        </button>
+
+        {panelOpen.layers && layersContent}
+      </div>}
 
       {/* Bas, gauche : espaces aériens sous le clic */}
       {aspItems && (
@@ -914,7 +923,8 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
         </div>
       )}
 
-      {/* Bas, droite : LÉGENDE (repliable) */}
+      {/* Bas, droite : LÉGENDE — bureau seulement (la feuille tient lieu de légende sur mobile) */}
+      {!isCompact && (
       <div style={{ ...inkPanel, position: 'absolute', right: 16, bottom: 36, zIndex: 10, padding: showLegend ? '12px 14px' : '8px 12px', display: 'flex', flexDirection: 'column', gap: 9 }}>
         <button type="button" className="ak-focus" onClick={() => setShowLegend(v => !v)} aria-expanded={showLegend} title={showLegend ? 'Hide legend' : 'Show legend'}
           style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -925,7 +935,27 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
           <LegendRow color={trafficDown ? T.etch : SAFESKY_CLR} text={trafficDown ? 'SafeSky user · feed down' : 'SafeSky user'} muted={trafficDown} />
           <LegendRow color={trafficDown ? T.etch : T.ink} outline={trafficDown ? null : T.white} text={trafficDown ? 'Radio traffic · feed down' : 'Radio traffic · ADS-B / FLARM'} muted={trafficDown} />
         </>)}
-      </div>
+      </div>)}
+      {/* (23/09, Claude Design « Live on iPad/iPhone ») FEUILLE ET CONTRÔLES — sous 1024 px.
+          Au repos on ne voit que le bandeau flotte et deux boutons de 44 px à hauteur de pouce ;
+          tout le reste est APPELÉ. Sur téléphone la feuille monte du bas (crans 380 px / plein),
+          sur tablette elle s'ancre en bas à droite sur 360 px, laissant la moitié haute de la
+          carte et le coin haut-gauche libres. */}
+      {isCompact && !sheet.open && (
+        <div style={{ position: 'absolute', right: 12, bottom: 76, zIndex: 12,
+          display: 'flex', flexDirection: isPhone ? 'column' : 'row', gap: 8 }}>
+          <MapControl icon="list"     label="Fleet"  onClick={() => setSheet({ open: true, tab: 'fleet' })} />
+          <MapControl icon="settings" label="Layers" onClick={() => setSheet({ open: true, tab: 'layers' })} />
+        </div>
+      )}
+      {isCompact && (
+        <MapSheet open={sheet.open} onOpenChange={(o) => setSheet(sh => ({ ...sh, open: o }))}
+          tab={sheet.tab} onTabChange={(t) => setSheet(sh => ({ ...sh, tab: t }))}
+          isPhone={isPhone} bottomOffset={isPhone ? 56 : 0}
+          tabs={[{ key: 'fleet', label: 'Fleet' }, { key: 'layers', label: 'Layers' }]}>
+          {sheet.tab === 'layers' ? layersContent : compactFleet}
+        </MapSheet>
+      )}
     </div>
   )
 }
