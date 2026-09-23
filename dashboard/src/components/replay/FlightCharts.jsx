@@ -27,19 +27,38 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
   const [active, setActive] = useState(() =>
     Object.fromEntries(PARAMS.map(p => [p.key, p.defaultOn]))
   )
+  // (23/09, Christophe : « les traits du graphique sont flous ») Le canvas était figé à
+  // 1200 px de large puis ÉTIRÉ en CSS à la largeur réelle : tout était interpolé, traits
+  // épaissis et baveux. On le dimensionne maintenant à sa taille affichée × la densité
+  // d'écran, et on dessine en pixels CSS (ctx.scale) → 1 px demandé = 1 px affiché.
+  const [cssW, setCssW] = useState(0)
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setCssW(Math.round(e.contentRect.width)))
+    ro.observe(el)
+    setCssW(Math.round(el.getBoundingClientRect().width))
+    return () => ro.disconnect()
+  }, [])
 
   const data = useMemo(() => subsampleFrames(frames || [], 1000), [frames])
   const activeParams = PARAMS.filter(p => active[p.key])
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !data || data.length < 2 || activeParams.length === 0) return
+    if (!canvas || !cssW || !data || data.length < 2 || activeParams.length === 0) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const W = canvas.width
-    const H = canvas.height - 4
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const dpr = Math.min(window.devicePixelRatio || 1, 3)
+    if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(height * dpr)) {
+      canvas.width  = Math.round(cssW * dpr)
+      canvas.height = Math.round(height * dpr)
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)   // tout se dessine en pixels CSS
+    const W = cssW
+    const H = height - 4
+    ctx.clearRect(0, 0, W, height)
 
     const startTs = data[0].ts
     const endTs   = data[data.length - 1].ts
@@ -54,16 +73,18 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       const range = maxV - minV || 1
       const py = v => H - ((v - minV) / range) * (H - 8) - 4
 
-      // Ghost
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round'
+
+      // À venir : le tracé complet, en retrait
       ctx.beginPath()
       data.forEach((f, i) => {
         i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key] * (param.mul || 1))) : ctx.lineTo(px(f.ts), py(f[param.key] * (param.mul || 1)))
       })
-      ctx.strokeStyle = `${param.color}55`
-      ctx.lineWidth = 1.5
+      ctx.strokeStyle = `${param.color}40`
+      ctx.lineWidth = 1
       ctx.stroke()
 
-      // Played
+      // Déjà joué : même trait, à peine plus appuyé (avant : 2 px, trop lourd)
       const played = data.filter(f => f.ts <= currentTs)
       if (played.length > 1) {
         ctx.beginPath()
@@ -71,39 +92,26 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
           i === 0 ? ctx.moveTo(px(f.ts), py(f[param.key] * (param.mul || 1))) : ctx.lineTo(px(f.ts), py(f[param.key] * (param.mul || 1)))
         })
         ctx.strokeStyle = param.color
-        ctx.lineWidth = 2
+        ctx.lineWidth = 1.25
         ctx.stroke()
       }
-
-      // Dot
-      const cur = played[played.length - 1]
-      if (cur) {
-        ctx.beginPath()
-        ctx.arc(px(cur.ts), py(cur[param.key] * (param.mul || 1)), 4, 0, Math.PI * 2)
-        ctx.fillStyle = param.color
-        ctx.fill()
-        ctx.strokeStyle = T.ink
-        ctx.lineWidth = 1
-        ctx.stroke()
-      }
+      // (23/09) PLUS DE PASTILLE au point courant : une boule cerclée par série faisait
+      // un chapelet de billes sur le curseur, et la valeur exacte est déjà lue en grand
+      // dans le bandeau d'instruments juste au-dessus.
     })
 
     // Curseur de lecture — (23/09) SEULE marque de position depuis la suppression de la barre
     // de progression : trait PLEIN (avant : pointillé pâle) + poignée au pied, pour qu'on voie
     // tout de suite où on en est et que la zone se devine « grattable ».
-    const cx = px(currentTs)
-    ctx.strokeStyle = T.amber
-    ctx.lineWidth = 1.5
+    const cx = Math.round(px(currentTs)) + 0.5   // + 0.5 → trait de 1 px vraiment net
+    ctx.strokeStyle = T.ink                      // encre, pas ambre : l'ambre sert déjà à la courbe G
+    ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(cx, 0)
     ctx.lineTo(cx, H)
     ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(cx - 5, H); ctx.lineTo(cx + 5, H); ctx.lineTo(cx, H - 7); ctx.closePath()
-    ctx.fillStyle = T.amber
-    ctx.fill()
 
-  }, [data, currentTs, activeParams])
+  }, [data, currentTs, activeParams, cssW, height])
 
   // Drag to seek
   const handleMouseDown = (e) => {
@@ -143,13 +151,21 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
         {PARAMS.map(p => {
           const on = active[p.key]
           return (
+            // (23/09, Christophe : « on ne voit pas assez ce qui est sélectionné ») La série
+            // tracée prend le FOND ENCRE et un texte blanc — le même marqueur de sélection que
+            // les vitesses de lecture juste en dessous. Avant, actif et inactif ne différaient
+            // que par la teinte du filet et du texte : illisible à 10 px. La pastille garde la
+            // couleur RÉELLE de la courbe (cerclée de blanc pour ressortir sur l'encre).
             <button key={p.key} type="button" className="ak-focus" aria-pressed={on} onClick={() => toggle(p.key)} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '3px 8px', borderRadius: T.radius.sm, cursor: 'pointer',
-              border: `1px solid ${on ? T.ink : C.border}`, background: T.card,
+              display: 'flex', alignItems: 'center', gap: 7,
+              padding: '4px 9px', borderRadius: T.radius.sm, cursor: 'pointer',
+              border: `1px solid ${on ? T.ink : C.border}`,
+              background: on ? T.ink : T.card,
             }}>
-              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: T.radius.pill, background: on ? p.color : 'transparent', border: `1.5px solid ${on ? p.color : T.etch}` }} />
-              <span style={{ fontFamily: C.mono, fontSize: 10, fontWeight: 500, color: on ? T.ink : T.etch, letterSpacing: '0.08em' }}>
+              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: T.radius.pill,
+                background: on ? p.color : 'transparent',
+                border: `1px solid ${on ? 'rgba(255,255,255,0.75)' : T.etch}` }} />
+              <span style={{ fontFamily: C.mono, fontSize: 11, fontWeight: 500, color: on ? T.white : T.etch, letterSpacing: '0.08em' }}>
                 {p.label}{p.unit ? ` ${p.unit}` : ''}
               </span>
             </button>
@@ -160,10 +176,8 @@ export default function FlightCharts({ frames, currentTs, height = 130, onSeek }
       {/* Chart */}
       <canvas
         ref={canvasRef}
-        width={1200}
-        height={height}
         onMouseDown={handleMouseDown}
-        style={{ width: '100%', height: height, display: 'block', borderRadius: T.radius.md, cursor: 'ew-resize' }}
+        style={{ width: '100%', height, display: 'block', cursor: 'ew-resize' }}
       />
     </div>
   )

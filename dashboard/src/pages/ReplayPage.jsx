@@ -63,7 +63,7 @@ function Timeline({ frames, currentTs, playing, onPlayPause, speed, onSpeedChang
 
       {/* Temps écoulé (gros) puis l'heure UTC correspondante (discrète) */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <span style={{ ...monoStyle(18, T.ink), fontWeight: 500, minWidth: 66 }}>{fmtTime(currentTs - startTs)}</span>
+        <span style={{ ...monoStyle(15, T.ink), fontWeight: 500, minWidth: 58 }}>{fmtTime(currentTs - startTs)}</span>
         <span style={{ ...monoStyle(11, T.graphite) }}>{fmtUTC(currentTs)}</span>
       </div>
 
@@ -104,27 +104,27 @@ function DataStrip({ frame }) {
   if (!frame) return null
   const n = (v, f = (x) => String(Math.round(x))) => (v == null || Number.isNaN(v) ? '−−−' : f(v))
   const items = [
-    { l: 'GS',    u: 'KT',  v: n(frame.spd),  w: 62 },
-    { l: 'ALT',   u: 'FT',  v: n(frame.alt),  w: 78 },
-    { l: 'AGL',   u: 'FT',  v: n(frame.agl),  w: 78 },
-    { l: 'VSI',   u: 'FPM', v: n(frame.vspd, x => `${x > 0 ? '+' : ''}${Math.round(x)}`), w: 86 },
-    { l: 'HDG',   u: '',    v: n(frame.hdg, x => String(Math.round(x) % 360).padStart(3, '0')), w: 62 },
-    { l: 'G',     u: '',    v: n(frame.normAc, x => x.toFixed(2)), w: 62, dot: Math.abs(frame.normAc) > 2 ? T.amber : null },
-    { l: 'RPM',   u: '',    v: n(frame.rpm),  w: 70 },
-    { l: 'OAT',   u: '°C',  v: n(frame.oat),  w: 62 },
-    { l: 'PHASE', u: '',    v: frame.phase,   w: 120, dot: PHASE_COLORS[frame.phase], text: true },
+    { l: 'GS',    u: 'KT',  v: n(frame.spd),  w: 54 },
+    { l: 'ALT',   u: 'FT',  v: n(frame.alt),  w: 62 },
+    { l: 'AGL',   u: 'FT',  v: n(frame.agl),  w: 62 },
+    { l: 'VSI',   u: 'FPM', v: n(frame.vspd, x => `${x > 0 ? '+' : ''}${Math.round(x)}`), w: 70 },
+    { l: 'HDG',   u: '',    v: n(frame.hdg, x => String(Math.round(x) % 360).padStart(3, '0')), w: 54 },
+    { l: 'G',     u: '',    v: n(frame.normAc, x => x.toFixed(2)), w: 54, dot: Math.abs(frame.normAc) > 2 ? T.amber : null },
+    { l: 'RPM',   u: '',    v: n(frame.rpm),  w: 58 },
+    { l: 'OAT',   u: '°C',  v: n(frame.oat),  w: 54 },
+    { l: 'PHASE', u: '',    v: frame.phase,   w: 104, dot: PHASE_COLORS[frame.phase], text: true },
   ]
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'stretch',
       background: T.card, borderTop: T.border }}>
       {items.map((item, i) => (
-        <div key={item.l} style={{ minWidth: item.w, padding: '8px 16px',
+        <div key={item.l} style={{ minWidth: item.w, padding: '7px 14px',
           borderLeft: i === 0 ? 'none' : T.border }}>
           <div style={labelStyle(T.etch)}>{item.u ? `${item.l} ${item.u}` : item.l}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 3 }}>
             {item.dot && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill,
               background: item.dot, flexShrink: 0 }} />}
-            <span style={{ ...monoStyle(item.text ? 13 : 20, T.ink), fontWeight: 500, lineHeight: 1 }}>{item.v}</span>
+            <span style={{ ...monoStyle(item.text ? 12 : 15, T.ink), fontWeight: 500, lineHeight: 1 }}>{item.v}</span>
           </div>
         </div>
       ))}
