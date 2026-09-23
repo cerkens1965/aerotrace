@@ -178,26 +178,31 @@ function addOpenAIPLayers(map, activeAirportTypes, dark = false) {
   map.setFilter('airports-labels', f)
 }
 
+// Palette par défaut de ces contrôles : le panneau ENCRE du bureau. Servis dans la feuille de
+// la carte (sous 1024 px) ils reçoivent `pal` = la palette du LAVIS — sans quoi piste et
+// poignées restent dessinées pour un fond sombre et s'effacent sur fond clair (23/09).
+const INK_PAL = { text: T.white, muted: T.mutedDark, rule: T.ruleDark }
+
 // ── Contrôles du panneau Layers (22/09, Claude Design « Live ») — déclarés AU NIVEAU MODULE (sinon remontés
 //    à chaque rendu et le glisser casse, cf. CLAUDE.md). Piste 4 px #2C2C2C, poignée 12 px, interrupteur 30×16.
-function Switch({ on, onClick, label, disabled }) {
+function Switch({ on, onClick, label, disabled, pal = INK_PAL }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick} disabled={disabled} className="ak-focus"
       style={{ all: 'unset', cursor: 'pointer', flexShrink: 0, width: 30, height: 16, boxSizing: 'border-box', borderRadius: 999, padding: '0 2px',
-               display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start', background: on ? T.amber : T.ruleDark }}>
+               display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start', background: on ? T.amber : pal.rule }}>
       <span style={{ width: 12, height: 12, borderRadius: 999, background: on ? T.ink : T.etch }} />
     </button>
   )
 }
 
 // Curseur simple (trame d'un espace aérien, 0-30 %).
-function SliderTrack({ value, max = 30, color, onChange, label }) {
+function SliderTrack({ value, max = 30, color, onChange, label, pal = INK_PAL }) {
   const pct = (value / max) * 100
   return (
     <div style={{ position: 'relative', height: 12, display: 'flex', alignItems: 'center' }}>
-      <div style={{ position: 'absolute', left: 0, right: 0, height: 4, background: T.ruleDark, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, height: 4, background: pal.rule, borderRadius: 999 }} />
       <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 4, background: color, borderRadius: 999 }} />
-      <div style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: 999, background: T.white, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, width: 12, height: 12, borderRadius: 999, background: pal.text, pointerEvents: 'none' }} />
       <input type="range" min={0} max={max} step={1} value={value} aria-label={label} className="ak-focus"
         onChange={e => onChange(Number(e.target.value))}
         style={{ position: 'absolute', width: '100%', opacity: 0, cursor: 'pointer', height: 12, margin: 0 }} />
@@ -207,7 +212,7 @@ function SliderTrack({ value, max = 30, color, onChange, label }) {
 
 // Bande d'altitude à DEUX poignées (pointeur : la poignée la plus proche suit ; clavier : flèches ±500 ft).
 const BAND_STEP = 500
-function BandSlider({ range, onChange, disabled }) {
+function BandSlider({ range, onChange, disabled, pal = INK_PAL }) {
   const trackRef = useRef(null)
   const dragRef = useRef(null)
   const toVal = (clientX) => {
@@ -237,13 +242,13 @@ function BandSlider({ range, onChange, disabled }) {
       aria-label={idx === 0 ? 'Traffic band floor' : 'Traffic band ceiling'}
       aria-valuemin={0} aria-valuemax={ALT_MAX} aria-valuenow={range[idx]} aria-valuetext={formatAlt(range[idx])}
       style={{ position: 'absolute', left: `calc(${pct}% - 6px)`, top: 0, width: 12, height: 12, borderRadius: 999,
-               background: disabled ? T.etch : T.white, cursor: disabled ? 'default' : 'grab' }} />
+               background: disabled ? T.etch : pal.text, cursor: disabled ? 'default' : 'grab' }} />
   )
   return (
     <div ref={trackRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'relative', height: 12, touchAction: 'none', cursor: disabled ? 'default' : 'pointer' }}>
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 4, height: 4, background: T.ruleDark, borderRadius: 999 }} />
-      <div style={{ position: 'absolute', left: `${l}%`, width: `${r - l}%`, top: 4, height: 4, background: disabled ? T.ruleDark : T.etch, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 4, height: 4, background: pal.rule, borderRadius: 999 }} />
+      <div style={{ position: 'absolute', left: `${l}%`, width: `${r - l}%`, top: 4, height: 4, background: disabled ? pal.rule : T.etch, borderRadius: 999 }} />
       {thumb(0, l)}{thumb(1, r)}
     </div>
   )
@@ -811,12 +816,12 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
                         <span style={rowText(on)}>{layer.label}</span>
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
-                        {layer.hasSlider && on && <span style={monoStyle(11, T.mutedDark)}>{opacity[layer.id]}%</span>}
-                        <Switch on={on} onClick={() => toggleLayer(layer.id)} label={`Show ${layer.label}`} />
+                        {layer.hasSlider && on && <span style={monoStyle(11, PP.muted)}>{opacity[layer.id]}%</span>}
+                        <Switch on={on} onClick={() => toggleLayer(layer.id)} label={`Show ${layer.label}`} pal={PP} />
                       </span>
                     </div>
                     {layer.hasSlider && on && (
-                      <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} label={`${layer.label} shading`} onChange={v => handleOpacity(layer.id, v)} />
+                      <SliderTrack value={opacity[layer.id]} max={30} color={layer.color} label={`${layer.label} shading`} onChange={v => handleOpacity(layer.id, v)} pal={PP} />
                     )}
                     {layer.id === 'airports' && on && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 18 }}>
@@ -844,14 +849,14 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <span style={labelStyle(PP.muted)}>TRAFFIC BAND</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={monoStyle(11, trafficDown || !visible.traffic ? T.mutedDark : T.white)}>{trafficDown ? '−−−' : `${bandCount} AC`}</span>
-                  <Switch on={visible.traffic} onClick={() => toggleLayer('traffic')} label="Show traffic" />
+                  <span style={monoStyle(11, trafficDown || !visible.traffic ? PP.muted : PP.text)}>{trafficDown ? '−−−' : `${bandCount} AC`}</span>
+                  <Switch on={visible.traffic} onClick={() => toggleLayer('traffic')} label="Show traffic" pal={PP} />
                 </span>
               </div>
-              <BandSlider range={altRange} onChange={setAltRange} disabled={trafficDown || !visible.traffic} />
+              <BandSlider range={altRange} onChange={setAltRange} disabled={trafficDown || !visible.traffic} pal={PP} />
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-                <span style={monoStyle(11, trafficDown ? T.mutedDark : T.white)}>{formatAlt(altRange[0])}</span>
-                <span style={monoStyle(11, trafficDown ? T.mutedDark : T.white)}>{formatAlt(altRange[1])}</span>
+                <span style={monoStyle(11, trafficDown ? PP.muted : PP.text)}>{formatAlt(altRange[0])}</span>
+                <span style={monoStyle(11, trafficDown ? PP.muted : PP.text)}>{formatAlt(altRange[1])}</span>
               </div>
             </div>
 
@@ -864,7 +869,7 @@ export default function AerotraceMap({ flyTo = null, onTrafficState, topCenter =
                   return (
                     <button key={bm.id} type="button" role="radio" aria-checked={on} className="ak-focus" onClick={() => changeBasemap(bm.id)}
                       style={{ all: 'unset', cursor: 'pointer', padding: '3px 8px', borderRadius: 4, fontFamily: T.sans, fontSize: 11,
-                               border: `1px solid ${on ? T.white : PP.rule}`, color: on ? T.white : T.mutedDark }}>
+                               border: `1px solid ${on ? PP.text : PP.rule}`, color: on ? PP.text : PP.muted }}>
                       {bm.label}
                     </button>
                   )

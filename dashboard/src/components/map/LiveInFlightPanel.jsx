@@ -32,16 +32,16 @@ function figures(ac) {
   }
 }
 
-function Figure({ label, value }) {
+function Figure({ label, value, P }) {
   return (
     <div>
-      <div style={labelStyle(T.mutedDark)}>{label}</div>
-      <div style={{ ...monoStyle(16, value === '−−−' ? T.etch : T.white), fontWeight: 500, marginTop: 2 }}>{value}</div>
+      <div style={labelStyle(P.muted)}>{label}</div>
+      <div style={{ ...monoStyle(16, value === '−−−' ? P.dim : P.text), fontWeight: 500, marginTop: 2 }}>{value}</div>
     </div>
   )
 }
 
-function FlightCard({ ac, owner, onLocate }) {
+function FlightCard({ ac, owner, onLocate, P, onInk }) {
   const [hover, setHover] = useState(false)
   const p = posOf(ac)
   const f = figures(ac)
@@ -53,25 +53,25 @@ function FlightCard({ ac, owner, onLocate }) {
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       title={p ? `Show ${ident(ac)} on the map` : `${ident(ac)}: no position yet`}
       style={{ all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: p ? 'pointer' : 'default',
-               border: `1px solid ${hover && p ? T.etch : T.ruleDark}`, borderRadius: 6, padding: 12 }}>
+               border: `1px solid ${hover && p ? T.etch : P.rule}`, borderRadius: 6, padding: 12 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <AircraftPhoto ac={ac} width={56} height={42} onInk />
+        <AircraftPhoto ac={ac} width={56} height={42} onInk={onInk} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ ...monoStyle(15, T.white), fontWeight: 500 }}>{ident(ac)}</span>
-            <StatusDot tone={lte ? 'caution' : 'ok'} onInk text={lte ? 'LTE LOST' : 'LIVE'} />
+            <span style={{ ...monoStyle(15, P.text), fontWeight: 500 }}>{ident(ac)}</span>
+            <StatusDot tone={lte ? 'caution' : 'ok'} onInk={onInk} text={lte ? 'LTE LOST' : 'LIVE'} />
           </div>
-          <div style={{ fontFamily: T.sans, fontSize: 11, color: T.mutedDark, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>
+          <div style={{ fontFamily: T.sans, fontSize: 11, color: P.muted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 12 }}>
-        <Figure label="ALT FT" value={f.alt} />
-        <Figure label="GS KT" value={f.gs} />
-        <Figure label="HDG" value={f.hdg} />
+        <Figure label="ALT FT" value={f.alt} P={P} />
+        <Figure label="GS KT" value={f.gs} P={P} />
+        <Figure label="HDG" value={f.hdg} P={P} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.ruleDark}` }}>
-        <span style={{ fontFamily: T.sans, fontSize: 11, color: T.mutedDark, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ac.pilotName || 'Pilot unknown'}</span>
-        <span style={{ ...monoStyle(12, T.white), fontWeight: 500 }} title="Time since take-off">{hhmm(ac.flightStart)}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${P.rule}` }}>
+        <span style={{ fontFamily: T.sans, fontSize: 11, color: P.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ac.pilotName || 'Pilot unknown'}</span>
+        <span style={{ ...monoStyle(12, P.text), fontWeight: 500 }} title="Time since take-off">{hhmm(ac.flightStart)}</span>
       </div>
     </button>
   )
@@ -111,7 +111,7 @@ export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading,
     <aside aria-label="In flight" style={embedded
       ? { width: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }
       : { width: 320, flexShrink: 0, background: T.ink, borderLeft: `1px solid ${T.ruleDark}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 14px', borderBottom: `1px solid ${T.ruleDark}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 16px 14px', borderBottom: `1px solid ${P.rule}` }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span style={{ fontFamily: T.sans, fontSize: 14, color: P.text }}>In flight</span>
           <span style={monoStyle(11, P.muted)}>{loading ? '−' : inFlight.length}</span>
@@ -129,10 +129,10 @@ export default function LiveInFlightPanel({ inFlight = [], owners = {}, loading,
         ) : inFlight.length === 0 ? (
           <EmptyState text={<span style={{ color: P.muted }}>No aircraft in flight.</span>} />
         ) : (
-          inFlight.map(ac => <FlightCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} onLocate={onLocate} />)
+          inFlight.map(ac => <FlightCard key={ac.id} ac={ac} owner={ownerOf(ac, owners)} onLocate={onLocate} P={P} onInk={!embedded} />)
         )}
         {!loading && (
-          <div style={{ ...labelStyle(T.etch), marginTop: 2, textAlign: inFlight.length ? 'left' : 'center' }}>
+          <div style={{ ...labelStyle(P.dim), marginTop: 2, textAlign: inFlight.length ? 'left' : 'center' }}>
             {trafficDown ? `TRAFFIC −−− · FLEET ${stamp}` : `UPDATED ${stamp}`}
           </div>
         )}
