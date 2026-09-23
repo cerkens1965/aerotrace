@@ -122,19 +122,39 @@ function addOpenAIPLayers(map, activeAirportTypes) {
   map.setFilter('airports-labels', f)
 }
 
+// (23/09, retours Christophe) VISIBILITÉ DES TRACES SUR TOUS LES FONDS.
+// Constat : le traitillé gris du vol à venir (#6b7280 à 55 %) se perdait sur les fonds
+// chargés, et la trace parcourue « en blanc » — en fait la phase GROUND, roulage — devenait
+// invisible dès qu'on passait sur une carte claire.
+// Remède conforme à la charte : on ne change aucune couleur de la palette, on ajoute sous
+// chaque trace un LISERÉ (casing) de contraste OPPOSÉ — technique cartographique classique.
+// Le liseré n'est pas décoratif : c'est lui qui garantit la lecture sur clair, sur satellite
+// et sur relief, sans introduire de couleur hors charte.
+//   · vol à venir  : traitillé ENCRE sur ruban blanc  → lisible sur sombre ET sur clair
+//   · vol parcouru : couleur de phase sur liseré ENCRE, sauf la phase CRITICAL (déjà encre)
+//                    qui reçoit un liseré BLANC — d'où un liseré choisi par segment.
 function addTraceLayers(map) {
+  const round = { 'line-join': 'round', 'line-cap': 'round' }
   if (!map.getSource('ghost-trace')) {
     map.addSource('ghost-trace', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
+    map.addLayer({ id: 'ghost-trace-casing', type: 'line', source: 'ghost-trace',
+      layout: round,
+      paint:  { 'line-color': '#ffffff', 'line-width': 5, 'line-opacity': 0.55 },
+    })
     map.addLayer({ id: 'ghost-trace', type: 'line', source: 'ghost-trace',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint:  { 'line-color': '#6b7280', 'line-width': 2, 'line-opacity': 0.55, 'line-dasharray': [4, 2] },
+      layout: round,
+      paint:  { 'line-color': T.ink, 'line-width': 2, 'line-opacity': 0.8, 'line-dasharray': [2.5, 2] },
     })
   }
   if (!map.getSource('played-trace')) {
     map.addSource('played-trace', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    map.addLayer({ id: 'played-trace-casing', type: 'line', source: 'played-trace',
+      layout: round,
+      paint:  { 'line-color': ['get', 'casing'], 'line-width': 7, 'line-opacity': 0.9 },
+    })
     map.addLayer({ id: 'played-trace', type: 'line', source: 'played-trace',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint:  { 'line-color': ['get', 'color'], 'line-width': 5, 'line-opacity': 1 },
+      layout: round,
+      paint:  { 'line-color': ['get', 'color'], 'line-width': 4, 'line-opacity': 1 },
     })
   }
 }
@@ -585,7 +605,11 @@ export default function ReplayMap({
           if (coords.length >= 2)
             features.push({
               type: 'Feature',
-              properties: { color: PHASE_COLORS[curPhase] ?? '#22c55e' },
+              properties: (() => {
+                const color = PHASE_COLORS[curPhase] ?? T.ok
+                // liseré opposé : encre sous une couleur claire, blanc sous l'encre
+                return { color, casing: color === T.ink ? '#ffffff' : T.ink }
+              })(),
               geometry: { type: 'LineString', coordinates: [...coords] },
             })
           coords = [[sub[i].lon, sub[i].lat]]
