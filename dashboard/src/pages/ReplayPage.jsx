@@ -108,28 +108,35 @@ const G_MARK_LIMIT = 2.0   // seuil de marquage sur la trace (demande Christophe
 function FlightSummary({ frames, flight }) {
   const st = useMemo(() => {
     if (!frames?.length) return null
-    let vmax = 0, amax = 0, gEx = 1
+    // (23/09, correction) On affichait le plus grand ÉCART à 1 g sous l'étiquette « G MAX » :
+    // sur un vol où la poussée la plus marquée descend à 0,13 g, la case annonçait « 0.13 » —
+    // illisible, et faux au sens du mot « max ». On donne maintenant les DEUX BORNES, max et
+    // min, ce qu'un pilote attend : la ressource d'un côté, la poussée de l'autre.
+    let vmax = 0, amax = 0, gMax = null, gMin = null
     for (const f of frames) {
       if (f.spd > vmax) vmax = f.spd
       if (f.alt > amax) amax = f.alt
       const g = f.normAc
-      if (g != null && !Number.isNaN(g) && Math.abs(g - 1) > Math.abs(gEx - 1)) gEx = g
+      if (g == null || Number.isNaN(g)) continue
+      if (gMax == null || g > gMax) gMax = g
+      if (gMin == null || g < gMin) gMin = g
     }
     const dur = flight?.duration || Math.round((frames[frames.length - 1].ts - frames[0].ts) / 1000)
-    return { vmax: Math.round(vmax), amax: Math.round(amax), g: gEx, dur }
+    return { vmax: Math.round(vmax), amax: Math.round(amax), gMax, gMin, dur }
   }, [frames, flight])
   if (!st) return null
   const cell = { padding: '8px 10px', border: T.border, borderRadius: T.radius.sm, background: T.card }
   const items = [
     { l: 'GS MAX KT', v: String(st.vmax) },
     { l: 'ALT MAX FT', v: String(st.amax) },
-    { l: 'G MAX',     v: st.g.toFixed(2), dot: Math.abs(st.g) > G_MARK_LIMIT ? T.amber : null },
+    { l: 'G MAX / MIN', v: st.gMax == null ? '−−−' : `${st.gMax.toFixed(2)} / ${st.gMin.toFixed(2)}`,
+      dot: (st.gMax != null && (Math.abs(st.gMax) > G_MARK_LIMIT || Math.abs(st.gMin) > G_MARK_LIMIT)) ? T.amber : null },
     { l: 'BLOCK',     v: formatDuration(st.dur) },
   ]
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, width: '100%' }}>
       {items.map(it => (
-        <div key={it.l} style={cell}>
+        <div key={it.l} style={{ ...cell, gridColumn: it.l.includes('/') ? '1 / -1' : undefined }}>
           <div style={labelStyle(T.etch)}>{it.l}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
             {it.dot && <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: T.radius.pill, background: it.dot, flexShrink: 0 }} />}

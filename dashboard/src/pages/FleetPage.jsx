@@ -51,6 +51,14 @@ function fmtMB(mb) {
   if (mb == null) return '—'
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`
 }
+// (23/09, décision Christophe) TARIF DE LA DATA : 8 centimes par MB. EMnify ne renvoyait pas
+// de coût (tous les « € » étaient à 0,00) et n'en donne de toute façon qu'au MOIS. En partant
+// du volume, le coût devient calculable sur N'IMPORTE QUELLE période — jour, mois, année — et
+// pour n'importe quelle sélection de boîtiers. Un seul chiffre à changer le jour où le tarif
+// change ; le coût EMnify, s'il finit par arriver, reste lisible dans /fleetMeta.
+const EUR_PER_MB = 0.08
+const costOf = (mb) => (mb == null ? null : mb * EUR_PER_MB)
+
 // (23/09, demande Christophe) TOTAUX DE CONSOMMATION SUR LA SÉLECTION COURANTE — jour, mois,
 // année. Les cartes du haut donnent le total FLOTTE ; ici on somme les lignes RÉELLEMENT
 // affichées (recherche et filtres compris), pour répondre à « combien consomment ces
@@ -61,13 +69,13 @@ function fmtMB(mb) {
 function UsageTotals({ rows, total, meta }) {
   const sum = (k) => rows.reduce((a, d) => a + (Number(d[k]) || 0), 0)
   const day = sum('lastDayMB'), month = sum('dataUsageMB'), year = sum('yearMB')
-  const cost = rows.reduce((a, d) => a + (Number(d.dataCost) || 0), 0)
   const cur = meta?.currency || 'EUR'
+  const eur = (mb) => `${costOf(mb).toFixed(2)} ${cur}`
   const dayLbl = meta?.lastDayDate ? `DAY · ${meta.lastDayDate.slice(8)}/${meta.lastDayDate.slice(5, 7)}` : 'DAY'
   const items = [
-    { l: dayLbl, v: fmtMB(day) },
-    { l: `MONTH · ${(monthLabel(meta?.monthKey).split(' ')[0] || '').slice(0, 3).toUpperCase()}`, v: fmtMB(month), sub: `${cost.toFixed(2)} ${cur}` },
-    { l: `YEAR · ${meta?.year || ''}`.trim(), v: fmtMB(year) },
+    { l: dayLbl, v: fmtMB(day), sub: eur(day) },
+    { l: `MONTH · ${(monthLabel(meta?.monthKey).split(' ')[0] || '').slice(0, 3).toUpperCase()}`, v: fmtMB(month), sub: eur(month) },
+    { l: `YEAR · ${meta?.year || ''}`.trim(), v: fmtMB(year), sub: eur(year) },
   ]
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28, flexWrap: 'wrap',
@@ -458,7 +466,7 @@ export default function FleetPage() {
             <span style={big(19, dev.dataUsageMB != null ? T.ink : T.etch)}>{dev.dataUsageMB != null ? Math.round(dev.dataUsageMB) : MISSING}</span>
             <span style={lab}>MB</span>
           </span>
-          <span style={lab}>{dev.dataCost != null ? `€ ${dev.dataCost.toFixed(2)}` : '€ −−−'} · {mbh != null ? `${mbh.toFixed(1)} MB/H` : '−−− MB/H'}</span>
+          <span style={lab}>{dev.dataUsageMB != null ? `€ ${costOf(dev.dataUsageMB).toFixed(2)}` : '€ −−−'} · {mbh != null ? `${mbh.toFixed(1)} MB/H` : '−−− MB/H'}</span>
         </div>
       )
     } },
@@ -526,8 +534,10 @@ export default function FleetPage() {
               status={seen24h === devices.length ? { tone: 'ok', text: 'All seen in the last 24 h' } : { tone: 'caution', text: `${devices.length - seen24h} silent for more than 24 h` }} />
             <MetricCard label={`DATA · ${monthLabel(emnify?.monthKey).toUpperCase()}`} value={monthVal} unit={monthUnit}
               status={pct != null ? { tone: pct >= 70 ? 'caution' : 'ok', text: `${pct} % of ${fmtMB(pool)} pool` } : { tone: 'off', text: syncText }} />
-            <MetricCard label="COST · MONTH" value={emnify?.totalCost != null ? emnify.totalCost.toFixed(2) : null} unit={currency}
-              status={emnify?.totalCost != null && totalHours >= 1 ? { tone: 'off', text: `${(emnify.totalCost / totalHours).toFixed(2)} ${currency} per flight hour` } : { tone: emnify ? 'ok' : 'off', text: syncText }} />
+            <MetricCard label="COST · MONTH" value={monthMB != null ? costOf(monthMB).toFixed(2) : null} unit={currency}
+              status={monthMB != null && totalHours >= 1
+                ? { tone: 'off', text: `${(costOf(monthMB) / totalHours).toFixed(2)} ${currency} per flight hour · ${EUR_PER_MB.toFixed(2)} ${currency}/MB` }
+                : { tone: emnify ? 'ok' : 'off', text: syncText }} />
           </div>
 
           <section aria-label="Needs attention" style={{ background: T.ink, borderRadius: T.radius.md, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
