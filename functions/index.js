@@ -7,6 +7,10 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore')
 const { getStorage } = require('firebase-admin/storage')
 const crypto = require('crypto')
 const zlib = require('zlib')
+// (24/09) Attribution d'un vol : règles PURES, éprouvées par `node test/attribution.js`.
+// Elles vivent dans leur propre module pour être vérifiables sans déployer — ces heures
+// partent dans des carnets de vol.
+const { ownersOf, decideAttribution } = require('./attribution')
 
 const STORAGE_BUCKET = 'aerotrace-74217.firebasestorage.app'
 
@@ -342,6 +346,7 @@ async function resolveClubByAircraft(db, icao24, reg) {
   const m = byReg || byCall || byIcao
   return m ? { clubId: m.clubId || null, registration: m.registration || reg,
                ownership: m.ownership || 'club', ownerPilotId: m.ownerPilotId || '',
+               ownerPilotIds: ownersOf(m),                // (24/09) copropriété
                typeDesig: m.typeDesig || null } : null   // (2026-09-21) propriétaire · (23/09) type → limites
 }
 
@@ -380,8 +385,14 @@ async function normalizeFlightDoc(db, flightId, data) {
   // (2026-09-21, règle Christophe) AVION PROPRIÉTAIRE → le pilote EST le propriétaire, aucune attribution à faire.
   // Auto-validé en solo SAUF si le boîtier a identifié un autre pilote (PIN) ou un instructeur (vol d'instruction
   // sur avion privé) : ces cas restent dans la file « To assign », pré-remplis, pour décision humaine.
-  const ownerAc   = resolved?.ownership === 'owner' && resolved?.ownerPilotId ? resolved.ownerPilotId : null
-  const ownerAuto = !!ownerAc && !instructor && (!pilot || pilot.id === ownerAc)
+  //
+  // (24/09) COPROPRIÉTÉ — l'automatisme ne s'arme QUE si la fiche ne désigne qu'un seul
+  // propriétaire. À plusieurs, personne ne peut être crédité en silence : le vol part en
+  // REVENDICATION (`claim`), chaque copropriétaire le voit et dit si c'est lui. Un carnet
+  // qui crédite d'office la mauvaise personne ne se corrige qu'au prochain audit de licence
+  // — on préfère un vol non attribué à un vol faussement attribué.
+  const owners = resolved?.ownership === 'owner' ? (resolved.ownerPilotIds || []) : []
+  const att    = decideAttribution(owners, pilot, instructor)
 
   // ── (23/09, demande Christophe) ÉTUDE DU VOL : dépassements de facteur de charge ──
   // GARDE-FOU VOULU : on n'évalue QUE des limites saisies pour CET avion et explicitement
@@ -438,13 +449,18 @@ async function normalizeFlightDoc(db, flightId, data) {
     aircraftType: data.aircraft_type || null,
     icao24: data.icao24 || null,
     fileName: (data.csvStoragePath || `${data.flight_id || flightId}.csv`).split('/').pop(),
-    pilotId: pilot?.id || ownerAc || null,
-    pilotRole: ownerAuto ? 'pilot' : (data.pilot_role || (pilot ? 'pilot' : null)),
+    pilotId: att.pilotId,
+    pilotRole: att.validated ? 'pilot' : (data.pilot_role || (pilot ? 'pilot' : null)),
     instructorId: instructor?.id || null,
     instructorOnboard: instructor ? true : null,
-    flightType: ownerAuto ? 'solo' : null,
-    validated: ownerAuto,                                  // propriétaire → auto ; sinon l'admin/instructeur assigne depuis le carnet
-    autoAssigned: ownerAuto ? 'owner' : null,
+    flightType: att.validated ? 'solo' : null,
+    validated: att.validated,                              // propriétaire → auto ; sinon l'admin/instructeur assigne depuis le carnet
+    autoAssigned: att.autoAssigned,
+    // (24/09) COMMENT on a su, jamais effacé ensuite : 'declared' = code saisi à l'avion (le
+    // boîtier le sait), 'owner' = seul propriétaire, 'claimed' = revendiqué après le vol,
+    // 'assigned' = posé au bureau. Le carnet ne doit pas présenter une déduction comme un fait.
+    pilotSource: att.pilotSource,
+    claim: att.claim,
     startTs, endTs,
     duration: stats?.duration ?? 0,
     maxAlt: stats?.maxAlt ?? null,
@@ -460,7 +476,7 @@ async function normalizeFlightDoc(db, flightId, data) {
     normalizedAt: FieldValue.serverTimestamp(),
   }
   await db.collection('flights').doc(flightId).set(patch, { merge: true })
-  console.log(`normalizeFlight ${flightId}: club=${clubId} ac=${aircraftIdent} start=${startTs} dur=${patch.duration} maxAlt=${patch.maxAlt} ${patch.depIcao || '?'}->${patch.arrIcao || '?'}`)
+  console.log(`normalizeFlight ${flightId}: club=${clubId} ac=${aircraftIdent} start=${startTs} dur=${patch.duration} maxAlt=${patch.maxAlt} ${patch.depIcao || '?'}->${patch.arrIcao || '?'} pilot=${att.pilotId || '∅'}/${att.pilotSource || 'none'}${att.claim ? ` claim=${att.claim.candidates.length}` : ''}`)
 }
 
 exports.normalizeFlight = onDocumentWritten(
@@ -555,10 +571,22 @@ async function syncAircraftToBox(after, tag) {
   const db = getFirestore()
   // (2026-09-20) PILOTE PAR DÉFAUT : avion en propriété privée (ownership 'owner') → trigramme du pilote
   // propriétaire poussé au boîtier (« owner ») → affiché par l'écran comme pilote par défaut (AirKi View v274).
+  //
+  // (24/09) COPROPRIÉTÉ : `owners` = TOUS les trigrammes, pour que l'écran puisse demander
+  // « qui pilote ? » en une pression. `owner` (pilote par défaut) n'est renseigné que s'il
+  // n'y en a QU'UN : à plusieurs, pré-remplir un nom, c'est refaire la supposition qu'on
+  // cherche à éviter. Trigrammes seulement, jamais les noms : ce document est PUBLIC en
+  // lecture (le boîtier le lit sans jeton, cf. règle deviceConfigPublic).
   let owner = ''
-  if (after.ownership === 'owner' && after.ownerPilotId) {
-    try { const ps = await db.doc(`pilots/${after.ownerPilotId}`).get()
-          owner = String(ps.data()?.trigram || '').trim().toUpperCase().slice(0, 3) } catch (e) { console.warn('[syncAircraft] owner lookup', e) }
+  let owners = []
+  if (after.ownership === 'owner') {
+    const ids = ownersOf(after)
+    for (const id of ids) {
+      try { const ps = await db.doc(`pilots/${id}`).get()
+            const tg = String(ps.data()?.trigram || '').trim().toUpperCase().slice(0, 3)
+            if (tg) owners.push(tg) } catch (e) { console.warn('[syncAircraft] owner lookup', e) }
+    }
+    if (owners.length === 1) owner = owners[0]
   }
   const devs = await db.collection('devices').where('callSign', '==', cs).get()
   const done = []
@@ -566,13 +594,14 @@ async function syncAircraftToBox(after, tag) {
     const boxId = d.data().boxId || d.id
     const ref = db.doc(`deviceConfigPublic/${boxId}`)
     const cur = (await ref.get()).data() || {}
-    if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type && (cur.owner || '') === owner) continue
+    const sameOwners = (cur.owners || []).join(',') === owners.join(',')
+    if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type && (cur.owner || '') === owner && sameOwners) continue
     await ref.set({
-      boxId, reg: cs, type, hex, owner,
+      boxId, reg: cs, type, hex, owner, owners,
       updatedAt: FieldValue.serverTimestamp(),
       updatedBy: `auto-sync fiche aéronef (${tag})`,
     }, { merge: true })
-    console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type} owner=${owner || '∅'}`)
+    console.log(`[syncAircraft] ${cs} → ${boxId}: hex=${hex} type=${type} owner=${owner || '∅'} owners=${owners.join('/') || '∅'}`)
     done.push(`${cs}→${boxId}:${hex || '∅'}`)
   }
   return done
@@ -584,8 +613,26 @@ exports.syncAircraftIdentity = onDocumentWritten(
     const before = event.data?.before?.data() || null
     const after  = event.data?.after?.data()  || null
     if (!after) return                                       // suppression → rien
+
+    // (24/09) MIGRATION EN DOUCEUR vers la copropriété. `ownerPilotIds` devient la source ;
+    // `ownerPilotId` est tenu sur le PREMIER nom parce que tout le dashboard le lit encore
+    // (fiche avion, règle propriétaire du carnet, noms de la page In flight). Une fiche
+    // ancienne se convertit d'elle-même à sa première écriture — pas de script à lancer, pas
+    // de fenêtre où les deux champs se contredisent. La ré-écriture redéclenche ce trigger
+    // UNE fois, puis converge : la deuxième passe ne trouve plus rien à corriger.
+    const want = ownersOf(after)
+    const curIds = Array.isArray(after.ownerPilotIds) ? after.ownerPilotIds : null
+    if (want.length && (!curIds || curIds.join('|') !== want.join('|')
+                        || String(after.ownerPilotId || '') !== want[0])) {
+      await getFirestore().doc(`aircraft/${event.params.acId}`)
+        .set({ ownerPilotIds: want, ownerPilotId: want[0] }, { merge: true })
+      console.log(`[syncAircraft] ${event.params.acId}: owners alignés → ${want.join('/')}`)
+    }
+
     const same = (k) => String(before?.[k] ?? '') === String(after[k] ?? '')
-    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig') && same('ownership') && same('ownerPilotId')) return
+    const sameOwners = (before?.ownerPilotIds || []).join('|') === (after.ownerPilotIds || []).join('|')
+    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig')
+        && same('ownership') && same('ownerPilotId') && sameOwners) return
     await syncAircraftToBox(after, event.params.acId)
   }
 )
@@ -817,6 +864,109 @@ exports.claimAccess = onCall({ region: 'europe-west1' }, async (req) => {
   // Non désigné → accès en attente. On NE crée PAS de doc user (base propre).
   const u = userSnap.exists ? userSnap.data() : {}
   return { authorized: false, role: u.role || 'user', clubId: u.clubId || '', email }
+})
+
+// ─── (24/09) REVENDICATION D'UN VOL — copropriété ────────────────────────────────
+// Un vol sur avion détenu à plusieurs n'est attribué à personne : chaque copropriétaire le
+// voit et répond. Cette fonction est le SEUL chemin d'écriture pour un pilote — les règles
+// Firestore réservent l'écriture des vols aux instructeurs et admins, et c'est très bien :
+// on ne veut pas qu'un compte puisse s'attribuer un vol quelconque depuis le navigateur.
+// Ici l'admin SDK écrit, après avoir vérifié que l'appelant est bien l'un des candidats.
+//
+// `mine: false` sert deux fois : récuser un vol qu'on ne revendique pas (il part dans la file
+// d'attribution une fois que tous ont dit non), et RENDRE un vol auto-attribué — le cas du
+// propriétaire qui prête son appareil et à qui on crédite des heures qu'il n'a pas volées.
+//
+// Premier arrivé, premier servi. Une deuxième revendication ne vole pas le vol au premier :
+// elle marque un CONFLIT, que l'admin tranche depuis le carnet.
+exports.claimFlight = onCall({ region: 'europe-west1' }, async (req) => {
+  const uid = req.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+  const flightId = String(req.data?.flightId || '')
+  if (!flightId) throw new HttpsError('invalid-argument', 'flightId is required')
+  const mine = req.data?.mine !== false          // défaut : je revendique
+
+  const db = getFirestore()
+  const me = (await db.doc(`users/${uid}`).get()).data() || {}
+  const myPilotId = String(me.pilotId || '')
+  if (!myPilotId) throw new HttpsError('failed-precondition', 'Your account is not linked to a pilot profile yet.')
+
+  const out = await db.runTransaction(async (tx) => {
+    const fRef = db.doc(`flights/${flightId}`)
+    const fSnap = await tx.get(fRef)
+    if (!fSnap.exists) throw new HttpsError('not-found', 'This flight no longer exists.')
+    const f = fSnap.data()
+    if (f.archived === true) throw new HttpsError('failed-precondition', 'This flight is archived.')
+    if (me.role !== 'super_admin' && f.clubId && me.clubId && f.clubId !== me.clubId) {
+      throw new HttpsError('permission-denied', 'This flight belongs to another club.')
+    }
+
+    const claim = f.claim || null
+    const candidates = Array.isArray(claim?.candidates) ? claim.candidates : []
+    const isCandidate = candidates.includes(myPilotId)
+    // Vol auto-attribué au seul propriétaire : lui seul peut le rendre.
+    const isAutoOwner = f.pilotSource === 'owner' && f.pilotId === myPilotId
+    if (!isCandidate && !isAutoOwner) throw new HttpsError('permission-denied', 'This flight is not yours to claim.')
+
+    const stamp = FieldValue.serverTimestamp()
+
+    if (mine) {
+      if (f.pilotId === myPilotId) return { state: 'already-yours' }
+      if (f.pilotId) {                                   // quelqu'un a répondu avant → conflit, pas de vol volé
+        const disputedBy = [...new Set([...(claim?.disputedBy || []), myPilotId])]
+        tx.set(fRef, { claim: { ...claim, state: 'disputed', disputedBy } }, { merge: true })
+        return { state: 'conflict', pilotId: f.pilotId }
+      }
+      tx.set(fRef, {
+        pilotId: myPilotId, pilotRole: 'pilot', flightType: f.flightType || 'solo',
+        validated: true, pilotSource: 'claimed', autoAssigned: null,
+        claim: { ...(claim || {}), state: 'settled', candidates, settledPilotId: myPilotId, claimedBy: uid, claimedAt: stamp },
+      }, { merge: true })
+      return { state: 'claimed' }
+    }
+
+    if (isAutoOwner) {                                   // « ce n'est pas moi » sur un vol auto-attribué
+      tx.set(fRef, {
+        pilotId: null, pilotRole: null, flightType: null, validated: false,
+        autoAssigned: null, pilotSource: null,
+        claim: { state: 'unclaimed', candidates: [], declinedBy: [myPilotId], releasedBy: uid, releasedAt: stamp },
+      }, { merge: true })
+      return { state: 'released' }
+    }
+
+    const declinedBy = [...new Set([...(claim?.declinedBy || []), myPilotId])]
+    // Tous ont dit non : le vol n'est plus une affaire de copropriétaires, il rejoint la file d'attribution.
+    const all = candidates.every((c) => declinedBy.includes(c))
+    tx.set(fRef, { claim: { ...claim, state: all ? 'unclaimed' : 'open', declinedBy } }, { merge: true })
+    return { state: all ? 'unclaimed' : 'declined' }
+  })
+
+  console.log(`claimFlight ${flightId}: pilot ${myPilotId} (uid ${uid}) mine=${mine} → ${out.state}`)
+  return out
+})
+
+// Backfill ONE-SHOT de la copropriété (admin) : aligne ownerPilotIds / ownerPilotId sur toutes
+// les fiches d'un coup, sans attendre qu'on les ouvre une par une. Idempotent.
+exports.backfillOwnerIds = onCall({ region: 'europe-west1' }, async (req) => {
+  const uid = req.auth?.uid
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign-in required')
+  const db = getFirestore()
+  const me = (await db.doc(`users/${uid}`).get()).data() || {}
+  if (me.role !== 'admin' && me.role !== 'super_admin') throw new HttpsError('permission-denied', 'Admin only')
+  const snap = await db.collection('aircraft').get()
+  const done = []
+  for (const d of snap.docs) {
+    const a = d.data()
+    if (a.ownership !== 'owner') continue
+    const want = ownersOf(a)
+    if (!want.length) continue
+    const cur = Array.isArray(a.ownerPilotIds) ? a.ownerPilotIds : null
+    if (cur && cur.join('|') === want.join('|') && String(a.ownerPilotId || '') === want[0]) continue
+    await d.ref.set({ ownerPilotIds: want, ownerPilotId: want[0] }, { merge: true })
+    done.push(`${a.callSign || a.registration || d.id}:${want.join('/')}`)
+  }
+  console.log(`backfillOwnerIds by ${me.email || uid}: ${done.length} fiche(s) — ${done.join(' ') || '∅'}`)
+  return { updated: done }
 })
 
 // ============================================================
