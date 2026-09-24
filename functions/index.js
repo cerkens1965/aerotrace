@@ -398,7 +398,15 @@ async function normalizeFlightDoc(db, flightId, data) {
 
   // Le code d'abord (chemin historique, et le clavier de l'avion club), le trigramme ensuite :
   // c'est lui que l'écran envoie quand le pilote a été choisi par son NOM dans la liste.
-  let pilot = data.pilot_code ? await resolvePilotByPin(db, clubId, data.pilot_code) : null
+  // (24/09) L'IDENTIFIANT DE FICHE D'ABORD : il ne dépend ni du club ni d'une étiquette qu'on
+  // peut renommer. Le code ensuite (clavier de l'avion club), le trigramme en dernier — les deux
+  // restent lus pour les boîtiers qui n'ont pas encore la v228.
+  let pilot = null
+  if (data.pilot_id) {
+    const ps = await db.doc(`pilots/${data.pilot_id}`).get()
+    if (ps.exists && ps.data().archived !== true) pilot = { id: ps.id, isInstructor: ps.data().isInstructor === true }
+  }
+  if (!pilot && data.pilot_code)    pilot = await resolvePilotByPin(db, clubId, data.pilot_code)
   if (!pilot && data.pilot_trigram) pilot = await resolvePilotByTrigram(db, clubId, data.pilot_trigram)
   const instructor = data.instr_code ? await resolvePilotByPin(db, clubId, data.instr_code) : null
 
@@ -599,8 +607,10 @@ async function syncAircraftToBox(after, tag) {
   // lecture (le boîtier le lit sans jeton, cf. règle deviceConfigPublic).
   let owner = ''
   let owners = []
+  let ownerIds = []
   if (after.ownership === 'owner') {
     const ids = ownersOf(after)
+    ownerIds = ids            // (24/09) l'identifiant de fiche ne change jamais, le trigramme si
     for (const id of ids) {
       try { const ps = await db.doc(`pilots/${id}`).get()
             const tg = String(ps.data()?.trigram || '').trim().toUpperCase().slice(0, 3)
@@ -615,9 +625,10 @@ async function syncAircraftToBox(after, tag) {
     const ref = db.doc(`deviceConfigPublic/${boxId}`)
     const cur = (await ref.get()).data() || {}
     const sameOwners = (cur.owners || []).join(',') === owners.join(',')
+                    && (cur.ownerIds || []).join(',') === ownerIds.join(',')
     if (cur.reg === cs && (cur.hex || '') === hex && (cur.type || '') === type && (cur.owner || '') === owner && sameOwners) continue
     await ref.set({
-      boxId, reg: cs, type, hex, owner, owners,
+      boxId, reg: cs, type, hex, owner, owners, ownerIds,
       updatedAt: FieldValue.serverTimestamp(),
       updatedBy: `auto-sync fiche aéronef (${tag})`,
     }, { merge: true })

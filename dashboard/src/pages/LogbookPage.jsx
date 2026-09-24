@@ -196,8 +196,11 @@ function PeriodStats({ list, strong }) {
     </span>
   )
 }
+// (24/09) Les fonds étaient des gris inventés (#FBFAF7, #EDE9E2) — proches des jetons, mais
+// hors charte : trois beiges au lieu d'un, et personne ne sait lequel fait foi. Le papier de la
+// charte suffit à marquer un niveau, les filets à séparer.
 const LEVEL = [
-  { pad: '12px 20px 12px 16px', bg: '#FBFAF7', title: { fontFamily: T.sans, fontSize: 15, fontWeight: 600, color: T.ink } },
+  { pad: '12px 20px 12px 16px', bg: T.paper, title: { fontFamily: T.sans, fontSize: 15, fontWeight: 600, color: T.ink } },
   { pad: '10px 20px 10px 40px', bg: T.card,    title: { fontFamily: T.sans, fontSize: 13, fontWeight: 600, color: T.ink } },
   { pad: '8px 20px 8px 64px',   bg: T.card,    title: { ...monoStyle(12, T.graphite), letterSpacing: '0.04em' } },
 ]
@@ -550,7 +553,7 @@ function QCheck({ checked, mixed = false, onChange, label }) {
       ref={el => { if (el) el.indeterminate = mixed && !checked }}
       onChange={e => onChange(e.target.checked)}
       style={{ appearance: 'none', WebkitAppearance: 'none', margin: 0, width: 16, height: 16, flexShrink: 0, cursor: 'pointer', borderRadius: 3,
-               border: `1.5px solid ${checked || mixed ? T.ink : T.etch}`, background: checked ? T.ink : mixed ? '#EDE9E2' : T.card,
+               border: `1.5px solid ${checked || mixed ? T.ink : T.etch}`, background: checked ? T.ink : mixed ? T.rule : T.card,
                backgroundImage: checked ? "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5 L6.5 11.5 L12.5 4.5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E\")" : 'none',
                backgroundSize: 'contain' }} />
   )
@@ -559,7 +562,7 @@ function QCheck({ checked, mixed = false, onChange, label }) {
 function QueueRow({ f, onAssign, onReplay, sel }) {
   const on = sel.has(f.id)
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '16px 84px minmax(120px, 170px) minmax(0, 1fr) 60px 80px auto', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #EDE9E2', background: on ? '#FBFAF7' : undefined }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '16px 84px minmax(120px, 170px) minmax(0, 1fr) 60px 80px auto', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: T.border, background: on ? T.paper : undefined }}>
       <QCheck checked={on} onChange={v => sel.set([f.id], v)} label={`Select the ${utcTime(f.startTs)} flight`} />
       <span style={monoStyle(12, T.ink)}>{utcTime(f.startTs)}</span>
       <span style={monoStyle(12, T.ink)}><Route f={f} /></span>
@@ -628,11 +631,11 @@ function AssignQueue({ queue, total, autoCount, acOf, onAssign, onReplay, onRevi
               onChange={v => sel.set(d.flights.map(f => f.id), v)} label={`Select the ${d.flights.length} flights of ${dayCaps(d.ts)}`} />
             <span style={{ ...labelStyle(T.ink), fontSize: 11 }}>{dayCaps(d.ts)}</span>
             <span style={labelStyle(T.etch)}>{nFlights(d.flights.length)} · {formatDuration(sumDuration(d.flights))}</span>
-            <span aria-hidden="true" style={{ flex: 1, height: 1, background: '#EDE9E2' }} />
+            <span aria-hidden="true" style={{ flex: 1, height: 1, background: T.rule }} />
           </div>
           {d.groups.map(g => (
             <div key={g.key} style={{ background: T.card, border: T.border, borderRadius: T.radius.md, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#FBFAF7', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: T.paper, flexWrap: 'wrap' }}>
                 <QCheck checked={g.flights.every(f => sel.has(f.id))} mixed={g.flights.some(f => sel.has(f.id))}
                   onChange={v => sel.set(g.flights.map(f => f.id), v)} label={`Select the ${g.flights.length} flights of ${g.ac.label}`} />
                 {g.ac.rec ? <AircraftPhoto ac={g.ac.rec} width={40} height={30} /> : null}
@@ -835,7 +838,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
                 <div role="button" tabIndex={0} aria-expanded={open} className="ak-focus"
                   onClick={() => setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n })}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenGroups(prev => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n }) } }}
-                  style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 10px', padding: '10px 12px', borderTop: T.border, background: open ? '#FBFAF7' : T.card, cursor: 'pointer' }}>
+                  style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 10px', padding: '10px 12px', borderTop: T.border, background: open ? T.paper : T.card, cursor: 'pointer' }}>
                   <span style={{ display: 'flex', color: T.graphite, transform: open ? 'rotate(90deg)' : 'none' }}><Icon name="chevron-right" size={14} /></span>
                   <span style={{ ...headingStyle(13), whiteSpace: 'nowrap' }}>{g.title}</span>
                   <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '4px 12px', minWidth: 0 }}>
