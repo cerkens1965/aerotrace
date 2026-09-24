@@ -660,10 +660,13 @@ exports.syncAircraftIdentity = onDocumentWritten(
       console.log(`[syncAircraft] ${event.params.acId}: owners alignés → ${want.join('/')}`)
     }
 
-    const same = (k) => String(before?.[k] ?? '') === String(after[k] ?? '')
-    const sameOwners = (before?.ownerPilotIds || []).join('|') === (after.ownerPilotIds || []).join('|')
-    if (before && same('callSign') && same('registration') && same('icao24') && same('typeDesig')
-        && same('ownership') && same('ownerPilotId') && sameOwners) return
+    // (24/09) PLUS DE SORTIE ANTICIPÉE SUR « RIEN N'A CHANGÉ DANS LA FICHE ».
+    // Elle comparait la fiche à elle-même et s'arrêtait là — donc un document de config
+    // INCOMPLET côté boîtier (par exemple sans ownerIds, ajouté depuis) ne se réparait jamais :
+    // ré-enregistrer la fiche ne faisait rien, et il fallait un backfill manuel.
+    // syncAircraftToBox compare déjà ce qui est POUSSÉ à ce qu'il faudrait pousser, et n'écrit
+    // que si ça diffère : la garde ci-dessus n'économisait qu'une lecture, au prix d'un état
+    // dont on ne pouvait pas sortir. Toute écriture sur la fiche revérifie donc la config.
     await syncAircraftToBox(after, event.params.acId)
   }
 )
