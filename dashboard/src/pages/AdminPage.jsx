@@ -15,7 +15,7 @@ import { photoFrame } from '../components/aircraft/photoFrame'
 import { AIRCRAFT_TYPES, CAT_LABEL, findAircraftType } from '../data/aircraftTypes'
 import {
   T, labelStyle, headingStyle, monoStyle,
-  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Input, Select, Chip, Toggle, Field, MetricCard, SearchBox,
+  Button, StatusDot, DataTable, Tabs, Drawer, EmptyState, Banner, Input, Select, Chip, Toggle, Field, MetricCard, SearchBox, Icon,
 } from '../components/ui'
 
 // (22/09) Recherche : helpers partagés (utils/search) + SearchBox de la bibliothèque.
@@ -80,17 +80,56 @@ const ReadOnly = ({ children, mono = false }) => (
 )
 
 // Section de tiroir : titre mono + filet au-dessus (sauf la première).
-const Section = ({ title, first = false, children }) => (
-  <section style={{
-    borderTop: first ? 'none' : T.border,
-    paddingTop: first ? 0 : 16, marginTop: first ? 0 : 16,
-  }}>
-    <div style={{ ...labelStyle(T.graphite), marginBottom: 12 }}>{title}</div>
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>{children}</div>
-  </section>
-)
+//
+// (24/09, Christophe : « c'est un peu le bordel dans l'affichage ») CHAPITRES REPLIABLES.
+// Une fiche avion en compte six ; tout déplié, la structure disparaît et il faut faire
+// défiler pour trouver un champ. Le premier chapitre est ouvert — c'est l'identité, ce
+// qu'on vient chercher — les autres se déplient à la demande.
+// Fermé, un chapitre ANNONCE son contenu d'un mot (`summary`) : sans ça on les rouvre un
+// par un pour retrouver le hex ou le propriétaire, et le repli coûte plus qu'il ne rapporte.
+// Le contenu se démonte quand on referme, mais l'état du formulaire vit chez le parent :
+// rien n'est perdu.
+function Section({ title, first = false, summary, defaultOpen, children }) {
+  const [open, setOpen] = useState(defaultOpen ?? first)
+  return (
+    <section style={{
+      borderTop: first ? 'none' : T.border,
+      paddingTop: first ? 0 : 16, marginTop: first ? 0 : 16,
+    }}>
+      <button type="button" className="ak-focus" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        style={{ all: 'unset', boxSizing: 'border-box', width: '100%', cursor: 'pointer',
+                 display: 'flex', alignItems: 'center', gap: 8, marginBottom: open ? 12 : 0 }}>
+        <span style={{ display: 'flex', color: T.graphite, transform: open ? 'rotate(90deg)' : 'none' }}>
+          <Icon name="chevron-right" size={14} />
+        </span>
+        <span style={labelStyle(T.graphite)}>{title}</span>
+        {!open && summary
+          ? <span style={{ ...labelStyle(T.etch), marginLeft: 'auto', minWidth: 0,
+                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+          : null}
+      </button>
+      {open && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>{children}</div>}
+    </section>
+  )
+}
 
 const full = { gridColumn: '1/-1' }
+
+// Résumés affichés quand un chapitre est replié — ce qu'on veut savoir sans l'ouvrir.
+const ownershipSummary = (form, pilots) => {
+  if ((form.ownership || 'club') !== 'owner') return 'CLUB'
+  const ids = ownerIdsOf(form)
+  if (!ids.length) return 'NO OWNER'
+  const first = pilots.find(p => p.id === ids[0])
+  const name = first ? `${first.firstName} ${first.lastName}`.trim().toUpperCase() : '?'
+  return ids.length > 1 ? `SHARED \u00b7 ${name} +${ids.length - 1}` : name
+}
+const gLimitsSummary = (code, types) => {
+  const t = code ? types?.[code] : null
+  if (!t) return 'NO TYPE FILE'
+  if (t.confirmed !== true) return 'NOT CONFIRMED'
+  return `${Number(t.gPos) > 0 ? '+' : ''}${t.gPos} / ${t.gNeg} G`
+}
 
 // Propriétaires d'une fiche, quelle que soit sa génération (liste, sinon champ historique).
 const ownerIdsOf = (a) => {
@@ -245,7 +284,7 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pil
         </div>
       </Section>
 
-      <Section title="LICENCE & RATINGS">
+      <Section title="LICENCE & RATINGS" summary={`${(form.licence || "pilot") === "student" ? "STUDENT" : "LICENSED"}${form.isInstructor ? " · FI" : ""}`}>
         <div style={full}>
           <Label>FLYING QUALIFICATION</Label>
           {/* (22/09, Claude Design Admin) Student · Licensed · FI en bascules (FI réservé au breveté) */}
@@ -276,7 +315,7 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pil
         </div>
       </Section>
 
-      <Section title="PLATFORM ROLE">
+      <Section title="PLATFORM ROLE" summary={(form.role || "user").toUpperCase()}>
         <div style={full}>
           <Label>ROLE</Label>
           {form.role === 'super_admin' ? (
@@ -294,7 +333,7 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pil
         </div>
       </Section>
 
-      <Section title="FDR">
+      <Section title="FDR" summary={form.pin ? "PIN SET" : "NO PIN"}>
         <div>
           <Label>TRIGRAM · 3 CHARS</Label>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -569,7 +608,7 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
         </div>
       </Section>
 
-      <Section title="TYPE">
+      <Section title="TYPE" summary={form.typeDesig || "NO TYPE"}>
         <div style={full}>
           <Label>TYPE DESIGNATOR · ICAO</Label>
           <TypeDesigInput
@@ -587,7 +626,7 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
         </div>
       </Section>
 
-      <Section title="TRANSPONDER">
+      <Section title="TRANSPONDER" summary={form.icao24 ? form.icao24.toUpperCase() : "NO HEX"}>
         <div style={full}>
           <Label>ICAO24 · HEX</Label>
           {/* (2026-08-31, demande Christophe) FIND (WEB) : immat → hex Mode S via hexdb.io/adsbdb.com
@@ -597,7 +636,7 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
         </div>
       </Section>
 
-      <Section title="OWNERSHIP">
+      <Section title="OWNERSHIP" summary={ownershipSummary(form, pilots)}>
         <div style={full}>
           <Label>OWNERSHIP</Label>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -613,13 +652,13 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
       {/* (23/09, 2e passe — Christophe : « par immat ce serait pas malin ») LES LIMITES
           APPARTIENNENT AU TYPE, pas à l'immatriculation : un club avec trois VL3 ne saisit
           rien trois fois. Elles se lisent ici, se modifient dans l'onglet Types. */}
-      <Section title="G ALERT THRESHOLDS">
+      <Section title="G ALERT THRESHOLDS" summary={gLimitsSummary(form.typeDesig, types)}>
         <div style={full}>
           <TypeLimitsReadOut code={form.typeDesig} types={types} />
         </div>
       </Section>
 
-      <Section title="PHOTO">
+      <Section title="PHOTO" summary={form.photoUrl ? "SET" : "NONE"}>
         <AircraftPhotoField form={form} setForm={setForm} />
       </Section>
     </div>
