@@ -61,6 +61,16 @@ const fieldBase = {
   color: T.ink, fontSize: 13, padding: '0 10px', outline: 'none',
 }
 
+// (24/09) Même cadre que fieldBase, SANS la hauteur fixe — pour un bloc de plusieurs lignes.
+// `fieldBase` est un style de CHAMP DE SAISIE : ses 34 px conviennent à un <input>, pas à un
+// encadré qui grandit avec son contenu. Réutilisé tel quel, le texte sortait de la boîte et
+// se superposait au chapitre suivant (constaté sur les seuils G, 24/09).
+const panelBase = {
+  width: '100%', boxSizing: 'border-box',
+  background: T.card, border: T.border, borderRadius: T.radius.sm,
+  color: T.ink, fontSize: 13, padding: 10,
+}
+
 const Label = ({ children }) => (
   <div style={{ ...labelStyle(T.etch), marginBottom: 6 }}>{children}</div>
 )
@@ -672,14 +682,14 @@ function TypeLimitsReadOut({ code, types }) {
   const num = v => (v == null || v === '' ? '—' : String(v))
   if (!code) return <Hint>Set the type designator above to see its structural limits.</Hint>
   if (!L) return (
-    <div style={{ ...fieldBase, padding: 10, background: T.paper }}>
+    <div style={{ ...panelBase, background: T.paper }}>
       <div style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{code}</div>
       <Hint>Nothing recorded for this type yet. Set it once, in the Types tab — it then applies
         to every {code} of the club.</Hint>
     </div>
   )
   return (
-    <div style={{ ...fieldBase, padding: 10, background: T.paper }}>
+    <div style={{ ...panelBase, background: T.paper }}>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         {[['G ALERT +', num(L.gPos), 'g'], ['G ALERT −', num(L.gNeg), 'g'],
           ['VNE', num(L.vne), 'kt'], ['VNO', num(L.vno), 'kt'], ['VA', num(L.va), 'kt']].map(([l, v, u]) => (
