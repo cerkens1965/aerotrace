@@ -243,6 +243,22 @@ function OwnersField({ form, setForm, pilots }) {
   )
 }
 
+// (24/09) GÉNÉRATEUR DE CODE PILOTE. Le code était saisi à la main, donc presque personne n'en
+// avait — et sans code, un pilote n'existe pas pour le boîtier : il ne peut ni s'identifier dans
+// l'avion, ni apparaître nommé sur l'écran. Le trigramme, lui, a son bouton « Auto » depuis
+// toujours ; le code n'avait aucune raison d'y échapper.
+// On écarte les suites qui se devinent (0000, 1234, 1111…) : ce code distingue des pilotes, il
+// ne protège rien, mais autant ne pas le rendre identique d'un club à l'autre.
+const TRIVIAL_PINS = new Set(['0000', '1234', '4321', '1111', '2222', '0123', '9999'])
+function generatePin(existing = []) {
+  const taken = new Set(existing.filter(Boolean).map(String))
+  for (let i = 0; i < 500; i++) {
+    const pin = String(Math.floor(Math.random() * 10000)).padStart(4, '0')
+    if (!taken.has(pin) && !TRIVIAL_PINS.has(pin)) return pin
+  }
+  return ''   // 10 000 codes pris : impossible en pratique, mais on ne renvoie pas un doublon
+}
+
 // ─── Trigram generator ────────────────────────────────────────────────────────
 function generateTrigram(firstName, lastName, existing = []) {
   const clean = s => s.toUpperCase().replace(/[^A-Z]/g, '')
@@ -260,13 +276,15 @@ const trigramConflictOf = (form, allTrigrams, isEdit) =>
   !!form && allTrigrams.filter(t => t !== (isEdit ? form._origTrigram : '')).includes((form.trigram || '').toUpperCase())
 
 // ─── Pilot form (corps du tiroir) ─────────────────────────────────────────────
-function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pilot }) {
+function PilotForm({ form, setForm, allTrigrams, allPins = [], currentClub, error, isEdit, pilot }) {
   const toggleLicence = (lic) => {
     setForm(p => ({
       ...p,
       licences: p.licences.includes(lic) ? p.licences.filter(l => l !== lic) : [...p.licences, lic],
     }))
   }
+
+  const autoPin = () => setForm(p => ({ ...p, pin: generatePin(allPins.filter(x => x !== p.pin)) }))
 
   const autoTrigram = () => {
     const existing = allTrigrams.filter(t => t !== form.trigram)
@@ -374,14 +392,18 @@ function PilotForm({ form, setForm, allTrigrams, currentClub, error, isEdit, pil
           {trigramConflict && <StatusDot tone="caution" text="TRIGRAM ALREADY IN USE" style={{ marginTop: 6 }} />}
         </div>
         <div>
-          <Label>PIN · 4 DIGITS</Label>
-          <input
-            type="password" value={form.pin} maxLength={4} inputMode="numeric" className="ak-focus"
-            onChange={e => setForm(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-            placeholder="••••"
-            style={{ ...fieldBase, fontFamily: T.mono, fontSize: 16, letterSpacing: '0.4em', textAlign: 'center' }}
-          />
-          <Hint>Four digits keyed on the AKview to identify the pilot.</Hint>
+          <Label>PILOT CODE · 4 DIGITS</Label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              type="password" value={form.pin} maxLength={4} inputMode="numeric" className="ak-focus"
+              onChange={e => setForm(p => ({ ...p, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+              placeholder="••••"
+              style={{ ...fieldBase, flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 16, letterSpacing: '0.4em', textAlign: 'center' }}
+            />
+            <Button size="md" onClick={autoPin} title="Pick a free code">Auto</Button>
+          </div>
+          <Hint>Identifies the pilot in the aircraft: the AKview lists them by name and sends this
+            code with the flight. A pilot without a code cannot be picked on the screen.</Hint>
           {form.pinConflict && <StatusDot tone="caution" text="DUPLICATE PIN IN THE CLUB" style={{ marginTop: 6 }} />}
         </div>
       </Section>
@@ -893,7 +915,9 @@ export default function AdminPage() {
   // ── Pilot CRUD ──────────────────────────────────────────────────────────────
   // clubId est toujours pré-rempli avec le club courant — l'utilisateur n'a
   // pas à le choisir, c'est le contexte d'opération.
-  const openNewPilot  = () => { setEditId(null); setPilotForm({ ...EMPTY_PILOT, clubId }); setError('') }
+  // (24/09) Code pré-rempli à la création : sans lui la fiche part incomplète et le pilote reste
+  // invisible du boîtier. Modifiable, bien sûr — mais le défaut n'est plus « aucun code ».
+  const openNewPilot  = () => { setEditId(null); setPilotForm({ ...EMPTY_PILOT, clubId, pin: generatePin(pilots.map(p => p.pin)) }); setError('') }
   const openEditPilot = (p) => { setEditId(p.id); setPilotForm({ ...EMPTY_PILOT, ...p, licence: p.licence || 'pilot', isInstructor: p.isInstructor ?? false, _origTrigram: p.trigram })   /* (21/09) licence absente = breveté (règle isStudent) — plus d'écriture silencieuse de 'student' */; setError('') }
 
   const savePilot = async () => {
@@ -1063,12 +1087,29 @@ export default function AdminPage() {
   const acList = activeAc.filter(a => aircraftShown.includes(a))
   const unlinked = activePilots.filter(p => !p.uid).length
   const dupPins = activePilots.filter(p => p.pinConflict).length
+  const noPinPilots = activePilots.filter(p => !p.pin)
   const fiCount = activePilots.filter(p => p.isInstructor).length
   const noHex = activeAc.filter(a => !a.icao24).length
   const noPhoto = activeAc.filter(a => !a.photoUrl).length
   const noAccess = activePilots.filter(p => !p.uid && !members.some(m => (m.email || '').toLowerCase() === (p.email || '').toLowerCase())).length
   const typePicks = [...new Set(activeAc.map(a => a.typeDesig).filter(Boolean))].sort(compareText).slice(0, 6)
   const setNotice = (tone, text) => setPurgeMsg({ tone, text })
+
+  // Attribue un code libre à chaque pilote qui n'en a pas. Les codes déjà pris — y compris ceux
+  // qu'on vient d'attribuer dans la même passe — sont écartés au fur et à mesure.
+  const giveMissingPins = async () => {
+    const taken = pilots.map(p => p.pin).filter(Boolean)
+    const done = []
+    for (const p of noPinPilots) {
+      const pin = generatePin(taken)
+      if (!pin) break
+      taken.push(pin)
+      await updateDoc(doc(db, 'pilots', p.id), { pin, updatedAt: serverTimestamp() })
+      done.push({ id: p.id, pin })
+    }
+    setPilots(prev => prev.map(p => { const d = done.find(x => x.id === p.id); return d ? { ...p, pin: d.pin } : p }))
+    setNotice('ok', `${done.length} pilot${done.length === 1 ? '' : 's'} now have a code — they can be picked on the AKview.`)
+  }
 
   const openBtn = (onClick) => <Button size="sm" icon="edit" onClick={onClick}>Open</Button>
   const pilotColumns = [
@@ -1237,12 +1278,24 @@ export default function AdminPage() {
           {metrics([
             { label: 'PILOTS ON FILE', value: activePilots.length, status: { tone: 'off', text: `${fiCount} instructor${fiCount === 1 ? '' : 's'} · ${activePilots.length - fiCount} pilots` } },
             { label: 'ACCOUNT NOT LINKED', value: unlinked, status: unlinked ? { tone: 'caution', text: 'Send an invitation code' } : { tone: 'ok', text: 'Every pilot linked' } },
-            { label: 'DUPLICATE PIN', value: dupPins, status: dupPins ? { tone: 'caution', text: 'Change one so the AKview tells them apart' } : { tone: 'ok', text: 'All PINs unique' } },
+            // (24/09) Le doublon de code était compté, l'ABSENCE de code ne l'était pas — or c'est
+            // elle qui empêche un pilote de s'identifier dans l'avion, et elle touchait 5 fiches sur 7.
+            { label: 'NO PILOT CODE', value: noPinPilots.length,
+              status: noPinPilots.length ? { tone: 'caution', text: 'They cannot be picked on the AKview' }
+                    : dupPins ? { tone: 'caution', text: 'Duplicate code: change one so the AKview tells them apart' }
+                    : { tone: 'ok', text: 'Every pilot can be identified' } },
           ])}
           {toolbar(qPilots, setQPilots, 'Name, trigram, e-mail or licence · Esc clears', pilotsList.length, activePilots.length, <>
             {archPilots.length > 0 && (
               <Button size="sm" variant="ghost" icon="archive" confirm="Purge all archived?" disabled={saving}
                 onClick={() => runPurge(archPilots, purgePilotDoc, setPilots, 'pilot')}>Purge archived ({archPilots.length})</Button>
+            )}
+            {noPinPilots.length > 0 && (
+              // (24/09) Rattrapage en un geste : cinq fiches sur sept n'avaient pas de code, et les
+              // reprendre une par une pour cliquer « Auto » n'est pas un travail d'administrateur.
+              <Button size="sm" variant="secondary" confirm={`Give ${noPinPilots.length} codes?`}
+                title="Pick a free code for every pilot who has none"
+                onClick={giveMissingPins}>Codes for {noPinPilots.length}</Button>
             )}
             <Button size="sm" variant="primary" icon="user" onClick={openNewPilot}>New pilot</Button>
           </>)}
