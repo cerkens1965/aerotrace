@@ -45,7 +45,9 @@ const EMPTY_PILOT = {
 }
 const EMPTY_AIRCRAFT = {
   registration: '', callSign: '', typeDesig: '', icao24: '', homeBase: '',
-  ownership: 'club', ownerPilotId: '',   // 'club' = avion du club · 'owner' = privé (propriétaire = un pilote)
+  // 'club' = avion du club · 'owner' = privé. (24/09) ownerPilotIds : UN nom = propriétaire,
+  // PLUSIEURS = copropriété, et la copropriété change l'attribution des vols (cf. cloud).
+  ownership: 'club', ownerPilotId: '', ownerPilotIds: [],
   photoUrl: '', photoStoragePath: '',
   photoCredit: '', photoLink: '', photoSource: '',   // (2026-08-31) photo web auto (planespotters)
   photoZoom: 1, photoX: 50, photoY: 50,              // (21/09) cadrage de la photo (zoom 1–3, point visé en %)
@@ -90,6 +92,12 @@ const Section = ({ title, first = false, children }) => (
 
 const full = { gridColumn: '1/-1' }
 
+// Propriétaires d'une fiche, quelle que soit sa génération (liste, sinon champ historique).
+const ownerIdsOf = (a) => {
+  const raw = Array.isArray(a?.ownerPilotIds) && a.ownerPilotIds.length ? a.ownerPilotIds : (a?.ownerPilotId ? [a.ownerPilotId] : [])
+  return [...new Set(raw.filter(Boolean))]
+}
+
 // (2026-09-16) Type designator OACI : combobox (datalist) sur la base Doc 8643 + saisie LIBRE d'un code
 // hors liste (5 car. max, majuscules). Affiche le modèle reconnu sous le champ, ou « code libre ».
 const TypeDesigInput = ({ value, onChange }) => {
@@ -111,6 +119,61 @@ const TypeDesigInput = ({ value, onChange }) => {
         {value
           ? (known ? `${known.name} · ${CAT_LABEL[known.cat] || known.cat}` : 'Custom code — check it against ICAO Doc 8643')
           : 'ICAO Doc 8643 designator (pick from the list or type your own)'}
+      </Hint>
+    </div>
+  )
+}
+
+// (24/09) PROPRIÉTAIRES — un nom, ou plusieurs. « Plusieurs » n'est pas un détail de saisie :
+// c'est ce qui décide si un vol est crédité tout seul ou s'il attend une réponse. Le texte
+// sous le champ le dit à la ligne, au moment où on ajoute le deuxième nom — pas dans une
+// documentation que personne ne lira.
+//
+// La liste `ownerPilotIds` est la source ; `ownerPilotId` (premier nom) reste écrit à
+// l'enregistrement, parce que le reste du dashboard le lit encore.
+function OwnersField({ form, setForm, pilots }) {
+  const ids = Array.isArray(form.ownerPilotIds) && form.ownerPilotIds.length
+    ? form.ownerPilotIds
+    : (form.ownerPilotId ? [form.ownerPilotId] : [])
+  const set = (next) => setForm(p => ({ ...p, ownerPilotIds: next, ownerPilotId: next[0] || '' }))
+  const nameOf = (id) => {
+    const p = pilots.find(x => x.id === id)
+    return p ? `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` : id
+  }
+  const free = pilots.filter(p => !ids.includes(p.id) && !p.archived)
+
+  return (
+    <div>
+      <Label>{ids.length > 1 ? `OWNERS · ${ids.length}` : 'OWNER'}</Label>
+
+      {ids.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {ids.map((id, i) => (
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 10,
+              border: `1px solid ${T.rule}`, borderRadius: T.radius.sm, padding: '7px 10px', background: T.card }}>
+              <span style={{ fontSize: 13, color: T.ink, flex: 1, minWidth: 0 }}>{nameOf(id)}</span>
+              {i === 0 && ids.length > 1 && <span style={labelStyle(T.etch)}>MAIN</span>}
+              <Button size="sm" variant="ghost" onClick={() => set(ids.filter(x => x !== id))}>Remove</Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Select
+        value=""
+        onChange={v => { if (v) set([...ids, v]) }}
+        options={sortOptions([
+          { value: '', label: ids.length ? 'Add another owner…' : 'Select owner…' },
+          ...free.map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` })),
+        ])}
+      />
+
+      <Hint>
+        {ids.length === 0
+          ? 'Pick the pilot who owns this aircraft.'
+          : ids.length === 1
+            ? 'One owner: their flights are credited to them automatically.'
+            : 'Shared ownership: flights are credited to nobody automatically. Each owner is asked on the AKview at start-up, and can confirm the flight afterwards in the logbook.'}
       </Hint>
     </div>
   )
@@ -538,21 +601,12 @@ function AircraftForm({ form, setForm, error, pilots = [], typePicks = [], types
         <div style={full}>
           <Label>OWNERSHIP</Label>
           <div style={{ display: 'flex', gap: 6 }}>
-            <Toggle active={(form.ownership || 'club') === 'club'} onClick={() => setForm(p => ({ ...p, ownership: 'club', ownerPilotId: '' }))}>Club</Toggle>
+            <Toggle active={(form.ownership || 'club') === 'club'} onClick={() => setForm(p => ({ ...p, ownership: 'club', ownerPilotId: '', ownerPilotIds: [] }))}>Club</Toggle>
             <Toggle active={form.ownership === 'owner'} onClick={() => setForm(p => ({ ...p, ownership: 'owner' }))}>Private owner</Toggle>
           </div>
         </div>
         {form.ownership === 'owner' && (
-          <div>
-            <Label>OWNER</Label>
-            <Select
-              value={form.ownerPilotId || ''}
-              onChange={v => setForm(p => ({ ...p, ownerPilotId: v }))}
-              options={sortOptions([{ value: '', label: 'Select owner…' },
-                ...pilots.filter(p => !p.archived || p.id === form.ownerPilotId).map(p => ({ value: p.id, label: `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` }))])}
-            />
-            <Hint>Flights of an owner aircraft are credited to the owner automatically.</Hint>
-          </div>
+          <div style={full}><OwnersField form={form} setForm={setForm} pilots={pilots} /></div>
         )}
       </Section>
 
@@ -862,7 +916,7 @@ export default function AdminPage() {
 
   // ── Aircraft CRUD ───────────────────────────────────────────────────────────
   const openNewAircraft  = () => { setEditId(null); setAircraftForm({ ...EMPTY_AIRCRAFT }); setError('') }
-  const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...EMPTY_AIRCRAFT, ...a }); setError('') }
+  const openEditAircraft = (a) => { setEditId(a.id); setAircraftForm({ ...EMPTY_AIRCRAFT, ...a, ownerPilotIds: ownerIdsOf(a) }); setError('') }
 
   const saveAircraft = async () => {
     if (!aircraftForm.callSign) return setError('Call sign required')
@@ -877,7 +931,11 @@ export default function AdminPage() {
         icao24:           aircraftForm.icao24,
         homeBase:         aircraftForm.homeBase,
         ownership:        aircraftForm.ownership || 'club',
-        ownerPilotId:     aircraftForm.ownership === 'owner' ? (aircraftForm.ownerPilotId || '') : '',
+        // (24/09) La LISTE fait foi ; ownerPilotId garde le premier nom tant que le reste du
+        // dashboard le lit. Avion club : les deux sont vidés, sinon un ancien propriétaire
+        // continuerait de se voir créditer des vols.
+        ownerPilotIds:    aircraftForm.ownership === 'owner' ? ownerIdsOf(aircraftForm) : [],
+        ownerPilotId:     aircraftForm.ownership === 'owner' ? (ownerIdsOf(aircraftForm)[0] || '') : '',
         photoUrl:         aircraftForm.photoUrl || '',
         photoStoragePath: aircraftForm.photoStoragePath || '',
         photoCredit:      aircraftForm.photoCredit || '',
@@ -923,7 +981,7 @@ export default function AdminPage() {
   const pilotName = (id) => { const p = pilots.find(x => x.id === id); return p ? `${p.firstName || ''} ${p.lastName || ''} ${p.trigram || ''}` : '' }
   const pilotsShown   = [...pilots].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0)).filter(p => matches(qPilots, p.archived ? 'archived' : '', p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
   const aircraftShown = [...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))
-    .filter(a => matches(qAircraft, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? `owner ${pilotName(a.ownerPilotId)}` : 'club', a.archived ? 'archived' : ''))
+    .filter(a => matches(qAircraft, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? `owner ${ownerIdsOf(a).map(pilotName).join(' ')}` : 'club', a.archived ? 'archived' : ''))
   const membersShown  = members.filter(m => matches(qAccess, m.email, m.displayName, m.role))
   const invitesShown  = pendingInvites.filter(i => matches(qAccess, i.email, i.id, i.role))
 
@@ -1014,11 +1072,12 @@ export default function AdminPage() {
     { key: 'homeBase', label: 'BASE', mono: true, render: a => a.homeBase || MISSING },
     { key: 'ownership', label: 'OWNERSHIP', render: a => {
       const isOwner = a.ownership === 'owner'
-      const owner = isOwner ? pilots.find(p => p.id === a.ownerPilotId) : null
+      const ids = isOwner ? ownerIdsOf(a) : []
+      const names = ids.map(id => { const p = pilots.find(x => x.id === id); return p ? pName(p) : null }).filter(Boolean)
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Chip strong={isOwner}>{isOwner ? 'OWNER' : 'CLUB'}</Chip>
-          {isOwner && <span style={{ fontSize: 13 }}>{owner ? pName(owner) : MISSING}</span>}
+          <Chip strong={isOwner}>{!isOwner ? 'CLUB' : ids.length > 1 ? 'SHARED' : 'OWNER'}</Chip>
+          {isOwner && <span style={{ fontSize: 13 }}>{names.length ? names.join(' + ') : MISSING}</span>}
         </div>
       )
     } },
@@ -1251,7 +1310,7 @@ export default function AdminPage() {
       {/* Aircraft drawer */}
       <Drawer closeOnOverlay={false} open={!!aircraftForm} onClose={closeAircraftForm}
         title={aircraftForm ? (aircraftForm.callSign || (editId ? 'Edit aircraft' : 'New aircraft')) : ''}
-        subtitle={aircraftForm ? [aircraftForm.typeDesig, aircraftForm.homeBase, aircraftForm.ownership === 'owner' ? 'private owner' : 'club aircraft'].filter(Boolean).join(' · ') : undefined}
+        subtitle={aircraftForm ? [aircraftForm.typeDesig, aircraftForm.homeBase, aircraftForm.ownership === 'owner' ? (ownerIdsOf(aircraftForm).length > 1 ? 'shared ownership' : 'private owner') : 'club aircraft'].filter(Boolean).join(' · ') : undefined}
         footer={
           <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             {editId ? (
