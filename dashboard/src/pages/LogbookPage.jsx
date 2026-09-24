@@ -163,7 +163,7 @@ function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
 }
 
 // Colonnes communes des tables de vols.
-const COL_DATE     = { key: 'date', label: 'DATE', mono: true, render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDateTime(f.startTs)}</span> }
+const COL_DATE     = { key: 'date', label: 'DATE', mono: true, sortValue: f => tsMillis(f.startTs), render: f => <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{formatDateTime(f.startTs)}</span> }
 // (22/09) Durée invraisemblable (> 12 h) : point ambre + valeur grisée, infobulle « exclue des totaux ».
 function DurationCell({ f }) {
   if (!isDurationSuspect(f)) return formatDuration(f.duration)
@@ -175,7 +175,7 @@ function DurationCell({ f }) {
     </span>
   )
 }
-const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', render: f => <DurationCell f={f} /> }
+const COL_DURATION = { key: 'duration', label: 'DURATION', mono: true, align: 'right', sortValue: f => (f.duration || 0), render: f => <DurationCell f={f} /> }
 const suspectDot = (n) => (n > 0 ? <StatusDot tone="caution" text={`${n} DURATION${n === 1 ? '' : 'S'} TO CHECK`} /> : null)
 
 // ─── (22/09, Christophe) Vols d'une carte rangés par ANNÉE → MOIS → JOUR ────────────────────────────────────
@@ -267,9 +267,9 @@ function FlightsByPeriod({ flights, columns: baseColumns }) {
     </div>
   )
 }
-const COL_TYPE     = { key: 'type', label: 'TYPE', render: f => <TypeBadge type={f.flightType} /> }
-const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', render: f => (f.maxAlt ? <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
-const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', render: f => <GMax f={f} /> }
+const COL_TYPE     = { key: 'type', label: 'TYPE', sortValue: f => (FLIGHT_TYPES[f.flightType]?.label || ''), render: f => <TypeBadge type={f.flightType} /> }
+const COL_ALT      = { key: 'alt', label: 'ALT MAX', mono: true, align: 'right', sortValue: f => (f.maxAlt || 0), render: f => (f.maxAlt ? <span style={{ color: T.graphite, whiteSpace: 'nowrap' }}>{`${Math.round(f.maxAlt)} ft`}</span> : DASH) }
+const COL_G        = { key: 'g', label: 'G MAX', mono: true, align: 'right', sortValue: f => (f.maxG || 0), render: f => <GMax f={f} /> }
 const colAircraft  = acLabel => ({
   key: 'aircraft', label: 'AIRCRAFT', mono: true,
   render: f => <span title={f.aircraftIdent || ''}>{acLabel ? acLabel(f.aircraftIdent) : (f.aircraftIdent || '—')}</span>,
@@ -356,7 +356,7 @@ function PilotCard({ pilot, flights, pilots, mode, acLabel, onReplay, onAssign }
   const columns = [
     COL_DATE,
     colAircraft(acLabel),
-    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
+    { key: 'route', label: 'ROUTE', mono: true, sortValue: f => `${f.depIcao || ''}${f.arrIcao || ''}`, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
     ...(mode === 'instructor' ? [{ key: 'student', label: 'STUDENT', render: f => getPilotName(pilots, f.pilotId) }] : []),
     ...(mode === 'pilot' ? [{ key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)}</span> : DASH) }] : []),
     COL_DURATION,
@@ -445,7 +445,7 @@ function AircraftCard({ ac, flights, pilots, onReplay, onAssign }) {
 
   const columns = [
     COL_DATE,
-    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
+    { key: 'route', label: 'ROUTE', mono: true, sortValue: f => `${f.depIcao || ''}${f.arrIcao || ''}`, render: f => <Route f={f} /> },   // (22/09) départ → arrivée
     { key: 'pilot', label: 'PILOT', render: f => getPilotName(pilots, f.pilotId) },
     { key: 'instr', label: 'INSTRUCTOR', render: f => (f.instructorId
       ? <span style={{ color: T.graphite }}>{getPilotName(pilots, f.instructorId)} · {presenceText(f).toLowerCase()}</span>
@@ -667,8 +667,6 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
   const [q,              setQ]              = useState('')     // (22/09) recherche texte sur les vols affichés
   const [openGroups,     setOpenGroups]     = useState(() => new Set())   // (22/09) groupes repliés (comme les cartes) : on voit la liste, on ouvre ce qu'on veut
   const [groupBy,        setGroupBy]        = useState('day')    // 'day' | 'aircraft' | 'pilot' | 'none'
-  const [sortKey,        setSortKey]        = useState('date')
-  const [sortDir,        setSortDir]        = useState('desc')
   const tableRef = useRef(null)
 
   const instructors = useMemo(() => pilots.filter(p => p.isInstructor === true), [pilots])
@@ -686,14 +684,12 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     if (q.trim()) list = list.filter(f => matches(q, acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig, getPilotName(pilots, f.pilotId),
       f.instructorId ? getPilotName(pilots, f.instructorId) : '', f.depIcao, f.arrIcao, FLIGHT_TYPES[f.flightType]?.label,
       formatDate(f.startTs), f._pending ? 'to assign' : 'validated'))
-    const key = f => sortKey === 'duration' ? (f.duration || 0)
-      : sortKey === 'g' ? (f.maxG || 0)                      // (23/09) tri par facteur de charge
-      : sortKey === 'aircraft' ? acLabel(f.aircraftIdent)
-      : sortKey === 'pilot' ? getPilotName(pilots, f.pilotId)
-      : tsMillis(f.startTs)
-    list.sort((a, b) => { const va = key(a), vb = key(b); return va < vb ? (sortDir === 'asc' ? -1 : 1) : va > vb ? (sortDir === 'asc' ? 1 : -1) : 0 })
+    // (24/09) LE TRI A QUITTÉ CETTE PAGE. Cinq bascules et une flèche reproduisaient ce que les
+    // en-têtes de colonne font désormais partout — et elles ne triaient QUE ce tableau, pas les
+    // cartes ni les autres listes. Reste l'ordre par défaut d'un carnet : le plus récent d'abord.
+    list.sort((a, b) => tsMillis(b.startTs) - tsMillis(a.startTs))
     return list
-  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, q, sortKey, sortDir, acLabel, acOf, pilots])
+  }, [flights, filterPilot, filterInstr, filterAircraft, filterType, filterStatus, q, acLabel, acOf, pilots])
 
   // (23/09, Christophe : « si la boule ne remonte pas dans le classement, je ne peux pas
   // pointer le vol ») RÈGLE D'AFFICHAGE : UNE LIGNE DE GROUPE PORTE TOUJOURS LE PIRE ÉTAT DE
@@ -713,13 +709,15 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     const out = []
     filtered.forEach(f => { const k = label(f); let g = out.find(x => x.key === k); if (!g) { g = { key: k, title: k, rows: [] }; out.push(g) } g.rows.push(f) })
     const res = out.map(withG)
-    if (sortKey === 'g') res.sort((a, b) => (sortDir === 'desc' ? b.gMax - a.gMax : a.gMax - b.gMax))
+    // (24/09) Ordonner les GROUPES est la seule chose qu'un en-tête de colonne ne sait pas faire :
+    // il trie à l'intérieur d'un tableau, pas les tableaux entre eux. On le fait donc au moment
+    // où ça compte — quand on regarde les dépassements de G — au lieu d'une bascule permanente.
+    if (filterStatus === 'galert') res.sort((a, b) => b.gMax - a.gMax)
     return res
-  }, [filtered, groupBy, acLabel, pilots, sortKey, sortDir])
+  }, [filtered, groupBy, acLabel, pilots, filterStatus])
 
   // (23/09) Les grandeurs numériques s'ouvrent en DESCENDANT : sur un tri par G, on veut le
   // vol le plus chargé en tête, pas le plus calme.
-  const setSort = k => { if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); else { setSortKey(k); setSortDir(k === 'date' || k === 'duration' || k === 'g' ? 'desc' : 'asc') } }
   const review = () => { setFilterStatus('pending'); setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0) }
 
   const pendingShown = filtered.filter(f => f._pending).map(f => f.id)
@@ -731,12 +729,12 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     // (23/09) Sur téléphone la carte porte l'essentiel : date · heure sur UNE ligne, avion,
     // terrain, pilote, durée, statut. Le type de vol et l'instructeur passent en pied de carte,
     // sur la ligne dense — l'information reste, elle cesse d'occuper deux lignes chacune.
-    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
+    { key: 'date', label: 'DATE', sortValue: f => tsMillis(f.startTs), render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
       phoneRender: f => <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{`${formatDate(f.startTs)} · ${utcTime(f.startTs)}`}</span> },
-    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
+    { key: 'aircraft', label: 'AIRCRAFT', sortValue: f => acLabel(f.aircraftIdent), render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
       phoneRender: f => <span style={monoStyle(13, T.ink)}>{[acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig || acOf(f).rec?.type].filter(Boolean).join(' · ')}</span> },
-    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
-    { key: 'pilot', label: 'PILOT', render: f => <Stack top={f.pilotId ? getPilotName(pilots, f.pilotId) : '—'} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} />,
+    { key: 'route', label: 'ROUTE', mono: true, sortValue: f => `${f.depIcao || ''}${f.arrIcao || ''}`, render: f => <Route f={f} /> },
+    { key: 'pilot', label: 'PILOT', sortValue: f => (f.pilotId ? getPilotName(pilots, f.pilotId) : ''), render: f => <Stack top={f.pilotId ? getPilotName(pilots, f.pilotId) : '—'} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} />,
       phoneRender: f => <span style={{ fontFamily: T.sans, fontSize: 13, color: T.ink }}>{f.pilotId ? getPilotName(pilots, f.pilotId) : '—'}</span> },
     { key: 'kind', label: 'TYPE · INSTRUCTOR', phone: 'minor',
       phoneRender: f => (
@@ -756,7 +754,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
     // été retirée en resserrant les colonnes), donc un vol au-dessus du seuil n'y apparaissait
     // pas — alors que c'est LA liste qu'on regarde. Pas de colonne en plus : la pastille se
     // range sous le badge de validation.
-    { key: 'status', label: 'STATUS', phone: 'minor',
+    { key: 'status', label: 'STATUS', phone: 'minor', sortValue: f => (f._pending ? 'TO ASSIGN' : 'VALIDATED'),
       phoneRender: f => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <ValidBadge validated={!f._pending} />
@@ -769,7 +767,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
         {/* la pastille au-dessus du seuil ; sinon la valeur en gris quand on trie sur le G,
             faute de quoi le tri paraîtrait sans effet (le tableau n'a pas de colonne G MAX) */}
         {gIsOver(f) ? <GAlert f={f} />
-          : (sortKey === 'g' && f.maxG ? <span style={{ ...monoStyle(11, T.graphite) }}>{`${f.maxG.toFixed(1)} G`}</span> : null)}
+          : (filterStatus === 'galert' && f.maxG ? <span style={{ ...monoStyle(11, T.graphite) }}>{`${f.maxG.toFixed(1)} G`}</span> : null)}
       </span>
     ) },
     { key: 'actions', label: '', align: 'right', render: f => (
@@ -803,15 +801,6 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
               {toggle(groupBy === 'aircraft', () => setGroupBy('aircraft'), 'AIRCRAFT')}
               {toggle(groupBy === 'pilot', () => setGroupBy('pilot'), 'PILOT')}
               {toggle(groupBy === 'none', () => setGroupBy('none'), 'NONE')}
-            </div>
-            <div role="group" aria-label="Sort by" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={labelStyle(T.etch)}>SORT</span>
-              {toggle(sortKey === 'date', () => setSort('date'), 'DATE')}
-              {toggle(sortKey === 'aircraft', () => setSort('aircraft'), 'AIRCRAFT')}
-              {toggle(sortKey === 'pilot', () => setSort('pilot'), 'PILOT')}
-              {toggle(sortKey === 'duration', () => setSort('duration'), 'DURATION')}
-              {toggle(sortKey === 'g', () => setSort('g'), 'G MAX')}
-              <Toggle mono onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))} title="Reverse the order">{sortDir === 'asc' ? '↑' : '↓'}</Toggle>
             </div>
           </div>
         </div>
@@ -850,7 +839,7 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
                         fontFamily: T.mono, fontSize: 11, fontWeight: 600, color: T.ink, whiteSpace: 'nowrap',
                       }}>{`${g.gOver} G · ${g.gMax.toFixed(1)} MAX`}</span>
                     )}
-                    {g.gOver === 0 && sortKey === 'g' && g.gMax > 0 && (
+                    {g.gOver === 0 && filterStatus === 'galert' && g.gMax > 0 && (
                       <span style={{ ...monoStyle(12, T.graphite), whiteSpace: 'nowrap' }}>{`${g.gMax.toFixed(1)} G MAX`}</span>
                     )}
                     <span style={{ ...monoStyle(12, T.graphite), textAlign: 'right', whiteSpace: 'nowrap' }}>{nFlights(g.rows.length)}</span>
@@ -899,11 +888,11 @@ function MyFlights({ me, flights, pilots, acLabel, acOf, onReplay }) {
   const first = flights[flights.length - 1]
   const pending = flights.filter(f => f._pending).length
   const columns = [
-    { key: 'date', label: 'DATE', render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
+    { key: 'date', label: 'DATE', sortValue: f => tsMillis(f.startTs), render: f => <Stack mono top={formatDate(f.startTs)} bottom={utcTime(f.startTs)} />,
       phoneRender: f => <span style={{ ...monoStyle(13, T.ink), fontWeight: 500 }}>{`${formatDate(f.startTs)} · ${utcTime(f.startTs)}`}</span> },
-    { key: 'aircraft', label: 'AIRCRAFT', render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
+    { key: 'aircraft', label: 'AIRCRAFT', sortValue: f => acLabel(f.aircraftIdent), render: f => <Stack mono top={acLabel(f.aircraftIdent)} bottom={acOf(f).rec?.typeDesig || acOf(f).rec?.type || null} />,
       phoneRender: f => <span style={monoStyle(13, T.ink)}>{[acLabel(f.aircraftIdent), acOf(f).rec?.typeDesig || acOf(f).rec?.type].filter(Boolean).join(' · ')}</span> },
-    { key: 'route', label: 'ROUTE', mono: true, render: f => <Route f={f} /> },
+    { key: 'route', label: 'ROUTE', mono: true, sortValue: f => `${f.depIcao || ''}${f.arrIcao || ''}`, render: f => <Route f={f} /> },
     ...(me.isInstructor ? [{ key: 'pilot', label: 'PILOT', render: f => <Stack strong={f.pilotId === me.id} top={getPilotName(pilots, f.pilotId)} bottom={f.pilotRole === 'student' ? 'STUDENT' : f.pilotRole === 'pilot' ? 'PILOT' : null} />,
       phoneRender: f => <span style={{ fontFamily: T.sans, fontSize: 13, color: T.ink }}>{getPilotName(pilots, f.pilotId)}</span> }] : []),
     { key: 'kind', label: 'TYPE · INSTRUCTOR', phone: 'minor',
