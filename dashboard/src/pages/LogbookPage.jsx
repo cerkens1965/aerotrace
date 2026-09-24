@@ -26,6 +26,8 @@ import { useClub } from '../contexts/ClubContext'
 import FlightAssignModal from '../components/logbook/FlightAssignModal'
 import BulkAssignDrawer from '../components/logbook/BulkAssignDrawer'
 import RedeemInvite from '../components/auth/RedeemInvite'
+import ClaimFlights from '../components/logbook/ClaimFlights'
+import { claimFlight } from '../utils/claim'
 import {
   T, labelStyle, valueStyle, headingStyle, monoStyle,
   Button, MetricCard, StatusDot, DataTable, Tabs, Banner, EmptyState, Chip, Field, Select, Toggle, Icon, SearchBox,
@@ -859,6 +861,28 @@ function FlightMatrix({ flights, pilots, aircraft, acLabel, acOf, onReplay, onAs
   )
 }
 
+// (24/09) « Ce n'est pas moi » sur un vol AUTO-attribué. Un propriétaire unique est crédité
+// sans rien faire — parfait tant qu'il vole lui-même, faux le jour où il prête son appareil.
+// Sans ce bouton, l'erreur ne se voit qu'à l'audit du carnet. Deux temps (confirm) : ce geste
+// retire des heures d'un carnet.
+function ReleaseFlight({ f }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr]   = useState('')
+  if (f.pilotSource !== 'owner') return null
+  const go = async () => {
+    setBusy(true); setErr('')
+    try { await claimFlight(f.id, false) }        // onSnapshot rafraîchit la liste tout seul
+    catch (e) { setErr(e?.message || String(e)) }
+    finally { setBusy(false) }
+  }
+  return (
+    <Button size="sm" variant="ghost" disabled={busy} confirm="Not my flight?" onClick={go}
+      title={err || 'This flight was credited to you automatically because you own the aircraft'}>
+      Not me
+    </Button>
+  )
+}
+
 // ─── MyFlights ────────────────────────────────────────────────────────────────
 // Vols du compte connecté (fiche /pilots reliée) : comme pilote (pilotId), et comme instructeur (instructorId) si
 // la fiche est instructeur. Lecture seule : « Open Loop » seulement. Métriques avec statut (maquette Claude Design).
@@ -890,7 +914,12 @@ function MyFlights({ me, flights, pilots, acLabel, acOf, onReplay }) {
     ) },
     COL_DURATION,
     { key: 'alt', label: 'MAX ALT FT', mono: true, align: 'right', phone: 'hide', render: f => (f.maxAlt ? Math.round(f.maxAlt) : DASH) },
-    { key: 'actions', label: '', align: 'right', render: f => <Button size="sm" variant="ghost" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button> },
+    { key: 'actions', label: '', align: 'right', render: f => (
+      <span style={{ display: 'inline-flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <Button size="sm" variant="ghost" icon="play" onClick={() => onReplay(f.id)}>Open Loop</Button>
+        {f.pilotId === me.id && <ReleaseFlight f={f} />}
+      </span>
+    ) },
   ]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1150,6 +1179,22 @@ export default function LogbookPage({ role }) {
       f.pilotId === me.id || (me.isInstructor === true && f.instructorId === me.id)))
   }, [flights, me])
 
+  // (24/09) VOLS À CONFIRMER — copropriété. Ils n'apparaissent dans aucune autre liste :
+  // `pilotId` est null tant que personne n'a répondu, donc ni dans « My flights », ni chez
+  // un autre copropriétaire. Sans cette section, un vol sur avion partagé serait invisible
+  // pour celui qui l'a fait.
+  const myClaims = useMemo(() => {
+    if (!me) return []
+    return sortByDateDesc(flights.filter(f =>
+      f.claim?.state === 'open' && (f.claim.candidates || []).includes(me.id)))
+  }, [flights, me])
+
+  // Les autres copropriétaires d'un vol, en clair — « shared with Bruno Martin ».
+  const othersOf = useMemo(() => (f) => {
+    if (!me) return []
+    return (f.claim?.candidates || []).filter(id => id !== me.id).map(id => getPilotName(pilots, id))
+  }, [me, pilots])
+
   // Onglet effectivement affiché : le pilote est cantonné à « My flights » ; un onglet
   // « My flights » sans fiche reliée (ou une clé inconnue venue de l'historique) retombe
   // sur All flights une fois les données chargées.
@@ -1371,7 +1416,10 @@ export default function LogbookPage({ role }) {
         ) : (
           <>
             {activeTab === 'mine' && me && (
-              <MyFlights me={me} flights={myFlights} pilots={pilots} acLabel={acLabel} acOf={acOf} onReplay={handleReplay} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <ClaimFlights flights={myClaims} acLabel={acLabel} othersOf={othersOf} />
+                <MyFlights me={me} flights={myFlights} pilots={pilots} acLabel={acLabel} acOf={acOf} onReplay={handleReplay} />
+              </div>
             )}
             {!isPilot && activeTab === 'pilots' && (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
