@@ -657,6 +657,42 @@ exports.syncAircraftIdentity = onDocumentWritten(
   }
 )
 
+// (24/09, Christophe : « son trigramme est affiché, plus son nom ») LE TRIGRAMME D'UN PILOTE
+// CHANGE, LES BOÎTIERS DOIVENT LE SAVOIR.
+// La liste des propriétaires poussée aux boîtiers est faite de TRIGRAMMES — une étiquette qui
+// appartient au pilote, pas à l'avion. Or la sync ne se déclenchait que sur la fiche AVION :
+// renommer un pilote (PLE → PTO) laissait les boîtiers avec un trigramme qui n'existe plus, et
+// l'écran, ne sachant plus le résoudre, affichait le code brut à la place du nom.
+// On réagit donc aussi aux fiches PILOTE, et uniquement au champ qui compte.
+exports.syncPilotTrigram = onDocumentWritten(
+  { document: 'pilots/{pilotId}', region: 'europe-west1' },
+  async (event) => {
+    const before = event.data?.before?.data() || null
+    const after  = event.data?.after?.data()  || null
+    if (!after || !before) return                      // création / suppression : rien à resynchroniser
+    const was = String(before.trigram || '').trim().toUpperCase()
+    const now = String(after.trigram  || '').trim().toUpperCase()
+    if (was === now) return
+
+    const db = getFirestore()
+    const pilotId = event.params.pilotId
+    // Les fiches des deux générations : tableau (copropriété) et champ historique.
+    const [byList, byLegacy] = await Promise.all([
+      db.collection('aircraft').where('ownerPilotIds', 'array-contains', pilotId).get(),
+      db.collection('aircraft').where('ownerPilotId', '==', pilotId).get(),
+    ])
+    const seen = new Set()
+    const done = []
+    for (const d of [...byList.docs, ...byLegacy.docs]) {
+      if (seen.has(d.id)) continue
+      seen.add(d.id)
+      if (d.data().archived === true) continue
+      done.push(...await syncAircraftToBox(d.data(), `trigram ${was}→${now}`))
+    }
+    console.log(`syncPilotTrigram ${pilotId}: ${was || '∅'} → ${now || '∅'} · ${seen.size} aéronef(s) resynchronisé(s) ${done.join(' ') || ''}`)
+  }
+)
+
 // Backfill ONE-SHOT (idempotent, bénin — ne fait que rejouer la sync sur l'existant) :
 // GET /backfillIdentity → applique syncAircraftToBox à TOUTES les fiches. Utilisé le 31/08
 // pour rattraper les boîtiers dont la fiche avait déjà le hex AVANT la mise en place du trigger.
