@@ -1277,7 +1277,13 @@ export default function AdminPage() {
         {tab === 'PILOTS' && (<>
           {metrics([
             { label: 'PILOTS ON FILE', value: activePilots.length, status: { tone: 'off', text: `${fiCount} instructor${fiCount === 1 ? '' : 's'} · ${activePilots.length - fiCount} pilots` } },
-            { label: 'ACCOUNT NOT LINKED', value: unlinked, status: unlinked ? { tone: 'caution', text: 'Send an invitation code' } : { tone: 'ok', text: 'Every pilot linked' } },
+            // (24/09) MÊME FAIT, MÊME LECTURE QUE L'ONGLET ACCESS. Un compte est FACULTATIF : il sert
+            // à consulter son carnet, pas à voler. Cette carte le présentait en ambre — « Send an
+            // invitation code » — comme s'il manquait quelque chose, alors qu'Access affichait la
+            // même réalité en gris et en toutes lettres. Deux lectures opposées du même chiffre.
+            // Le code PILOTE, lui, est indispensable : c'est la carte suivante, et elle est en ambre.
+            { label: 'NO DASHBOARD ACCOUNT', value: unlinked,
+              status: { tone: 'off', text: unlinked ? 'They fly, they do not sign in' : 'Every pilot signs in' } },
             // (24/09) Le doublon de code était compté, l'ABSENCE de code ne l'était pas — or c'est
             // elle qui empêche un pilote de s'identifier dans l'avion, et elle touchait 5 fiches sur 7.
             { label: 'NO PILOT CODE', value: noPinPilots.length,
