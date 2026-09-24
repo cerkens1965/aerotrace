@@ -1067,10 +1067,19 @@ export default function AdminPage() {
 
   const pendingInvites = invites.filter(i => i.status !== 'accepted')
   const pilotName = (id) => { const p = pilots.find(x => x.id === id); return p ? `${p.firstName || ''} ${p.lastName || ''} ${p.trigram || ''}` : '' }
-  const pilotsShown   = [...pilots].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0)).filter(p => matches(qPilots, p.archived ? 'archived' : '', p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
-  const aircraftShown = [...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0))
+  // (24/09, Christophe) ORDRE ALPHABÉTIQUE. Les listes sortaient dans l'ordre de Firestore —
+  // c'est-à-dire aucun ordre lisible : on cherchait un nom en balayant sept lignes, et on
+  // l'aurait cherché en balayant cent. Les archivés restent relégués à la fin.
+  // Tri sur le nom TEL QU'AFFICHÉ (prénom puis nom), pas sur le patronyme : c'est ce que l'œil
+  // suit. compareText ignore la casse et les accents (Intl.Collator).
+  const byName = (x, y) => compareText(`${x.firstName || ''} ${x.lastName || ''}`.trim(),
+                                       `${y.firstName || ''} ${y.lastName || ''}`.trim())
+  const byIdent = (x, y) => compareText(x.callSign || x.registration || '', y.callSign || y.registration || '')
+  const pilotsShown   = [...pilots].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0) || byName(x, y)).filter(p => matches(qPilots, p.archived ? 'archived' : '', p.firstName, p.lastName, p.trigram, p.email, p.accountEmail, p.licence, p.isInstructor ? 'fi instructor' : '', ...(p.licences || [])))
+  const aircraftShown = [...aircraft].sort((x, y) => (x.archived ? 1 : 0) - (y.archived ? 1 : 0) || byIdent(x, y))
     .filter(a => matches(qAircraft, a.callSign, a.registration, a.typeDesig, a.type, a.icao24, a.homeBase, a.ownership === 'owner' ? `owner ${ownerIdsOf(a).map(pilotName).join(' ')}` : 'club', a.archived ? 'archived' : ''))
   const membersShown  = members.filter(m => matches(qAccess, m.email, m.displayName, m.role))
+    .sort((x, y) => compareText(x.displayName || x.email || '', y.displayName || y.email || ''))
   const invitesShown  = pendingInvites.filter(i => matches(qAccess, i.email, i.id, i.role))
 
   // ── (22/09) Admin d'après Claude Design « Admin dashboard live build » ─────────────────────────────────────
@@ -1114,13 +1123,13 @@ export default function AdminPage() {
   const openBtn = (onClick) => <Button size="sm" icon="edit" onClick={onClick}>Open</Button>
   const pilotColumns = [
     { key: 'trigram', label: 'TRIG', mono: true, width: 62, render: p => <span style={{ ...monoStyle(13), fontWeight: 500, letterSpacing: '0.08em' }}>{p.trigram || MISSING}</span> },
-    { key: 'name', label: 'PILOT', render: p => (
+    { key: 'name', label: 'PILOT', sortValue: p => pName(p), render: p => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>{pName(p)}</span>
         <span style={{ fontSize: 11, color: T.graphite, overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.email || '—'}</span>
       </div>
     ) },
-    { key: 'qual', label: 'QUALIFICATION', render: p => (
+    { key: 'qual', label: 'QUALIFICATION', sortValue: p => `${p.licence === 'student' ? 'STUDENT' : 'LICENSED'}${p.isInstructor ? ' FI' : ''}`, render: p => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <Chip>{p.licence === 'student' ? 'STUDENT' : 'LICENSED'}</Chip>
@@ -1130,7 +1139,7 @@ export default function AdminPage() {
       </div>
     ) },
     { key: 'role', label: 'ROLE', render: p => <span style={{ fontSize: 13 }}>{roleLabel(p.role)}</span> },
-    { key: 'pin', label: 'PIN', mono: true, render: p => (
+    { key: 'pin', label: 'PIN', mono: true, sortValue: p => (p.pin ? 'A' : 'Z'), render: p => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         <span style={monoStyle(13, p.pin ? T.ink : T.etch)}>{p.pin ? '••••' : MISSING}</span>
         {p.pinConflict && <span title="Another pilot of the club has the same PIN: change one so the AKview tells them apart."><StatusDot tone="caution" text="DUPLICATE" /></span>}
@@ -1175,7 +1184,7 @@ export default function AdminPage() {
     { key: 'typeDesig', label: 'TYPE', mono: true, render: a => a.typeDesig || MISSING },
     { key: 'icao24', label: 'HEX', mono: true, render: a => <span style={{ color: a.icao24 ? T.ink : T.etch }}>{a.icao24 ? a.icao24.toUpperCase() : MISSING}</span> },
     { key: 'homeBase', label: 'BASE', mono: true, render: a => a.homeBase || MISSING },
-    { key: 'ownership', label: 'OWNERSHIP', render: a => {
+    { key: 'ownership', label: 'OWNERSHIP', sortValue: a => (a.ownership === 'owner' ? (ownerIdsOf(a).map(id => { const p = pilots.find(x => x.id === id); return p ? pName(p) : '' }).filter(Boolean).join(' ') || 'OWNER') : 'CLUB'), render: a => {
       const isOwner = a.ownership === 'owner'
       const ids = isOwner ? ownerIdsOf(a) : []
       const names = ids.map(id => { const p = pilots.find(x => x.id === id); return p ? pName(p) : null }).filter(Boolean)
@@ -1186,7 +1195,7 @@ export default function AdminPage() {
         </div>
       )
     } },
-    { key: 'status', label: 'STATUS', render: a => (!a.icao24 ? <StatusDot tone="caution" text="NO HEX" /> : !a.photoUrl ? <StatusDot tone="caution" text="NO PHOTO" /> : <StatusDot tone="ok" text="COMPLETE" />) },
+    { key: 'status', label: 'STATUS', sortValue: a => (!a.icao24 ? 'NO HEX' : !a.photoUrl ? 'NO PHOTO' : 'COMPLETE'), render: a => (!a.icao24 ? <StatusDot tone="caution" text="NO HEX" /> : !a.photoUrl ? <StatusDot tone="caution" text="NO PHOTO" /> : <StatusDot tone="ok" text="COMPLETE" />) },
     { key: 'actions', label: '', align: 'right', render: a => (
       <Actions>
         {openBtn(() => openEditAircraft(a))}

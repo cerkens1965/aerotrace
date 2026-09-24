@@ -2,7 +2,13 @@
 // Règles DS : carte blanche bordée 1 px rule, radius 6, pas d'ombre ; en-têtes Geist Mono 10 px 0.08em etch
 // (libellés écrits en capitales dans la chaîne — jamais de text-transform, une table peut contenir « AirKi ») ;
 // lignes 13 px, chiffres tabulaires ; survol fond papier ; conteneur overflow-x:auto.
-// columns : [{ key, label, align?, mono?, width?, render?(row) }] ; rows ; rowKey (clé ou fn(row, i)) ;
+// columns : [{ key, label, align?, mono?, width?, render?(row), sortValue?(row) }] ; rows ; rowKey ;
+//
+// (24/09, Christophe) TRI PAR EN-TÊTE. Une colonne est triable si elle fournit `sortValue`, ou si
+// sa valeur brute est un texte ou un nombre — on ne propose pas de trier ce qu'on ne sait pas
+// comparer. L'en-tête ACTIF passe en encre (les autres restent en etch) et porte un chevron :
+// la couleur dit QUELLE colonne trie, le chevron dit dans quel SENS. Sans tri actif, l'ordre
+// reçu du parent est conservé — c'est lui qui sait, par exemple, reléguer les archivés.
 // Sur TÉLÉPHONE (carte par ligne), trois options par colonne — sans effet sur la table :
 //   phone: 'hide'   la colonne disparaît de la carte ;
 //   phone: 'minor'  elle passe en pied de carte, sur une ligne dense, sans son libellé ;
@@ -25,15 +31,67 @@ function keyOf(row, i, rowKey) {
   return row?.id ?? i
 }
 
-export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRowClick, empty, loading = false, style }) {
+const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+
+export default function DataTable({ columns = [], rows: rawRows = [], rowKey = 'id', onRowClick, empty, loading = false, style }) {
   const [hovered, setHovered] = useState(null)
+  const [sort, setSort] = useState(null)        // { key, dir: 'asc' | 'desc' }
   const { isPhone } = useBreakpoint()
   const clickable = typeof onRowClick === 'function'
 
+  const valueOf = (c, row) => (c.sortValue ? c.sortValue(row) : row?.[c.key])
+  const sortableOf = (c) => {
+    if (!c.label) return false
+    if (c.sortValue) return true
+    const v = rawRows.length ? rawRows[0]?.[c.key] : undefined
+    return typeof v === 'string' || typeof v === 'number'
+  }
+
+  const rows = useMemo(() => {
+    if (!sort) return rawRows
+    const c = columns.find(x => x.key === sort.key)
+    if (!c) return rawRows
+    const dir = sort.dir === 'desc' ? -1 : 1
+    return [...rawRows].sort((a, b) => {
+      const va = valueOf(c, a), vb = valueOf(c, b)
+      // Une valeur absente va TOUJOURS à la fin, quel que soit le sens : « pas de valeur » n'est
+      // pas une valeur, et la voir remonter en tête au premier clic n'aide personne.
+      const ea = va == null || va === '', eb = vb == null || vb === ''
+      if (ea || eb) return ea && eb ? 0 : ea ? 1 : -1
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+      return collator.compare(String(va), String(vb)) * dir
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawRows, sort, columns])
+
+  const toggleSort = (key) => setSort(s => (
+    s?.key === key ? (s.dir === 'asc' ? { key, dir: 'desc' } : null) : { key, dir: 'asc' }
+  ))
+
   const th = (c) => ({
-    ...labelStyle(T.etch), textAlign: c.align || 'left', width: c.width, whiteSpace: 'nowrap',
-    padding: '10px 12px', borderBottom: T.border, background: T.card, fontWeight: 500,
+    ...labelStyle(sort?.key === c.key ? T.ink : T.etch), textAlign: c.align || 'left', width: c.width,
+    whiteSpace: 'nowrap', padding: '10px 12px', borderBottom: T.border, background: T.card, fontWeight: 500,
   })
+  // En-tête cliquable : le libellé reste un libellé (pas de bouton visible), seul le curseur et
+  // le chevron signalent qu'on peut trier. Troisième clic = retour à l'ordre du parent.
+  const thContent = (c) => {
+    if (!sortableOf(c)) return c.label
+    const active = sort?.key === c.key
+    return (
+      <span role="button" tabIndex={0} className="ak-focus"
+        onClick={() => toggleSort(c.key)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSort(c.key) } }}
+        title={active ? (sort.dir === 'asc' ? 'Sorted A→Z — click for Z→A' : 'Sorted Z→A — click to clear') : 'Sort by this column'}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                 justifyContent: c.align === 'right' ? 'flex-end' : 'flex-start' }}>
+        {c.label}
+        <span aria-hidden="true" style={{ display: 'flex', width: 12, color: active ? T.ink : 'transparent',
+          transform: active && sort.dir === 'desc' ? 'rotate(90deg)' : 'rotate(-90deg)' }}>
+          <Icon name="chevron-right" size={12} />
+        </span>
+      </span>
+    )
+  }
   const td = (c, last) => ({
     textAlign: c.align || 'left', padding: '10px 12px', fontSize: 13, lineHeight: 1.4, color: T.ink,
     fontFamily: c.mono ? T.mono : T.sans, fontVariantNumeric: 'tabular-nums',
@@ -150,7 +208,12 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', onRo
       <div style={{ overflowX: 'auto' }}>
         <table aria-busy={loading || undefined} style={{ width: '100%', borderCollapse: 'collapse', fontFamily: T.sans }}>
           <thead>
-            <tr>{columns.map((c) => <th key={c.key} scope="col" style={th(c)}>{c.label}</th>)}</tr>
+            <tr>{columns.map((c) => (
+              <th key={c.key} scope="col" style={th(c)}
+                aria-sort={sort?.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                {thContent(c)}
+              </th>
+            ))}</tr>
           </thead>
           <tbody>{body}</tbody>
         </table>
