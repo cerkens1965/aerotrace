@@ -350,6 +350,23 @@ async function resolveClubByAircraft(db, icao24, reg) {
                typeDesig: m.typeDesig || null } : null   // (2026-09-21) propriétaire · (23/09) type → limites
 }
 
+// (24/09, Christophe : « pourquoi garde-t-on encore ce code à 4 chiffres ? ») TRIGRAMME → pilote.
+// Le code à 4 chiffres n'était qu'une clé de transport : personne ne le tape sur un avion en
+// propriété, l'écran affiche des noms. Le trigramme est unique dans le club (l'Admin le vérifie),
+// il est déjà partout, et un pilote sans code reste ainsi identifiable — l'absence de code ne
+// peut plus faire disparaître quelqu'un en silence.
+// Même exigence que pour le PIN : on n'attribue QUE si le match est unique.
+async function resolvePilotByTrigram(db, clubId, trig) {
+  if (!clubId || !trig) return null
+  const t = String(trig).trim().toUpperCase()
+  if (!t) return null
+  const snap = await db.collection('pilots').where('clubId', '==', clubId).get()
+  const cands = snap.docs.filter((d) => d.data().archived !== true
+    && String(d.data().trigram || '').trim().toUpperCase() === t)
+  if (cands.length !== 1) return null
+  return { id: cands[0].id, isInstructor: cands[0].data().isInstructor === true }
+}
+
 // PIN → pilote, uniquement si le match est unique dans le club (sinon admin).
 async function resolvePilotByPin(db, clubId, pin) {
   if (!clubId || !pin) return null
@@ -379,7 +396,10 @@ async function normalizeFlightDoc(db, flightId, data) {
   const startTs = stats?.startTs ?? endMs
   const endTs   = stats?.endTs   ?? endMs
 
-  const pilot      = data.pilot_code ? await resolvePilotByPin(db, clubId, data.pilot_code) : null
+  // Le code d'abord (chemin historique, et le clavier de l'avion club), le trigramme ensuite :
+  // c'est lui que l'écran envoie quand le pilote a été choisi par son NOM dans la liste.
+  let pilot = data.pilot_code ? await resolvePilotByPin(db, clubId, data.pilot_code) : null
+  if (!pilot && data.pilot_trigram) pilot = await resolvePilotByTrigram(db, clubId, data.pilot_trigram)
   const instructor = data.instr_code ? await resolvePilotByPin(db, clubId, data.instr_code) : null
 
   // (2026-09-21, règle Christophe) AVION PROPRIÉTAIRE → le pilote EST le propriétaire, aucune attribution à faire.
