@@ -190,6 +190,9 @@ function OwnersField({ form, setForm, pilots }) {
     return p ? `${p.firstName} ${p.lastName}${p.trigram ? ` (${p.trigram})` : ''}` : id
   }
   const free = pilots.filter(p => !ids.includes(p.id) && !p.archived)
+  // Copropriétaires sans code pilote : le boîtier ne les embarque pas dans son annuaire.
+  const noPin = ids.map(id => pilots.find(p => p.id === id)).filter(p => p && !p.pin)
+                   .map(p => `${p.firstName} ${p.lastName}`.trim())
 
   return (
     <div>
@@ -224,6 +227,18 @@ function OwnersField({ form, setForm, pilots }) {
             ? 'One owner: their flights are credited to them automatically.'
             : 'Shared ownership: flights are credited to nobody automatically. Each owner is asked on the AKview at start-up, and can confirm the flight afterwards in the logbook.'}
       </Hint>
+      {/* (24/09) Un copropriétaire SANS code pilote ne peut pas se désigner dans l'avion :
+          l'annuaire embarqué n'emporte que les pilotes qui ont un code. L'écran affiche alors
+          son trigramme et refuse le choix — autant le dire ici, où le code se saisit. */}
+      {noPin.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 6 }}>
+          <StatusDot tone="caution" style={{ marginTop: 5 }} />
+          <span style={{ fontFamily: T.sans, fontSize: 12, lineHeight: 1.4, color: T.graphite }}>
+            {noPin.join(', ')} {noPin.length > 1 ? 'have' : 'has'} no pilot code, so {noPin.length > 1 ? 'they' : 'they'} cannot be picked on the
+            AKview at start-up. Set one in their pilot record.
+          </span>
+        </div>
+      )}
     </div>
   )
 }
