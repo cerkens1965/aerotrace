@@ -149,10 +149,14 @@ function RowActions({ f, onReplay, onAssign, canDelete, onDelete }) {
       {/* (22/09) Open Loop et Edit en boutons carrés à icône (nom en infobulle + aria-label) : la ligne tient à l'écran */}
       <Button size="sm" icon="play" onClick={() => onReplay(f.id)} title="Open Loop" aria-label="Open Loop" style={{ width: 32, padding: 0, justifyContent: 'center' }} />
       {onAssign && !f._pending && <Button size="sm" variant="ghost" icon="edit" onClick={() => onAssign(f)} title="Edit assignment" aria-label="Edit assignment" style={{ width: 32, padding: 0, justifyContent: 'center' }} />}
+      {/* (24/09, Christophe) Corbeille au lieu du mot « Delete » : la ligne gagne la place d'un
+          libellé, et les trois commandes se lisent enfin comme une famille — lecture, édition,
+          suppression. Le mot revient à l'ARMEMENT (« Delete? » à côté de l'icône) : c'est là
+          qu'il faut être explicite, pas au repos. */}
       {canDelete && (
-        <Button size="sm" variant="danger" confirm="Confirm?" onClick={() => onDelete(f.id)} title="Remove this flight from the logbook">
-          Delete
-        </Button>
+        <Button size="sm" variant="danger" icon="trash" confirm="Delete?" onClick={() => onDelete(f.id)}
+          title="Remove this flight from the logbook" aria-label="Delete this flight"
+          style={{ padding: '0 8px' }} />
       )}
     </span>
   )
@@ -1496,7 +1500,7 @@ export default function LogbookPage({ role }) {
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <Button size="sm" icon="play" onClick={() => handleReplay(f.id)}>Open Loop</Button>
                         <Button size="sm" icon="refresh" onClick={() => restoreFlight(f.id)}>Restore</Button>
-                        <Button size="sm" variant="danger" icon="close"
+                        <Button size="sm" variant="danger" icon="trash"
                           onClick={() => { setPurgeState(null); setPurgeAsk({ ids: [f.id], label: `${acLabel(f.aircraftIdent) || 'this flight'} · ${formatDate(f.startTs)}` }) }}>Purge</Button>
                       </div>
                     ) },

@@ -1108,7 +1108,7 @@ export default function AdminPage() {
     { key: 'act', label: '', align: 'right', render: r => (
       <Actions>
         <Button size="sm" icon="refresh" onClick={() => { (kind === 'pilot' ? restorePilot : restoreAircraft)(r); setNotice('ok', `${kind === 'pilot' ? pName(r) : (r.callSign || r.registration)} restored: back in the lists and totals.`) }}>Restore</Button>
-        <Button size="sm" variant="danger" icon="close" confirm="Delete for ever?" title="Purge: permanent"
+        <Button size="sm" variant="danger" icon="trash" confirm="Delete for ever?" title="Purge: permanent"
           onClick={() => (kind === 'pilot' ? runPurge([r], purgePilotDoc, setPilots, 'pilot') : runPurge([r], purgeAircraftDoc, setAircraft, 'aircraft'))}>Purge</Button>
       </Actions>
     ) },

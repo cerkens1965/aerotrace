@@ -14,6 +14,9 @@ const PATHS = {
   download: ['M12 3 V15', 'M6 9 L12 15 L18 9', 'M3 16 V21 H21 V16'],
   edit: ['M4 20 V16 L16 4 L20 8 L8 20 Z', 'M13 7 L17 11'],
   archive: ['M3 4 H21 V8 H3 Z', 'M5 8 V20 H19 V8', 'M10 12 H14'],
+  // (24/09) corbeille — même grammaire que « archive » : bandeau, corps, deux traits verticaux.
+  // Extrémités plates, angles vifs, aucun arrondi : une corbeille aux coins ronds jurerait dans le jeu.
+  trash: ['M4 7 H20', 'M9 7 V4 H15 V7', 'M6 7 V21 H18 V7', 'M10 11 V17', 'M14 11 V17'],
   check: ['M4 12 L10 18 L20 6'],
   warning: ['M12 3 L22 20 H2 Z', 'M12 9 V14', 'M12 16 V18'],
   refresh: ['M19 13 V19 H5 V5 H17', 'M14 2 L17 5 L14 8'],
