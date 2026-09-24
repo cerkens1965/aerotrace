@@ -4,7 +4,9 @@
   "scripts": {
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
-    "test": "node test/attribution.js"
+    "test": "node test/attribution.js",
+    "emulators": "cd .. && firebase emulators:start --only firestore,functions,auth",
+    "test:coownership": "node test/coownership.js"
   },
   "engines": {
     "node": "20"

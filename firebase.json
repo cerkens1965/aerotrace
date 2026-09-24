@@ -41,10 +41,10 @@
         "destination": "/index.html"
       }
     ],
-    "//headers": "ORDRE IMPORTANT : quand plusieurs règles matchent, Firebase applique la DERNIÈRE (vérifié au curl 2026-07-17). Le cas général vient donc en premier, les assets ensuite pour gagner.",
+    "//headers": "ORDRE IMPORTANT : quand plusieurs r\u00e8gles matchent, Firebase applique la DERNI\u00c8RE (v\u00e9rifi\u00e9 au curl 2026-07-17). Le cas g\u00e9n\u00e9ral vient donc en premier, les assets ensuite pour gagner.",
     "headers": [
       {
-        "//": "Cas général = l'index.html de la SPA (les routes /logbook, /replay... y sont réécrites, et les en-têtes sont matchés sur l'URL demandée, pas sur la cible réécrite). DOIT être revalidé à chaque visite : sinon le défaut max-age=3600 fige l'index sur l'ANCIEN bundle hashé pendant 1 h après un déploiement. Vécu le 2026-07-17 : le Replay échouait sur les vols G3X fraîchement importés (l'ancien bundle n'avait pas le parser 'Lcl Date') alors que le fix était en ligne.",
+        "//": "Cas g\u00e9n\u00e9ral = l'index.html de la SPA (les routes /logbook, /replay... y sont r\u00e9\u00e9crites, et les en-t\u00eates sont match\u00e9s sur l'URL demand\u00e9e, pas sur la cible r\u00e9\u00e9crite). DOIT \u00eatre revalid\u00e9 \u00e0 chaque visite : sinon le d\u00e9faut max-age=3600 fige l'index sur l'ANCIEN bundle hash\u00e9 pendant 1 h apr\u00e8s un d\u00e9ploiement. V\u00e9cu le 2026-07-17 : le Replay \u00e9chouait sur les vols G3X fra\u00eechement import\u00e9s (l'ancien bundle n'avait pas le parser 'Lcl Date') alors que le fix \u00e9tait en ligne.",
         "source": "**",
         "headers": [
           {
@@ -54,7 +54,7 @@
         ]
       },
       {
-        "//": "Assets Vite : le nom porte un hash de contenu → un changement = un nouveau nom, jamais de périmé servi. Cache long. Doit rester APRÈS la règle ** pour la surcharger.",
+        "//": "Assets Vite : le nom porte un hash de contenu \u2192 un changement = un nouveau nom, jamais de p\u00e9rim\u00e9 servi. Cache long. Doit rester APR\u00c8S la r\u00e8gle ** pour la surcharger.",
         "source": "/assets/**",
         "headers": [
           {
@@ -67,5 +67,20 @@
   },
   "functions": {
     "source": "functions"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
   }
 }
